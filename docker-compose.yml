@@ -1,0 +1,43 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    container_name: gimme-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////app/data/gimme.db
+      INBOX_DIR: /app/data/inbox
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173
+      SECRET_KEY: ${SECRET_KEY:-dev-only-insecure-secret-change-me}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@gimmedelivery.co.nz}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-GimmeAdmin123!}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-true}
+    volumes:
+      # The SQLite database and CSV inbox survive container rebuilds.
+      - gimme-data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        # Baked into the bundle at build time, so it must be the URL the
+        # browser can reach — not the internal compose hostname.
+        VITE_API_URL: ${VITE_API_URL:-http://127.0.0.1:8000}
+    container_name: gimme-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  gimme-data:

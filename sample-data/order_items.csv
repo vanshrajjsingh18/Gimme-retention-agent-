@@ -1,0 +1,296 @@
+external_id,order_external_id,sku,product_name,category,brand,quantity,unit_price,line_total
+ITEM-00001-01-01,ORD-00001-01,NA-GIE-06,Giesen 0% Sauvignon Blanc,Non-Alcoholic,Giesen,2,18.99,37.98
+ITEM-00001-01-02,ORD-00001-01,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,2,39.99,79.98
+ITEM-00001-01-03,ORD-00001-01,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00001-02-01,ORD-00001-02,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00001-03-01,ORD-00001-03,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,1,24.99,24.99
+ITEM-00001-04-01,ORD-00001-04,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00002-01-01,ORD-00002-01,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,2,22.99,45.98
+ITEM-00002-02-01,ORD-00002-02,MIX-EAS-04,East Imperial Ginger Beer 4pk,Mixers,East Imperial,1,12.99,12.99
+ITEM-00002-03-01,ORD-00002-03,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,1,22.99,22.99
+ITEM-00002-04-01,ORD-00002-04,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,2,27.99,55.98
+ITEM-00002-05-01,ORD-00002-05,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00002-05-02,ORD-00002-05,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,1,52.99,52.99
+ITEM-00002-06-01,ORD-00002-06,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00002-07-01,ORD-00002-07,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00002-08-01,ORD-00002-08,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00002-08-02,ORD-00002-08,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00002-09-01,ORD-00002-09,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,1,28.99,28.99
+ITEM-00002-09-02,ORD-00002-09,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00003-01-01,ORD-00003-01,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00003-02-01,ORD-00003-02,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,2,89.99,179.98
+ITEM-00003-02-02,ORD-00003-02,RTD-PAL-06,Pals Vodka Soda 6pk,RTDs,Pals,2,21.99,43.98
+ITEM-00003-03-01,ORD-00003-03,NA-GIE-06,Giesen 0% Sauvignon Blanc,Non-Alcoholic,Giesen,2,18.99,37.98
+ITEM-00003-03-02,ORD-00003-03,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00003-03-03,ORD-00003-03,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00003-04-01,ORD-00003-04,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00003-05-01,ORD-00003-05,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00004-01-01,ORD-00004-01,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00004-01-02,ORD-00004-01,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00004-01-03,ORD-00004-01,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00004-02-01,ORD-00004-02,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,2,27.99,55.98
+ITEM-00004-02-02,ORD-00004-02,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,1,79.99,79.99
+ITEM-00004-03-01,ORD-00004-03,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-03-02,ORD-00004-03,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-03-03,ORD-00004-03,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00004-03-04,ORD-00004-03,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00004-03-05,ORD-00004-03,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00004-04-01,ORD-00004-04,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00004-04-02,ORD-00004-04,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00004-05-01,ORD-00004-05,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00004-05-02,ORD-00004-05,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00004-06-01,ORD-00004-06,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00004-06-02,ORD-00004-06,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-07-01,ORD-00004-07,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,2,39.99,79.98
+ITEM-00004-07-02,ORD-00004-07,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00004-08-01,ORD-00004-08,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-08-02,ORD-00004-08,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,2,19.99,39.98
+ITEM-00004-09-01,ORD-00004-09,MIX-EAS-04,East Imperial Ginger Beer 4pk,Mixers,East Imperial,1,12.99,12.99
+ITEM-00004-09-02,ORD-00004-09,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-09-03,ORD-00004-09,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,2,24.99,49.98
+ITEM-00004-09-04,ORD-00004-09,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00004-10-01,ORD-00004-10,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00004-10-02,ORD-00004-10,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,2,27.99,55.98
+ITEM-00004-10-03,ORD-00004-10,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00004-10-04,ORD-00004-10,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-11-01,ORD-00004-11,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00004-11-02,ORD-00004-11,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00004-12-01,ORD-00004-12,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00004-12-02,ORD-00004-12,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00004-12-03,ORD-00004-12,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-12-04,ORD-00004-12,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,2,19.99,39.98
+ITEM-00004-12-05,ORD-00004-12,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,2,28.99,57.98
+ITEM-00004-13-01,ORD-00004-13,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00004-13-02,ORD-00004-13,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00004-13-03,ORD-00004-13,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00004-14-01,ORD-00004-14,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00004-14-02,ORD-00004-14,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00004-15-01,ORD-00004-15,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00004-15-02,ORD-00004-15,NA-GIE-06,Giesen 0% Sauvignon Blanc,Non-Alcoholic,Giesen,2,18.99,37.98
+ITEM-00004-15-03,ORD-00004-15,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00004-16-01,ORD-00004-16,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-16-02,ORD-00004-16,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00004-17-01,ORD-00004-17,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,1,21.99,21.99
+ITEM-00004-17-02,ORD-00004-17,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,2,19.99,39.98
+ITEM-00004-17-03,ORD-00004-17,NA-HEI-12,Heineken 0.0 12pk,Non-Alcoholic,Heineken,1,24.99,24.99
+ITEM-00004-18-01,ORD-00004-18,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00004-18-02,ORD-00004-18,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,1,21.99,21.99
+ITEM-00004-18-03,ORD-00004-18,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,2,34.99,69.98
+ITEM-00004-18-04,ORD-00004-18,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00004-19-01,ORD-00004-19,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00004-19-02,ORD-00004-19,MIX-EAS-04,East Imperial Ginger Beer 4pk,Mixers,East Imperial,1,12.99,12.99
+ITEM-00004-20-01,ORD-00004-20,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00004-20-02,ORD-00004-20,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00004-21-01,ORD-00004-21,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00004-21-02,ORD-00004-21,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00005-01-01,ORD-00005-01,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00005-02-01,ORD-00005-02,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00005-02-02,ORD-00005-02,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00005-03-01,ORD-00005-03,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,2,27.99,55.98
+ITEM-00005-04-01,ORD-00005-04,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,2,19.99,39.98
+ITEM-00005-05-01,ORD-00005-05,NA-GIE-06,Giesen 0% Sauvignon Blanc,Non-Alcoholic,Giesen,1,18.99,18.99
+ITEM-00006-01-01,ORD-00006-01,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00006-02-01,ORD-00006-02,RTD-PAL-06,Pals Vodka Soda 6pk,RTDs,Pals,1,21.99,21.99
+ITEM-00006-03-01,ORD-00006-03,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00006-03-02,ORD-00006-03,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,1,39.99,39.99
+ITEM-00006-03-03,ORD-00006-03,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00006-04-01,ORD-00006-04,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,2,22.99,45.98
+ITEM-00006-04-02,ORD-00006-04,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00006-05-01,ORD-00006-05,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,2,29.99,59.98
+ITEM-00006-05-02,ORD-00006-05,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,2,52.99,105.98
+ITEM-00006-06-01,ORD-00006-06,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00006-07-01,ORD-00006-07,NA-GIE-06,Giesen 0% Sauvignon Blanc,Non-Alcoholic,Giesen,1,18.99,18.99
+ITEM-00007-01-01,ORD-00007-01,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,2,19.99,39.98
+ITEM-00007-01-02,ORD-00007-01,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,1,21.99,21.99
+ITEM-00007-02-01,ORD-00007-02,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00007-02-02,ORD-00007-02,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00007-03-01,ORD-00007-03,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00007-04-01,ORD-00007-04,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00007-05-01,ORD-00007-05,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,1,21.99,21.99
+ITEM-00007-06-01,ORD-00007-06,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00007-07-01,ORD-00007-07,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00007-07-02,ORD-00007-07,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00007-08-01,ORD-00007-08,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00007-09-01,ORD-00007-09,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,1,21.99,21.99
+ITEM-00008-01-01,ORD-00008-01,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,2,22.99,45.98
+ITEM-00008-01-02,ORD-00008-01,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,2,28.99,57.98
+ITEM-00008-01-03,ORD-00008-01,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,2,52.99,105.98
+ITEM-00008-02-01,ORD-00008-02,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,1,24.99,24.99
+ITEM-00008-02-02,ORD-00008-02,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,1,79.99,79.99
+ITEM-00008-02-03,ORD-00008-02,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,2,52.99,105.98
+ITEM-00008-02-04,ORD-00008-02,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00008-03-01,ORD-00008-03,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,1,22.99,22.99
+ITEM-00008-04-01,ORD-00008-04,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,1,52.99,52.99
+ITEM-00008-04-02,ORD-00008-04,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,1,52.99,52.99
+ITEM-00008-05-01,ORD-00008-05,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,2,28.99,57.98
+ITEM-00008-05-02,ORD-00008-05,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,1,28.99,28.99
+ITEM-00008-05-03,ORD-00008-05,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,1,28.99,28.99
+ITEM-00008-06-01,ORD-00008-06,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,1,39.99,39.99
+ITEM-00008-06-02,ORD-00008-06,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,1,22.99,22.99
+ITEM-00008-07-01,ORD-00008-07,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,2,34.99,69.98
+ITEM-00008-07-02,ORD-00008-07,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,1,22.99,22.99
+ITEM-00008-07-03,ORD-00008-07,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,2,28.99,57.98
+ITEM-00008-08-01,ORD-00008-08,NA-HEI-12,Heineken 0.0 12pk,Non-Alcoholic,Heineken,2,24.99,49.98
+ITEM-00008-08-02,ORD-00008-08,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,1,22.99,22.99
+ITEM-00008-08-03,ORD-00008-08,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,2,24.99,49.98
+ITEM-00008-08-04,ORD-00008-08,NA-GIE-06,Giesen 0% Sauvignon Blanc,Non-Alcoholic,Giesen,2,18.99,37.98
+ITEM-00010-01-01,ORD-00010-01,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00010-02-01,ORD-00010-02,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00010-03-01,ORD-00010-03,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,1,79.99,79.99
+ITEM-00011-01-01,ORD-00011-01,NA-HEI-12,Heineken 0.0 12pk,Non-Alcoholic,Heineken,1,24.99,24.99
+ITEM-00011-01-02,ORD-00011-01,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,1,22.99,22.99
+ITEM-00012-01-01,ORD-00012-01,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00014-01-01,ORD-00014-01,RTD-PAL-06,Pals Vodka Soda 6pk,RTDs,Pals,2,21.99,43.98
+ITEM-00014-01-02,ORD-00014-01,MIX-EAS-04,East Imperial Ginger Beer 4pk,Mixers,East Imperial,1,12.99,12.99
+ITEM-00014-02-01,ORD-00014-02,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00014-02-02,ORD-00014-02,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00014-02-03,ORD-00014-02,RTD-PAL-06,Pals Vodka Soda 6pk,RTDs,Pals,1,21.99,21.99
+ITEM-00014-03-01,ORD-00014-03,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00014-03-02,ORD-00014-03,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00014-04-01,ORD-00014-04,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00014-05-01,ORD-00014-05,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00014-06-01,ORD-00014-06,RTD-PAL-06,Pals Vodka Soda 6pk,RTDs,Pals,2,21.99,43.98
+ITEM-00014-07-01,ORD-00014-07,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,2,29.99,59.98
+ITEM-00014-08-01,ORD-00014-08,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00014-09-01,ORD-00014-09,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00014-10-01,ORD-00014-10,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00016-01-01,ORD-00016-01,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00016-02-01,ORD-00016-02,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00016-03-01,ORD-00016-03,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,1,21.99,21.99
+ITEM-00016-03-02,ORD-00016-03,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00016-04-01,ORD-00016-04,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00016-05-01,ORD-00016-05,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00016-06-01,ORD-00016-06,RTD-CDC-12,Codys 7% 12pk,RTDs,Codys,1,32.99,32.99
+ITEM-00018-01-01,ORD-00018-01,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,1,39.99,39.99
+ITEM-00018-01-02,ORD-00018-01,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,1,52.99,52.99
+ITEM-00018-02-01,ORD-00018-02,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,2,24.99,49.98
+ITEM-00018-03-01,ORD-00018-03,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,2,24.99,49.98
+ITEM-00019-01-01,ORD-00019-01,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,2,52.99,105.98
+ITEM-00019-02-01,ORD-00019-02,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00019-03-01,ORD-00019-03,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,2,27.99,55.98
+ITEM-00019-04-01,ORD-00019-04,NA-GIE-06,Giesen 0% Sauvignon Blanc,Non-Alcoholic,Giesen,1,18.99,18.99
+ITEM-00019-05-01,ORD-00019-05,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00019-06-01,ORD-00019-06,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00019-06-02,ORD-00019-06,MIX-EAS-04,East Imperial Ginger Beer 4pk,Mixers,East Imperial,1,12.99,12.99
+ITEM-00019-06-03,ORD-00019-06,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,1,28.99,28.99
+ITEM-00019-07-01,ORD-00019-07,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00019-07-02,ORD-00019-07,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,1,21.99,21.99
+ITEM-00019-08-01,ORD-00019-08,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,2,22.99,45.98
+ITEM-00019-09-01,ORD-00019-09,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00019-09-02,ORD-00019-09,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00020-01-01,ORD-00020-01,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,2,28.99,57.98
+ITEM-00020-01-02,ORD-00020-01,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,2,34.99,69.98
+ITEM-00020-02-01,ORD-00020-02,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,1,24.99,24.99
+ITEM-00020-02-02,ORD-00020-02,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,1,52.99,52.99
+ITEM-00020-03-01,ORD-00020-03,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,1,24.99,24.99
+ITEM-00020-03-02,ORD-00020-03,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,1,24.99,24.99
+ITEM-00020-03-03,ORD-00020-03,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,2,39.99,79.98
+ITEM-00020-04-01,ORD-00020-04,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,1,52.99,52.99
+ITEM-00020-04-02,ORD-00020-04,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,1,52.99,52.99
+ITEM-00020-05-01,ORD-00020-05,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00020-05-02,ORD-00020-05,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00020-05-03,ORD-00020-05,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,1,28.99,28.99
+ITEM-00020-05-04,ORD-00020-05,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00020-06-01,ORD-00020-06,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00020-06-02,ORD-00020-06,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,1,28.99,28.99
+ITEM-00023-01-01,ORD-00023-01,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00023-01-02,ORD-00023-01,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00023-02-01,ORD-00023-02,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,1,79.99,79.99
+ITEM-00023-03-01,ORD-00023-03,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00023-04-01,ORD-00023-04,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,1,79.99,79.99
+ITEM-00023-05-01,ORD-00023-05,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,2,89.99,179.98
+ITEM-00023-06-01,ORD-00023-06,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,2,54.99,109.98
+ITEM-00023-06-02,ORD-00023-06,RTD-LNS-10,Long White Vodka 10pk,RTDs,Long White,1,29.99,29.99
+ITEM-00023-07-01,ORD-00023-07,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00023-08-01,ORD-00023-08,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00024-01-01,ORD-00024-01,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,1,79.99,79.99
+ITEM-00027-01-01,ORD-00027-01,BEER-STE-24,Steinlager Classic 24pk,Beer,Steinlager,2,52.99,105.98
+ITEM-00027-02-01,ORD-00027-02,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,2,39.99,79.98
+ITEM-00027-03-01,ORD-00027-03,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00027-04-01,ORD-00027-04,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,1,22.99,22.99
+ITEM-00027-04-02,ORD-00027-04,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,1,24.99,24.99
+ITEM-00027-05-01,ORD-00027-05,BEER-STE-12,Steinlager Classic 12pk,Beer,Steinlager,2,28.99,57.98
+ITEM-00027-06-01,ORD-00027-06,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,2,22.99,45.98
+ITEM-00028-01-01,ORD-00028-01,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00028-01-02,ORD-00028-01,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00031-01-01,ORD-00031-01,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00031-01-02,ORD-00031-01,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00031-01-03,ORD-00031-01,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00031-01-04,ORD-00031-01,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00031-02-01,ORD-00031-02,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00031-02-02,ORD-00031-02,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00031-02-03,ORD-00031-02,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00031-02-04,ORD-00031-02,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,2,39.99,79.98
+ITEM-00031-03-01,ORD-00031-03,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00031-03-02,ORD-00031-03,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,1,21.99,21.99
+ITEM-00031-04-01,ORD-00031-04,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00031-04-02,ORD-00031-04,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00031-05-01,ORD-00031-05,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00031-05-02,ORD-00031-05,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00031-06-01,ORD-00031-06,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00031-06-02,ORD-00031-06,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00031-07-01,ORD-00031-07,RTD-PAL-06,Pals Vodka Soda 6pk,RTDs,Pals,2,21.99,43.98
+ITEM-00031-07-02,ORD-00031-07,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00031-08-01,ORD-00031-08,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00031-08-02,ORD-00031-08,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,1,27.99,27.99
+ITEM-00031-08-03,ORD-00031-08,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00031-08-04,ORD-00031-08,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00031-08-05,ORD-00031-08,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,1,19.99,19.99
+ITEM-00031-09-01,ORD-00031-09,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00031-09-02,ORD-00031-09,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00031-10-01,ORD-00031-10,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,2,39.99,79.98
+ITEM-00031-10-02,ORD-00031-10,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,1,74.99,74.99
+ITEM-00031-11-01,ORD-00031-11,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,2,27.99,55.98
+ITEM-00031-11-02,ORD-00031-11,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00031-12-01,ORD-00031-12,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00031-12-02,ORD-00031-12,WINE-FEL-PN,Felton Road Pinot Noir,Wine,Felton Road,2,74.99,149.98
+ITEM-00031-12-03,ORD-00031-12,BEER-EPI-06,Epic Pale Ale 6pk,Beer,Epic,1,22.99,22.99
+ITEM-00031-12-04,ORD-00031-12,WINE-OYS-CH,Oyster Bay Chardonnay,Wine,Oyster Bay,2,21.99,43.98
+ITEM-00041-01-01,ORD-00041-01,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00041-02-01,ORD-00041-02,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,1,24.99,24.99
+ITEM-00041-03-01,ORD-00041-03,BEER-GAR-06,Garage Project Hazy Daze 6pk,Beer,Garage Project,2,24.99,49.98
+ITEM-00041-04-01,ORD-00041-04,NA-GIE-06,Giesen 0% Sauvignon Blanc,Non-Alcoholic,Giesen,1,18.99,18.99
+ITEM-00041-04-02,ORD-00041-04,WINE-VIL-SB,Villa Maria Sauvignon Blanc,Wine,Villa Maria,2,19.99,39.98
+ITEM-00041-05-01,ORD-00041-05,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00041-06-01,ORD-00041-06,MIX-EAS-04,East Imperial Ginger Beer 4pk,Mixers,East Imperial,1,12.99,12.99
+ITEM-00041-07-01,ORD-00041-07,WINE-MTD-PG,Mt Difficulty Pinot Gris,Wine,Mt Difficulty,2,27.99,55.98
+ITEM-00041-08-01,ORD-00041-08,NA-HEI-12,Heineken 0.0 12pk,Non-Alcoholic,Heineken,2,24.99,49.98
+ITEM-00044-01-01,ORD-00044-01,RTD-PAL-06,Pals Vodka Soda 6pk,RTDs,Pals,1,21.99,21.99
+ITEM-00044-02-01,ORD-00044-02,BEER-PAN-12,Panhead Supercharger IPA 12pk,Beer,Panhead,1,39.99,39.99
+ITEM-00046-01-01,ORD-00046-01,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00046-01-02,ORD-00046-01,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,2,89.99,179.98
+ITEM-00046-02-01,ORD-00046-02,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00046-02-02,ORD-00046-02,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00046-02-03,ORD-00046-02,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,2,79.99,159.98
+ITEM-00046-03-01,ORD-00046-03,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00046-04-01,ORD-00046-04,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,2,89.99,179.98
+ITEM-00052-01-01,ORD-00052-01,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00052-02-01,ORD-00052-02,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00052-02-02,ORD-00052-02,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,2,54.99,109.98
+ITEM-00052-03-01,ORD-00052-03,WINE-CLO-SB,Cloudy Bay Sauvignon Blanc,Wine,Cloudy Bay,1,39.99,39.99
+ITEM-00052-03-02,ORD-00052-03,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00052-03-03,ORD-00052-03,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,2,49.99,99.98
+ITEM-00052-04-01,ORD-00052-04,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,2,54.99,109.98
+ITEM-00052-04-02,ORD-00052-04,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,1,79.99,79.99
+ITEM-00052-05-01,ORD-00052-05,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00052-05-02,ORD-00052-05,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00052-05-03,ORD-00052-05,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,2,79.99,159.98
+ITEM-00052-05-04,ORD-00052-05,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00052-06-01,ORD-00052-06,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,1,79.99,79.99
+ITEM-00052-06-02,ORD-00052-06,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,2,89.99,179.98
+ITEM-00052-07-01,ORD-00052-07,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00052-07-02,ORD-00052-07,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00052-08-01,ORD-00052-08,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,2,89.99,179.98
+ITEM-00052-08-02,ORD-00052-08,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00052-08-03,ORD-00052-08,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,1,49.99,49.99
+ITEM-00052-09-01,ORD-00052-09,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,2,49.99,99.98
+ITEM-00052-09-02,ORD-00052-09,SPIR-SCA-WH,Scapegrace Whisky 700ml,Spirits,Scapegrace,1,89.99,89.99
+ITEM-00052-10-01,ORD-00052-10,SPIR-BRO-GN,Broken Heart Gin 700ml,Spirits,Broken Heart,2,79.99,159.98
+ITEM-00052-11-01,ORD-00052-11,SPIR-42B-VK,42 Below Vodka 1L,Spirits,42 Below,1,54.99,54.99
+ITEM-00052-11-02,ORD-00052-11,SPIR-BAC-RM,Bacardi Carta Blanca 1L,Spirits,Bacardi,2,49.99,99.98
+ITEM-00087-01-01,ORD-00087-01,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00087-01-02,ORD-00087-01,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00087-01-03,ORD-00087-01,WINE-BAB-RO,Babich Rosé,Wine,Babich,2,17.99,35.98
+ITEM-00087-02-01,ORD-00087-02,WINE-BAB-RO,Babich Rosé,Wine,Babich,1,17.99,17.99
+ITEM-00097-01-01,ORD-00097-01,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99
+ITEM-00097-02-01,ORD-00097-02,BEER-EMR-12,Emerson's Pilsner 12pk,Beer,Emerson's,1,34.99,34.99

@@ -1,0 +1,28 @@
+external_id,email,phone,first_name,last_name,date_of_birth,age_verified,city,region,postcode,country,signup_date,acquisition_source,preferred_channel,marketing_consent,email_consent,sms_consent,whatsapp_consent
+CUST-00012,vince.zhang12@example.test,+64219811388,Vince,Zhang,2004-11-19,true,Wellington,Wellington,6011,New Zealand,2026-08-09T23:37:23.262656,Facebook,SMS,true,true,true,true
+CUST-00024,isla.ingram24@example.test,+64213982660,Isla,Ingram,1977-06-14,true,Wellington,Wellington,6011,New Zealand,2026-08-05T23:37:23.262656,TikTok,EMAIL,false,false,false,false
+CUST-00028,wiremu.vermeulen28@example.test,+64214012164,Wiremu,Vermeulen,1992-11-25,true,Auckland,Auckland,1021,New Zealand,2026-08-03T23:37:23.262656,Word of Mouth,WHATSAPP,true,true,false,true
+CUST-00044,harry.gray44@example.test,+64211610319,Harry,Gray,1991-07-02,true,Tauranga,Bay of Plenty,3110,New Zealand,2026-04-15T23:37:23.262656,Word of Mouth,EMAIL,true,true,false,false
+CUST-00087,ruby.jones87@example.test,+64214433134,Ruby,Jones,1959-02-28,true,Christchurch,Canterbury,8011,New Zealand,2026-06-15T23:37:23.262656,Facebook,EMAIL,true,true,false,false
+CUST-00097,declan.fitzgerald97@example.test,+64214659387,Declan,Fitzgerald,1991-06-21,true,Wellington,Wellington,6011,New Zealand,2026-04-19T23:37:23.262656,Referral,EMAIL,true,true,false,false
+CUST-00002,liam.patel2@example.test,+64216172909,Liam,Patel,1965-04-06,false,Dunedin,Otago,9016,New Zealand,2025-11-21T23:37:23.262656,Instagram,SMS,true,true,true,false
+CUST-00005,eve.māhuta5@example.test,+64217092796,Eve,Māhuta,1959-05-05,true,Napier,Hawke's Bay,4110,New Zealand,2025-09-27T23:37:23.262656,Organic Search,EMAIL,true,true,true,true
+CUST-00006,felix.obrien6@example.test,+64214264063,Felix,O'Brien,1981-11-28,true,Wellington,Wellington,6011,New Zealand,2025-07-21T23:37:23.262656,Facebook,EMAIL,true,true,false,true
+CUST-00007,ben.jones7@example.test,+64218464072,Ben,Jones,1987-06-17,true,Christchurch,Canterbury,8011,New Zealand,2025-12-24T23:37:23.262656,Facebook,EMAIL,false,false,false,false
+CUST-00008,daniel.fitzgerald8@example.test,+64216688316,Daniel,Fitzgerald,1994-09-26,true,Tauranga,Bay of Plenty,3110,New Zealand,2025-08-25T23:37:23.262656,Organic Search,SMS,true,true,true,false
+CUST-00020,ella.obrien20@example.test,+64214359387,Ella,O'Brien,1990-02-06,true,Wellington,Wellington,6011,New Zealand,2025-08-29T23:37:23.262656,Word of Mouth,EMAIL,true,true,false,false
+CUST-00004,patrick.māhuta4@example.test,+64216832219,Patrick,Māhuta,1978-10-25,false,Auckland,Auckland,1021,New Zealand,2025-09-30T23:37:23.262656,TikTok,EMAIL,true,true,false,true
+CUST-00031,blake.xu31@example.test,+64212169219,Blake,Xu,1991-11-10,true,Christchurch,Canterbury,8011,New Zealand,2025-10-03T23:37:23.262656,Organic Search,EMAIL,true,true,false,true
+CUST-00052,sophie.kaur52@example.test,+64219046737,Sophie,Kaur,1982-10-09,true,Auckland,Auckland,1010,New Zealand,2025-10-06T23:37:23.262656,Partner Promo,EMAIL,true,false,false,false
+CUST-00014,dylan.anderson14@example.test,+64212459115,Dylan,Anderson,1989-01-15,false,Napier,Hawke's Bay,4110,New Zealand,2025-09-20T23:37:23.262656,Google Ads,EMAIL,true,true,false,false
+CUST-00018,pania.beckett18@example.test,+64211674117,Pania,Beckett,1999-01-14,true,Auckland,Auckland,1010,New Zealand,2026-06-25T23:37:23.262656,Google Ads,EMAIL,true,true,false,false
+CUST-00019,tama.davies19@example.test,+64213482656,Tama,Davies,2001-03-27,true,Auckland,Auckland,1021,New Zealand,2025-07-07T23:37:23.262656,Facebook,EMAIL,true,true,true,false
+CUST-00010,dylan.reid10@example.test,+64218717333,Dylan,Reid,1989-02-07,true,Christchurch,Canterbury,8011,New Zealand,2025-07-06T23:37:23.262656,Referral,EMAIL,false,false,false,false
+CUST-00011,jack.chen11@example.test,+64213684535,Jack,Chen,1961-07-08,true,Christchurch,Canterbury,8011,New Zealand,2025-08-01T23:37:23.262656,Facebook,WHATSAPP,true,true,false,true
+CUST-00027,ana.māhuta27@example.test,+64218330626,Ana,Māhuta,1994-04-24,true,Christchurch,Canterbury,8011,New Zealand,2025-07-27T23:37:23.262656,Instagram,EMAIL,false,false,false,false
+CUST-00003,sophie.thompson3@example.test,+64214171288,Sophie,Thompson,1959-05-11,true,Wellington,Wellington,6011,New Zealand,2025-07-07T23:37:23.262656,Organic Search,EMAIL,true,true,false,false
+CUST-00023,quinn.fitzgerald23@example.test,+64212271543,Quinn,Fitzgerald,1974-03-04,true,Napier,Hawke's Bay,4110,New Zealand,2025-06-22T23:37:23.262656,Google Ads,EMAIL,true,true,false,true
+CUST-00041,mia.anderson41@example.test,+64218095177,Mia,Anderson,1976-01-05,true,Auckland,Auckland,1021,New Zealand,2025-06-16T23:37:23.262656,Instagram,WHATSAPP,true,true,true,true
+CUST-00001,tearoha.jones1@example.test,+64219658640,Te Aroha,Jones,1980-06-16,true,Wellington,Wellington,6011,New Zealand,2025-06-22T23:37:23.262656,Partner Promo,EMAIL,true,true,true,false
+CUST-00016,ophelia.walker16@example.test,+64219442582,Ophelia,Walker,1989-03-12,true,Hamilton,Waikato,3204,New Zealand,2025-08-25T23:37:23.262656,Google Ads,EMAIL,false,false,false,false
+CUST-00046,ruby.ngata46@example.test,+64213769986,Ruby,Ngata,1962-06-14,false,Auckland,Auckland,1010,New Zealand,2025-07-08T23:37:23.262656,Partner Promo,EMAIL,true,true,false,false

@@ -1,0 +1,4 @@
+customer_external_id,event_type,occurred_at,source,payload
+CUST-00001,EMAIL_OPENED,2026-08-01T10:15:00,import,{}
+CUST-00001,EMAIL_CLICKED,2026-08-01T10:17:00,import,{}
+CUST-00002,CUSTOMER_OPTED_OUT,2026-08-02T14:00:00,import,"{""reason"": ""too many emails""}"

@@ -1,0 +1,4 @@
+customer_external_id,consent_type,granted,source,occurred_at
+CUST-00001,MARKETING,true,preference centre,2026-08-01T09:00:00
+CUST-00001,SMS,true,preference centre,2026-08-01T09:00:00
+CUST-00002,MARKETING,false,unsubscribe link,2026-08-02T14:00:00
