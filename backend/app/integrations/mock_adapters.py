@@ -127,13 +127,42 @@ class BaseMockAdapter(MessagingAdapter):
             "checked_at": datetime.utcnow().isoformat(),
         }
 
+    #: Provider-style status names, resolved against this adapter's channel.
+    #: A mock integration must understand the same payloads a real provider
+    #: sends, so a webhook can be exercised locally before going live.
+    PROVIDER_STATUS_EVENTS: dict[str, dict[Channel, EventType]] = {
+        "sent": SENT_EVENT,
+        "delivered": DELIVERED_EVENT,
+        "read": OPENED_EVENT,
+        "opened": OPENED_EVENT,
+        "failed": FAILED_EVENT,
+        "undelivered": FAILED_EVENT,
+        "bounced": FAILED_EVENT,
+    }
+
     def process_webhook(self, payload: dict) -> list[NormalizedEvent]:
-        """Accept a generic webhook shape used by the mock webhook endpoint."""
-        event_name = str(payload.get("event", "")).upper()
-        try:
-            event_type = EventType(event_name)
-        except ValueError:
+        """Accept both our event vocabulary and provider-style status names."""
+        raw = str(payload.get("event") or payload.get("status") or "").strip()
+        if not raw:
             return []
+
+        event_type: EventType | None = None
+        try:
+            event_type = EventType(raw.upper())
+        except ValueError:
+            by_channel = self.PROVIDER_STATUS_EVENTS.get(raw.lower())
+            if by_channel:
+                event_type = by_channel.get(self.channel)
+            elif raw.lower() in ("clicked", "click") and self.channel == Channel.EMAIL:
+                event_type = EventType.EMAIL_CLICKED
+            elif raw.lower() in ("replied", "reply") and self.channel == Channel.WHATSAPP:
+                event_type = EventType.WHATSAPP_REPLIED
+            elif raw.lower() in ("optout", "stop", "unsubscribed"):
+                event_type = EventType.CUSTOMER_OPTED_OUT
+
+        if event_type is None:
+            return []
+
         return [
             NormalizedEvent(
                 event_type=event_type,
