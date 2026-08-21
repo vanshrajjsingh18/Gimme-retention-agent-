@@ -1,0 +1,42 @@
+# Keep host build artefacts out of the images.
+#
+# Without this, `COPY backend/ ./` copies the host virtualenv — whose scripts
+# carry absolute host paths — and `COPY frontend/ ./` copies node_modules,
+# overwriting the platform-correct dependencies installed inside the image.
+
+# Python
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+
+# Node
+**/node_modules
+**/dist
+**/.vite
+**/coverage
+**/test-results
+**/playwright-report
+**/blob-report
+**/playwright/.cache
+
+# Local state and secrets
+.env
+.env.local
+data/
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite3
+
+# Repo metadata
+.git
+.gitignore
+.github
+
+# Docs are not needed at runtime
+docs/
+*.md
+!README.md

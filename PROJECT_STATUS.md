@@ -1,62 +1,97 @@
 # PROJECT STATUS — GIMME Retention Engine
 
-**Last updated:** 2026-08-20
+**Last updated:** 2026-08-21
+**State:** MVP complete and verified from a clean install.
 
-## Product Goal
+## Product goal
 
 A local-first, AI-assisted customer retention platform for GIMME Beverage
-Delivery. It ingests customer/order data, builds Customer 360 profiles,
+Delivery. It ingests customer and order data, builds Customer 360 profiles,
 computes lifecycle stage, RFM, churn risk and next-best-action, generates
-grounded personalised messages via an LLM, and runs compliance-gated campaigns
-in MOCK MODE with full event tracking and revenue attribution.
+grounded personalised messages with an LLM, and runs compliance-gated
+campaigns with full event tracking and revenue attribution.
 
-## Current Phase
+## Current phase
 
-Phase 2 — Data foundation and persistence layer (engines complete and tested).
+Complete. All seven milestones verified, including the closed retention loop
+and a fresh-install run following the README from an empty tree.
 
-## Completed Features
+## Completed features
 
-- Repository scaffold, Python venv, dependency install.
-- Configuration layer (`app/core/config.py`) with `.env` support.
-- SQLAlchemy engine/session layer; SQLite with a PostgreSQL-portable schema.
-- 33 ORM tables covering customers, orders, metrics, segments, campaigns,
-  messages, events, journeys, compliance, integrations and operations.
-- Security primitives: bcrypt password hashing, JWT issuing, API-key hashing.
-- **Metrics engine** — behavioural metric computation (14 tests).
-- **Lifecycle engine** — 9-stage deterministic classifier with per-customer
-  cadence and global fallbacks (21 tests, all 9 stages proven reachable).
-- **Churn engine** — 0-100 transparent weighted-factor scoring with named
-  factors and human-readable explanations (19 tests).
-- **RFM engine** — quantile scoring with absolute fallback for small/flat
-  populations (11 tests).
-- **Next Best Action engine** — priority-ordered rules with reason codes
-  (29 tests).
+**Foundation** — FastAPI backend, React frontend, 33-table SQLite schema
+(PostgreSQL-portable), JWT sessions plus hashed API keys, APScheduler jobs,
+seed command producing 1,000 customers with 12 months of history.
 
-## Partially Completed Features
+**Intelligence** — five deterministic engines as pure functions: behavioural
+metrics, 9-stage lifecycle classification with per-customer cadence, RFM with
+quantile scoring and small-population fallback, transparent 0-100 churn
+scoring with per-factor attribution, and next-best-action with reason codes.
 
-None currently in flight.
+**Data** — CSV upload with preview, per-row validation, duplicate detection
+and downloadable error reports; authenticated ingestion APIs for customers,
+orders, order items, events and consent events; watched inbox folder.
 
-## Missing Features
+**Segmentation** — nested AND/OR rule engine over 30+ fields with six operator
+families, live preview, 14 built-in segments, CSV export.
 
-Persistence services, ingestion, API layer, auth endpoints, brand settings,
-LLM message studio, campaign engine, compliance engine, event system,
-attribution, analytics, journeys, seed data, frontend, Docker, docs.
+**Messaging** — LLM provider abstraction (mock + OpenAI-compatible), versioned
+grounding prompts, and output validation rejecting invented coupons,
+promotions, products, prices, delivery claims, stock claims and customer facts.
 
-## Known Bugs
+**Campaigns** — audience snapshots with per-recipient exclusion reasons,
+compliance gating, human approval, mock sending with simulated delivery and
+engagement, and full event tracking.
 
-None open.
+**Compliance** — alcohol-marketing rules enforced in code: age verification,
+consent per channel, suppression, frequency caps, quiet hours, prohibited
+claims, and vulnerability-targeting checks.
 
-## External Blockers
+**Attribution** — configurable last-touch windows, reactivation detection,
+idempotent per-order records, campaign revenue roll-up.
 
-- No LLM API key available → MOCK LLM provider is the default.
-- No Microsoft Graph / TNZ / WhatsApp credentials → MOCK adapters are the
-  default. Live adapter code paths are implemented but unexercised.
+**Analytics** — overview, customer, churn, campaign and cohort dashboards, all
+computed from the database at request time.
 
-## Last Successful Verification
+**Journeys** — step-based execution with triggers, delays, conditions and
+actions; messages still pass the same grounding and compliance checks.
 
-`pytest tests/` — 94 passed (metrics, lifecycle, churn, RFM, recommendations).
+**Frontend** — 16 pages, shared UI primitives with loading/empty/error states,
+consistent colour semantics, responsive down to 390px.
 
-## Next Task
+## Test coverage
 
-Build the persistence services that write engine output to the database
-(`intelligence` service), then CSV/API ingestion.
+| Suite | Count | Command |
+| --- | --- | --- |
+| Backend | 306 | `make test-backend` |
+| Frontend | 35 | `make test-frontend` |
+| Browser (Playwright) | 10 | `make test-e2e` |
+| **Total** | **351** | `make test` |
+
+## Known bugs
+
+None open. Ten defects were found and fixed during verification; they are
+listed in `VERIFICATION.md` and `ERROR_LOG.md`.
+
+## External blockers
+
+Each has working code that could not be exercised here:
+
+- **No LLM API key** — the OpenAI-compatible adapter is written and
+  unit-tested, but no live call was made. Mock mode is the default and is
+  fully functional.
+- **No Microsoft Graph, TNZ or WhatsApp credentials** — all three live
+  adapters are implemented; only the mock counterparts were exercised.
+- **No Docker daemon** — `docker compose config` validates and every build
+  path was checked, but the images were never built.
+
+## Last successful verification
+
+Fresh install from an empty working tree following the README:
+`make setup` → `make seed` → `make test` → both servers started →
+`npx playwright test`. 351 tests passing, zero console errors.
+
+## Next task
+
+None for the MVP. Recommended next steps are in `FINAL_REPORT.md` —
+principally exercising the live adapters once credentials exist, and building
+the images once a Docker daemon is available.
