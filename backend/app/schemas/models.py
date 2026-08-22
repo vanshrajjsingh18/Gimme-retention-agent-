@@ -7,12 +7,15 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.core.enums import (
+    AutomationKind,
     CampaignObjective,
     CampaignStatus,
     Channel,
     ConsentType,
+    EnrollmentMode,
     LifecycleStage,
     OrderStatus,
+    RecurrenceKind,
 )
 
 
@@ -341,6 +344,8 @@ class BrandSettingsOut(BaseModel):
     id: int
     company_name: str
     company_description: str
+    signatory_name: str
+    signatory_title: str
     brand_voice: str
     tone: str
     communication_principles: list
@@ -373,6 +378,8 @@ class BrandSettingsOut(BaseModel):
 class BrandSettingsUpdate(BaseModel):
     company_name: str | None = None
     company_description: str | None = None
+    signatory_name: str | None = None
+    signatory_title: str | None = None
     brand_voice: str | None = None
     tone: str | None = None
     communication_principles: list[str] | None = None
@@ -625,3 +632,133 @@ class JourneyOut(BaseModel):
 
 OrderOut.model_rebuild()
 TokenResponse.model_rebuild()
+
+# --------------------------------------------------------------------------
+# Campaign automations
+# --------------------------------------------------------------------------
+class AutomationStepIn(BaseModel):
+    name: str = ""
+    #: Days after the customer's own enrollment, not a calendar date.
+    offset_days: int = Field(default=0, ge=0, le=365)
+    send_time_local: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    message_template: str = ""
+    use_llm: bool = False
+
+
+class AutomationStepOut(AutomationStepIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    position: int
+
+
+class AutomationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    kind: AutomationKind
+    channel: Channel = Channel.SMS
+    objective: CampaignObjective = CampaignObjective.RETENTION
+    segment_id: int | None = None
+    manual_customer_ids: list[int] = Field(default_factory=list)
+    enrollment_mode: EnrollmentMode | None = None
+    recurrence: RecurrenceKind = RecurrenceKind.ONCE
+    #: 0=Monday..6=Sunday for WEEKLY; day-of-month for MONTHLY.
+    recurrence_day: int | None = Field(default=None, ge=0, le=31)
+    send_time_local: str = Field(default="10:00", pattern=r"^\d{2}:\d{2}$")
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    message_template: str = ""
+    template_overrides: dict = Field(default_factory=dict)
+    config: dict = Field(default_factory=dict)
+    stop_on_order: bool = True
+    require_approval: bool = True
+    steps: list[AutomationStepIn] = Field(default_factory=list)
+
+
+class AutomationUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    segment_id: int | None = None
+    manual_customer_ids: list[int] | None = None
+    enrollment_mode: EnrollmentMode | None = None
+    recurrence: RecurrenceKind | None = None
+    recurrence_day: int | None = Field(default=None, ge=0, le=31)
+    send_time_local: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    message_template: str | None = None
+    template_overrides: dict | None = None
+    config: dict | None = None
+    stop_on_order: bool | None = None
+
+
+class AutomationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str
+    kind: str
+    status: str
+    channel: str
+    objective: str
+    segment_id: int | None
+    manual_customer_ids: list
+    enrollment_mode: str
+    recurrence: str
+    recurrence_day: int | None
+    send_time_local: str
+    starts_at: datetime | None
+    ends_at: datetime | None
+    message_template: str
+    template_overrides: dict
+    config: dict
+    campaign_id: int | None
+    stop_on_order: bool
+    require_approval: bool
+    approved_at: datetime | None
+    last_run_at: datetime | None
+    next_run_at: datetime | None
+    total_sent: int
+    total_skipped: int
+    total_failed: int
+    created_at: datetime
+    steps: list[AutomationStepOut] = Field(default_factory=list)
+
+
+class AutomationSendOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    automation_id: int
+    customer_id: int
+    step_id: int | None
+    status: str
+    skip_reason: str | None
+    skip_detail: str | None
+    scheduled_for: datetime
+    local_date: date
+    sent_at: datetime | None
+    delivered_at: datetime | None
+    body: str
+    provider: str
+    provider_message_id: str | None
+    error_message: str | None
+    is_dry_run: bool
+    priority: int
+
+
+class AutomationEnrollmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    automation_id: int
+    customer_id: int
+    status: str
+    enrolled_at: datetime
+    current_step: int
+    last_sent_at: datetime | None
+    next_due_at: datetime | None
+    stopped_at: datetime | None
+    stop_reason: str | None
+    pattern: dict

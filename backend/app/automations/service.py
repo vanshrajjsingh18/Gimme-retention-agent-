@@ -81,6 +81,12 @@ def create_automation(
         raise AutomationError(
             "An automation needs an audience: either a segment or a manual customer list."
         )
+    if kind == AutomationKind.SEQUENCE.value and not steps:
+        # Checked before anything is written, so a rejected sequence does not
+        # leave an orphaned backing campaign behind.
+        raise AutomationError("A sequence needs at least one step.")
+    if db.execute(select(Automation.id).where(Automation.name == name)).first():
+        raise AutomationError(f"An automation named '{name}' already exists.")
 
     campaign = Campaign(
         name=f"{name} (automation)",
@@ -133,9 +139,6 @@ def create_automation(
                 use_llm=bool(step.get("use_llm", False)),
             )
         )
-
-    if kind == AutomationKind.SEQUENCE.value and not steps:
-        raise AutomationError("A sequence needs at least one step.")
 
     db.commit()
     logger.info("Created %s automation '%s' (id=%s)", kind, name, automation.id)

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.api.v1 import (
     analytics,
     auth,
+    automations,
     brand,
     campaigns,
     customers,
@@ -100,6 +101,7 @@ for router in (
     brand.router,
     messages.router,
     campaigns.router,
+    automations.router,
     analytics.router,
     integrations.router,
     journeys.router,

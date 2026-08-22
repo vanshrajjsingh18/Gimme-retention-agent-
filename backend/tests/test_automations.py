@@ -8,6 +8,7 @@ the ledger is what an operator would audit after the fact.
 """
 from __future__ import annotations
 
+import itertools
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -56,15 +57,17 @@ from app.services.optout import apply_global_opt_out, handle_inbound_reply
 MONDAY_10AM = combine_local(date(2026, 6, 15), datetime(2026, 6, 15, 10, 0).time())
 
 
+#: Monotonic across the whole module: object ids get recycled, so using one as
+#: a uniqueness suffix produces collisions on names and external ids.
+_SEQ = itertools.count(1)
+
+
 @pytest.fixture()
 def make_customer(db):
-    counter = {"n": 0}
-
     def _make(**overrides) -> Customer:
-        counter["n"] += 1
-        n = counter["n"]
+        n = next(_SEQ)
         base = {
-            "external_id": f"auto-test-{n}-{id(counter)}",
+            "external_id": f"auto-test-{n}",
             "email": f"auto{n}@example.test",
             "phone": f"+6421000{n:04d}",
             "first_name": f"Test{n}",
@@ -88,11 +91,9 @@ def make_customer(db):
 
 @pytest.fixture()
 def make_automation(db, bootstrapped):
-    created: list[int] = []
-
     def _make(**overrides) -> Automation:
         base = {
-            "name": f"Test automation {len(created)}-{id(created)}",
+            "name": f"Test automation {next(_SEQ)}",
             "kind": AutomationKind.COHORT_BULK.value,
             "channel": Channel.SMS.value,
             "message_template": "Hi {first_name}, your usual is a tap away. Reply STOP to opt out.",
@@ -101,7 +102,6 @@ def make_automation(db, bootstrapped):
         automation = create_automation(db, **base)
         approve(db, automation, user_id=1)
         activate(db, automation, now=MONDAY_10AM)
-        created.append(automation.id)
         return automation
 
     return _make
@@ -414,7 +414,7 @@ class TestApprovalGate:
         customer = make_customer()
         automation = create_automation(
             db,
-            name=f"Unapproved {id(customer)}",
+            name=f"Unapproved {next(_SEQ)}",
             kind=AutomationKind.COHORT_BULK.value,
             manual_customer_ids=[customer.id],
             message_template="Hi {first_name}. Reply STOP to opt out.",
@@ -426,7 +426,7 @@ class TestApprovalGate:
         customer = make_customer()
         automation = create_automation(
             db,
-            name=f"Draft {id(customer)}",
+            name=f"Draft {next(_SEQ)}",
             kind=AutomationKind.COHORT_BULK.value,
             manual_customer_ids=[customer.id],
             message_template="Hi {first_name}. Reply STOP to opt out.",
@@ -740,7 +740,7 @@ class TestSequences:
         with pytest.raises(AutomationError, match="at least one step"):
             create_automation(
                 db,
-                name=f"Stepless {id(customer)}",
+                name=f"Stepless {next(_SEQ)}",
                 kind=AutomationKind.SEQUENCE.value,
                 manual_customer_ids=[customer.id],
             )
@@ -750,7 +750,7 @@ def make_automation_for_same_day(db, customer) -> Automation:
     """A separate cohort automation used to occupy a customer's day."""
     automation = create_automation(
         db,
-        name=f"Blocker {customer.id}-{id(customer)}",
+        name=f"Blocker {customer.id}-{next(_SEQ)}",
         kind=AutomationKind.COHORT_BULK.value,
         manual_customer_ids=[customer.id],
         message_template="Blocking send. Reply STOP to opt out.",
