@@ -154,7 +154,95 @@ def _default_enrollment_mode(kind: str) -> str:
     return EnrollmentMode.ROLLING.value
 
 
-def replace_steps(db: Session, automation: Automation, steps: list[dict]) -> Automation:
+#: Fields whose change means the approved thing is no longer what would be
+#: sent. Approval attaches to the message, not merely to the automation's
+#: existence, so editing any of these withdraws it.
+APPROVAL_SENSITIVE_FIELDS = {
+    "message_template",
+    "template_overrides",
+    "segment_id",
+    "manual_customer_ids",
+    "config",
+}
+
+
+def revoke_approval(
+    db: Session, automation: Automation, *, reason: str, actor: str = "system"
+) -> bool:
+    """Withdraw approval after a change to what would be sent.
+
+    Returns whether anything changed. An automation that never required
+    approval is left alone: the operator turned that gate off deliberately.
+
+    An active automation is also paused, because an approved-looking campaign
+    that silently stops sending is worse than one that visibly needs attention.
+    """
+    if not automation.require_approval or automation.approved_at is None:
+        return False
+
+    automation.approved_at = None
+    automation.approved_by_id = None
+    was_active = automation.status == AutomationStatus.ACTIVE.value
+    if was_active:
+        automation.status = AutomationStatus.PAUSED.value
+        automation.next_run_at = None
+
+    db.add(
+        AuditLog(
+            actor=actor,
+            action="AUTOMATION_APPROVAL_REVOKED",
+            entity_type="automation",
+            entity_id=str(automation.id),
+            detail={"reason": reason, "was_active": was_active},
+        )
+    )
+    logger.info(
+        "Approval revoked for automation %s (%s); %s",
+        automation.id,
+        reason,
+        "paused" if was_active else "still a draft",
+    )
+    return True
+
+
+def apply_update(
+    db: Session, automation: Automation, changes: dict, *, actor: str = "system"
+) -> dict:
+    """Apply an update, withdrawing approval if it changes what would be sent.
+
+    Returns a summary including whether re-approval is now needed, so the
+    caller can tell the operator rather than letting them discover it when
+    nothing sends.
+    """
+    for key, value in changes.items():
+        setattr(automation, key, value.value if hasattr(value, "value") else value)
+
+    touched = sorted(set(changes) & APPROVAL_SENSITIVE_FIELDS)
+    revoked = False
+    if touched:
+        revoked = revoke_approval(
+            db,
+            automation,
+            reason=f"Changed {', '.join(touched)}.",
+            actor=actor,
+        )
+
+    db.add(
+        AuditLog(
+            actor=actor,
+            action="AUTOMATION_UPDATED",
+            entity_type="automation",
+            entity_id=str(automation.id),
+            detail={"fields": sorted(changes), "approval_revoked": revoked},
+        )
+    )
+    db.commit()
+    return {"fields": sorted(changes), "approval_revoked": revoked}
+
+
+def replace_steps(
+    db: Session, automation: Automation, steps: list[dict], *, actor: str = "system"
+) -> Automation:
     """Rewrite a sequence's steps. Refused once customers are enrolled.
 
     Changing offsets mid-flight would silently re-time messages for people
@@ -182,6 +270,8 @@ def replace_steps(db: Session, automation: Automation, steps: list[dict]) -> Aut
                 use_llm=bool(step.get("use_llm", False)),
             )
         )
+    # New steps are new copy, and approval was given for the old copy.
+    revoke_approval(db, automation, reason="Sequence steps rewritten.", actor=actor)
     db.commit()
     return automation
 

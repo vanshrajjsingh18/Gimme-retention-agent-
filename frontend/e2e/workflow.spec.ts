@@ -318,6 +318,39 @@ test.describe('Automations', () => {
     expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
     expect(failedRequests, `failed API calls: ${failedRequests.join(' | ')}`).toEqual([]);
   });
+
+  test('editing the copy of an approved automation withdraws its approval', async ({
+    page,
+  }) => {
+    const { errors, failedRequests } = guard(page);
+    await login(page);
+
+    const name = `E2E editable ${Date.now()}`;
+    await page.getByRole('link', { name: 'Automations', exact: true }).click();
+    await page.getByRole('button', { name: 'New cohort send' }).click();
+    await page.getByLabel('Name').fill(name);
+    await page.getByLabel('Audience').selectOption({ index: 1 });
+    await page.getByLabel(/^Message/).fill('Original copy. Reply STOP to opt out.');
+    await page.getByRole('button', { name: 'Create as draft' }).click();
+
+    await page.getByRole('link', { name }).click();
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByRole('button', { name: 'Activate' })).toBeVisible();
+    await page.getByRole('button', { name: 'Activate' }).click();
+    await expect(page.getByText('ACTIVE').first()).toBeVisible();
+
+    // Editing the message warns before saving, then pauses the automation.
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await page.getByLabel('Message').fill('Rewritten copy. Reply STOP to opt out.');
+    await expect(page.getByText(/withdraws approval/)).toBeVisible();
+    await page.getByRole('button', { name: 'Save changes' }).click();
+
+    await expect(page.getByText('has not been approved yet')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+    expect(failedRequests, `failed API calls: ${failedRequests.join(' | ')}`).toEqual([]);
+  });
 });
 
 test.describe('Analytics', () => {

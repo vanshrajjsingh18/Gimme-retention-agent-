@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
+import AutomationEditor from '../features/AutomationEditor';
 import {
   Badge,
   Card,
@@ -10,6 +11,7 @@ import {
   ErrorState,
   Field,
   LoadingState,
+  Modal,
   PageHeader,
   SectionTitle,
   Spinner,
@@ -92,6 +94,7 @@ export default function AutomationDetailPage() {
 
   const [report, setReport] = useState<AutomationRunReport | null>(null);
   const [confirmRun, setConfirmRun] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const dryRun = useMutation(async () => api.post<AutomationRunReport>(`${base}/preview`));
   const liveRun = useMutation(async () => api.post<AutomationRunReport>(`${base}/run`));
@@ -124,6 +127,9 @@ export default function AutomationDetailPage() {
         }
         actions={
           <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setEditing(true)}>
+              Edit
+            </button>
             <button
               type="button"
               className="btn-secondary"
@@ -494,6 +500,27 @@ export default function AutomationDetailPage() {
           </Card>
         </div>
       </div>
+
+      {editing && (
+        <Modal
+          open
+          size="lg"
+          title={`Edit ${automation.name}`}
+          description="Change the name, description or message. The editor says up front if a change needs re-approving."
+          onClose={() => setEditing(false)}
+        >
+          <AutomationEditor
+            automation={automation}
+            onCancel={() => setEditing(false)}
+            onSaved={() => {
+              setEditing(false);
+              setReport(null);
+              refetch();
+              refetchStats();
+            }}
+          />
+        </Modal>
+      )}
 
       <ConfirmDialog
         open={confirmRun}

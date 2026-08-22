@@ -17,6 +17,7 @@ from app.automations import cohort, nudge, sequences
 from app.automations.runtime import AutomationError
 from app.automations.service import (
     activate,
+    apply_update,
     approve,
     automation_stats,
     create_automation,
@@ -153,19 +154,9 @@ def update_automation(
     user: User = Depends(require_write),
 ) -> AutomationOut:
     automation = _get(db, automation_id)
-    changes = payload.model_dump(exclude_unset=True)
-    for key, value in changes.items():
-        setattr(automation, key, value.value if hasattr(value, "value") else value)
-    db.add(
-        AuditLog(
-            actor=user.email,
-            action="AUTOMATION_UPDATED",
-            entity_type="automation",
-            entity_id=str(automation.id),
-            detail={"fields": sorted(changes)},
-        )
+    apply_update(
+        db, automation, payload.model_dump(exclude_unset=True), actor=user.email
     )
-    db.commit()
     return _out(db, automation)
 
 
@@ -178,11 +169,13 @@ def set_steps(
     automation_id: int,
     steps: list[AutomationStepIn],
     db: Session = Depends(get_db),
-    _: User = Depends(require_write),
+    user: User = Depends(require_write),
 ) -> AutomationOut:
     automation = _get(db, automation_id)
     try:
-        replace_steps(db, automation, [step.model_dump() for step in steps])
+        replace_steps(
+            db, automation, [step.model_dump() for step in steps], actor=user.email
+        )
     except AutomationError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -78,6 +78,15 @@ before sending. Each recipient is re-checked at send time for age
 verification, marketing and channel consent, suppression, frequency caps and
 quiet hours.
 
+**Automate** — three recurring campaign types over one shared send pipeline:
+*cohort sends* to whoever matches a segment at send time; *sequences* whose
+steps are timed from each customer's own enrollment; and *behavioural nudges*
+that message each customer at the day and time they usually order, derived
+from their order history. All three re-check consent at dispatch, respect NZ
+business hours, and never let two automations reach the same customer on the
+same day. Every one can be dry-run first: exactly who would receive what, and
+who would not, with the reason.
+
 **Close the loop** — delivery and engagement events are recorded, a returning
 customer's order is detected as a reactivation, attributed to the campaign
 that touched them, and the revenue appears on the dashboards.
@@ -121,9 +130,9 @@ docker/           Dockerfiles and nginx config
 
 ```bash
 make test          # backend (pytest) + frontend (vitest)
-make test-backend  # 277 tests
-make test-frontend # 35 tests
-make test-e2e      # 10 Playwright tests — needs both servers running
+make test-backend  # 465 tests
+make test-frontend # 53 tests
+make test-e2e      # 13 Playwright tests — needs both servers running
 ```
 
 The backend suite includes a 24-step end-to-end scenario

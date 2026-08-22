@@ -1343,3 +1343,148 @@ class TestSeededExamples:
         assert bodies
         for body in bodies:
             assert "STOP" in body
+
+# ==========================================================================
+# Editing what would be sent
+# ==========================================================================
+class TestApprovalFollowsTheMessage:
+    """Approval attaches to the copy, not to the automation's existence.
+
+    Someone approved a specific message going to a specific audience. Editing
+    either of those and continuing to send would mean sending something nobody
+    signed off on.
+    """
+
+    def test_changing_the_copy_withdraws_approval(
+        self, db, make_customer, make_automation
+    ):
+        from app.automations.service import apply_update
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        assert automation.approved_at is not None
+        assert automation.status == AutomationStatus.ACTIVE.value
+
+        result = apply_update(
+            db,
+            automation,
+            {"message_template": "Completely different copy. Reply STOP to opt out."},
+        )
+
+        assert result["approval_revoked"] is True
+        assert automation.approved_at is None
+        assert automation.status == AutomationStatus.PAUSED.value
+
+    def test_a_paused_automation_with_edited_copy_cannot_send(
+        self, db, make_customer, make_automation
+    ):
+        from app.automations.service import apply_update
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        apply_update(db, automation, {"message_template": "New copy. Reply STOP to opt out."})
+
+        with pytest.raises(AutomationError):
+            run_automation(db, automation, now=MONDAY_10AM)
+
+    def test_changing_the_audience_also_withdraws_approval(
+        self, db, make_customer, make_automation
+    ):
+        from app.automations.service import apply_update
+
+        first = make_customer()
+        second = make_customer()
+        automation = make_automation(manual_customer_ids=[first.id])
+
+        result = apply_update(db, automation, {"manual_customer_ids": [second.id]})
+
+        assert result["approval_revoked"] is True
+
+    def test_renaming_does_not_withdraw_approval(
+        self, db, make_customer, make_automation
+    ):
+        """A rename changes nothing a customer would receive."""
+        from app.automations.service import apply_update
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+
+        result = apply_update(db, automation, {"name": f"Renamed {next(_SEQ)}"})
+
+        assert result["approval_revoked"] is False
+        assert automation.approved_at is not None
+        assert automation.status == AutomationStatus.ACTIVE.value
+
+    def test_an_automation_that_never_needed_approval_is_left_alone(
+        self, db, make_customer
+    ):
+        """Turning the approval gate off is a deliberate choice; honour it."""
+        from app.automations.service import activate as activate_automation
+        from app.automations.service import apply_update
+
+        customer = make_customer()
+        automation = create_automation(
+            db,
+            name=f"No approval needed {next(_SEQ)}",
+            kind=AutomationKind.COHORT_BULK.value,
+            manual_customer_ids=[customer.id],
+            message_template="Hi {first_name}. Reply STOP to opt out.",
+            require_approval=False,
+        )
+        activate_automation(db, automation, now=MONDAY_10AM)
+
+        result = apply_update(db, automation, {"message_template": "Changed. Reply STOP to opt out."})
+
+        assert result["approval_revoked"] is False
+        assert automation.status == AutomationStatus.ACTIVE.value
+        assert run_automation(db, automation, now=MONDAY_10AM).sent == 1
+
+    def test_re_approving_after_an_edit_restores_sending(
+        self, db, make_customer, make_automation
+    ):
+        from app.automations.service import activate as activate_automation
+        from app.automations.service import apply_update
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        apply_update(
+            db, automation, {"message_template": "Reviewed copy. Reply STOP to opt out."}
+        )
+
+        approve(db, automation, user_id=1)
+        activate_automation(db, automation, now=MONDAY_10AM)
+
+        report = run_automation(db, automation, now=MONDAY_10AM)
+        assert report.sent == 1
+        assert report.results[0].body == "Reviewed copy. Reply STOP to opt out."
+
+    def test_rewriting_sequence_steps_withdraws_approval(
+        self, db, make_customer, sequence
+    ):
+        from app.automations.service import replace_steps
+
+        customer = make_customer()
+        automation = sequence([customer.id])
+        assert automation.approved_at is not None
+
+        replace_steps(
+            db,
+            automation,
+            [{"name": "Only step", "offset_days": 0, "message_template": "New. Reply STOP to opt out."}],
+        )
+
+        assert automation.approved_at is None
+        assert automation.status == AutomationStatus.PAUSED.value
+
+    def test_steps_cannot_be_rewritten_once_customers_are_enrolled(
+        self, db, make_customer, sequence
+    ):
+        """Re-timing a sequence under people already partway through it."""
+        from app.automations.service import replace_steps
+
+        customer = make_customer()
+        automation = sequence([customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+
+        with pytest.raises(AutomationError, match="enrolled"):
+            replace_steps(db, automation, [{"offset_days": 0, "message_template": "x"}])

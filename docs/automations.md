@@ -310,6 +310,32 @@ nothing.
 
 Viewers can read everything, and approve, run or delete nothing.
 
+### Approval follows the message
+
+Approval attaches to the *copy and audience*, not merely to the automation's
+existence. Somebody signed off on a specific message going to a specific group;
+editing either and carrying on sending would mean sending something nobody
+approved.
+
+So changing any of these withdraws approval:
+
+`message_template` · `template_overrides` · `segment_id` ·
+`manual_customer_ids` · `config` · a sequence's steps
+
+When that happens the automation is also **paused**, because an
+approved-looking campaign that has quietly stopped sending is worse than one
+that visibly needs attention. An audit entry records what was changed and
+whether it had been running. The editor warns before saving rather than
+letting an operator discover it afterwards.
+
+Renaming, or editing the description, changes nothing a customer would receive
+and leaves approval intact. An automation created with `require_approval:
+false` is left alone entirely — turning that gate off is a deliberate choice.
+
+Sequence steps additionally **cannot be changed once anyone is enrolled**:
+re-timing a sequence under customers already partway through it would change
+what they receive and when. Create a new version instead.
+
 ---
 
 ## API

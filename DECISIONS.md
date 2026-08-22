@@ -244,3 +244,29 @@ present); telling developers to delete their database.
 **Tradeoffs:** Only handles added columns. Type changes, constraints and
 backfills still need a real migration — which is why Alembic stays in
 `requirements.txt` rather than being removed.
+
+---
+
+## 2026-08-22 — Editing an automation's message withdraws its approval
+
+**Decision:** Changing `message_template`, `template_overrides`, the audience,
+the per-kind `config`, or a sequence's steps clears `approved_at` and pauses an
+active automation. Renaming or editing the description does not.
+
+**Reason:** Approval is a human vouching for a specific message going to a
+specific group of people. Without this rule, an approved automation is a
+standing permission to send *whatever it currently says* — someone could
+approve innocuous copy and edit it afterwards, and the compliance gate would
+have been bypassed without anyone bypassing anything.
+
+Pausing as well as un-approving is the honest half: `require_approval` already
+stops the send, so an un-approved active automation would sit there looking
+live while sending nothing. Better that its status says what is true.
+
+**Alternatives considered:** Versioning automations so an edit creates a new
+draft; blocking edits on approved automations entirely.
+
+**Tradeoffs:** Fixing a typo costs a re-approval. That is the right price —
+the alternative is a gate that can be walked around by editing after the fact.
+Versioning would be better still and is the natural next step if approvals
+become frequent enough to be a nuisance.
