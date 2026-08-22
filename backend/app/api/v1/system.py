@@ -112,6 +112,7 @@ def seed_demo_data(
     """
     from app.services.intelligence import refresh_all_customers
     from app.services.seed import clear_demo_data, generate_customers
+    from app.services.seed_automations import seed_automations
     from app.services.seed_campaigns import seed_campaigns
     from app.services.segments import refresh_all_segments
 
@@ -128,6 +129,10 @@ def seed_demo_data(
         refresh_all_customers(db)
         refresh_all_segments(db)
 
+    # Example automations, always as drafts — seed data must never be able to
+    # start messaging customers on its own.
+    automation_result = seed_automations(db)
+
     db.add(
         AuditLog(
             actor=user.email,
@@ -139,4 +144,9 @@ def seed_demo_data(
     )
     db.commit()
 
-    return {"generated": counts, "campaigns": campaign_result, "totals": summary(db)}
+    return {
+        "generated": counts,
+        "campaigns": campaign_result,
+        "automations": automation_result,
+        "totals": summary(db),
+    }

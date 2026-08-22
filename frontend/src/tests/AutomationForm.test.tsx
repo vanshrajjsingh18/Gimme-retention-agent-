@@ -20,6 +20,7 @@ function stubAutomation(overrides: Partial<Automation> = {}): Automation {
     channel: 'SMS',
     objective: 'RETENTION',
     segment_id: 7,
+    segment_name: 'At Risk',
     manual_customer_ids: [],
     enrollment_mode: 'ROLLING',
     recurrence: 'ONCE',

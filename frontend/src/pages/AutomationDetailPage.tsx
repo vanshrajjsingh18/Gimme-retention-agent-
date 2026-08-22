@@ -25,13 +25,61 @@ import type {
   AutomationSend,
   AutomationStats,
 } from '../types';
-import { formatDateTime, formatNumber, humanize } from '../utils/format';
+import { formatBusinessTime, formatDateTime, formatNumber, humanize } from '../utils/format';
 import {
   AUTOMATION_KIND_LABEL,
   AUTOMATION_STATUS_BADGE,
   SEND_STATUS_BADGE,
   SKIP_REASON_LABEL,
 } from '../utils/theme';
+
+/** Why this customer is being messaged now, shown so an operator can judge it.
+ *
+ * A nudge's timing is only as good as the pattern behind it, and a weak
+ * pattern is worth seeing before approving rather than after. */
+function RecipientRationale({ context }: { context: Record<string, unknown> }) {
+  const usualDay = context.usual_day as string | undefined;
+  const confidence = context.pattern_confidence as number | undefined;
+  const offer = context.offer as { include_discount?: boolean; reason?: string } | undefined;
+  const stepName = context.step_name as string | undefined;
+  const offsetDays = context.offset_days as number | undefined;
+
+  const bits: string[] = [];
+  if (usualDay) {
+    const hour = context.usual_hour as number | undefined;
+    bits.push(`Usually orders ${usualDay}${hour != null ? ` around ${hour}:00` : ''}`);
+  }
+  if (stepName != null && offsetDays != null) bits.push(`${stepName} — day ${offsetDays}`);
+  if (bits.length === 0 && !offer) return null;
+
+  // Below this the modal weekday explains under half their orders, which is a
+  // weak basis for claiming to know when they usually buy.
+  const weak = typeof confidence === 'number' && confidence < 0.5;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+      {bits.map((bit) => (
+        <span key={bit}>{bit}</span>
+      ))}
+      {typeof confidence === 'number' && (
+        <Badge
+          className={
+            weak
+              ? 'bg-amber-50 text-amber-800 ring-amber-200'
+              : 'bg-slate-100 text-slate-600 ring-slate-200'
+          }
+        >
+          {weak ? 'weak pattern' : 'pattern'} {Math.round(confidence * 100)}%
+        </Badge>
+      )}
+      {offer && (
+        <span title={offer.reason}>
+          {offer.include_discount ? 'Offer included' : 'No offer'}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function AutomationDetailPage() {
   const { id } = useParams();
@@ -152,7 +200,7 @@ export default function AutomationDetailPage() {
         <StatTile label="Skipped" value={formatNumber(stats?.total_skipped ?? 0)} />
         <StatTile
           label="Next run"
-          value={automation.next_run_at ? formatDateTime(automation.next_run_at) : '—'}
+          value={automation.next_run_at ? formatBusinessTime(automation.next_run_at) : '—'}
         />
       </div>
 
@@ -175,17 +223,30 @@ export default function AutomationDetailPage() {
               label="Audience"
               value={
                 automation.segment_id ? (
-                  <Link
-                    to="/segments"
-                    className="text-brand-700 hover:underline"
-                  >{`Segment #${automation.segment_id}`}</Link>
+                  <Link to="/segments" className="text-brand-700 hover:underline">
+                    {automation.segment_name ?? `Segment #${automation.segment_id}`}
+                  </Link>
                 ) : (
                   `${automation.manual_customer_ids.length} customers (manual list)`
                 )
               }
               hint="Re-evaluated at send time, not at creation."
             />
-            <Field label="Repeats" value={humanize(automation.recurrence)} />
+            {automation.kind === 'NUDGE' ? (
+              <Field
+                label="Runs"
+                value="Continuously"
+                hint="Each customer is messaged on their own schedule, until they opt out."
+              />
+            ) : automation.kind === 'SEQUENCE' ? (
+              <Field
+                label="Runs"
+                value="Per customer, from enrollment"
+                hint="Step timing is counted from when each customer joined."
+              />
+            ) : (
+              <Field label="Repeats" value={humanize(automation.recurrence)} />
+            )}
             <Field
               label="Send window"
               value="09:00–19:00 NZ time"
@@ -290,7 +351,7 @@ export default function AutomationDetailPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500">
-                          {formatDateTime(recipient.scheduled_for_local)} NZ
+                          {formatBusinessTime(recipient.scheduled_for)} NZ
                         </span>
                         <Badge className={SEND_STATUS_BADGE[recipient.status]}>
                           {recipient.status}
@@ -303,9 +364,12 @@ export default function AutomationDetailPage() {
                         {recipient.skip_detail}
                       </p>
                     ) : (
-                      <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">
-                        {recipient.body}
-                      </p>
+                      <>
+                        <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">
+                          {recipient.body}
+                        </p>
+                        <RecipientRationale context={recipient.context} />
+                      </>
                     )}
                   </div>
                 ))}
@@ -374,7 +438,7 @@ export default function AutomationDetailPage() {
                         <td className="table-cell text-sm text-slate-600">
                           {automation.kind === 'NUDGE'
                             ? enrollment.next_due_at
-                              ? formatDateTime(enrollment.next_due_at)
+                              ? formatBusinessTime(enrollment.next_due_at)
                               : '—'
                             : `Step ${enrollment.current_step + 1}`}
                         </td>

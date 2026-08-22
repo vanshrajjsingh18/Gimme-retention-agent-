@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  formatBusinessTime,
   formatCurrency,
   formatDate,
   formatDays,
@@ -93,5 +94,34 @@ describe('humanize', () => {
     expect(humanize('VIP')).toBe('Vip');
     expect(humanize('')).toBe('—');
     expect(humanize(null)).toBe('—');
+  });
+});
+
+describe('formatBusinessTime', () => {
+  it('renders a UTC timestamp in New Zealand time', () => {
+    // 06:00 UTC on 23 June is 6pm in Auckland (NZST, UTC+12).
+    expect(formatBusinessTime('2026-06-23T06:00:00')).toContain('06:00 pm');
+    expect(formatBusinessTime('2026-06-23T06:00:00')).toContain('23 Jun');
+  });
+
+  it('follows daylight saving', () => {
+    // The same 06:00 UTC in January is 7pm (NZDT, UTC+13) — an hour later.
+    expect(formatBusinessTime('2026-01-23T06:00:00')).toContain('07:00 pm');
+  });
+
+  it('respects an explicit offset rather than double-converting it', () => {
+    expect(formatBusinessTime('2026-06-23T18:00:00+12:00')).toContain('06:00 pm');
+  });
+
+  it('is unaffected by the viewer being somewhere else', () => {
+    // The same instant expressed three ways must render identically.
+    const nz = formatBusinessTime('2026-06-23T18:00:00+12:00');
+    expect(formatBusinessTime('2026-06-23T06:00:00Z')).toBe(nz);
+    expect(formatBusinessTime('2026-06-23T02:00:00-04:00')).toBe(nz);
+  });
+
+  it('handles a missing or unparseable value', () => {
+    expect(formatBusinessTime(null)).toBe('—');
+    expect(formatBusinessTime('not a date')).toBe('—');
   });
 });

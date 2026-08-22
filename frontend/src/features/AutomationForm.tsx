@@ -37,6 +37,8 @@ export default function AutomationForm({
   const [stopOnOrder, setStopOnOrder] = useState(true);
   const [endsAt, setEndsAt] = useState('');
   const [steps, setSteps] = useState<StepDraft[]>(STARTER_STEPS);
+  const [minOrders, setMinOrders] = useState(3);
+  const [minGapDays, setMinGapDays] = useState(7);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,8 +62,9 @@ export default function AutomationForm({
         enrollment_mode: enrollmentMode,
         message_template: messageTemplate,
         stop_on_order: stopOnOrder,
-        ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+        ends_at: isNudge || !endsAt ? null : new Date(endsAt).toISOString(),
         steps: isSequence ? steps : [],
+        config: isNudge ? { min_orders: minOrders, min_gap_days: minGapDays } : {},
       });
       onCreated(automation);
     } catch (caught) {
@@ -318,10 +321,65 @@ export default function AutomationForm({
         </>
       )}
 
+      {isNudge && (
+        <fieldset className="rounded-lg border border-slate-200 p-3">
+          <legend className="px-1 text-xs font-medium text-slate-600">
+            When each customer is nudged
+          </legend>
+          <p className="mb-3 text-xs text-slate-500">
+            Timed from each customer’s own order history — the day of the week and the
+            time of day they usually buy. Customers without enough history are simply
+            not enrolled, and join automatically once they have ordered enough times.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label" htmlFor="nudge-min-orders">
+                Minimum completed orders
+              </label>
+              <input
+                id="nudge-min-orders"
+                type="number"
+                min={2}
+                max={20}
+                className="input"
+                value={minOrders}
+                onChange={(event) => setMinOrders(Number(event.target.value))}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Below three, a repeated weekday is a one-in-seven coincidence rather than
+                a habit.
+              </p>
+            </div>
+            <div>
+              <label className="label" htmlFor="nudge-min-gap">
+                Minimum days between nudges
+              </label>
+              <input
+                id="nudge-min-gap"
+                type="number"
+                min={1}
+                max={90}
+                className="input"
+                value={minGapDays}
+                onChange={(event) => setMinGapDays(Number(event.target.value))}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                A weekly buyer gets a weekly nudge; a monthly buyer should not get four.
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            This runs indefinitely until a customer opts out. A discount is included only
+            where their own history justifies it <em>and</em> an approved promotion exists
+            in Brand settings.
+          </p>
+        </fieldset>
+      )}
+
       {!isSequence && (
         <div>
           <label className="label" htmlFor="automation-template">
-            Message {isNudge ? '' : '(leave blank to use the segment’s default copy)'}
+            Message {isNudge ? '(leave blank to use the standard nudge copy)' : '(leave blank to use the segment’s default copy)'}
           </label>
           <textarea
             id="automation-template"

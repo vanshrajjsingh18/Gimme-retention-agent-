@@ -703,6 +703,7 @@ class AutomationOut(BaseModel):
     channel: str
     objective: str
     segment_id: int | None
+    segment_name: str | None = None
     manual_customer_ids: list
     enrollment_mode: str
     recurrence: str

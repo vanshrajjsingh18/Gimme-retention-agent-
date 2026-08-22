@@ -19,6 +19,7 @@ from app.core.database import session_scope
 from app.services.bootstrap import bootstrap, create_tables
 from app.services.intelligence import refresh_all_customers
 from app.services.seed import clear_demo_data, generate_customers, summary
+from app.services.seed_automations import seed_automations
 from app.services.seed_campaigns import seed_campaigns
 from app.services.segments import refresh_all_segments
 
@@ -82,6 +83,12 @@ def main() -> int:
         with session_scope() as db:
             refresh_all_customers(db)
             refresh_all_segments(db)
+
+    print("Seeding example automations (as drafts)...")
+    with session_scope() as db:
+        automations = seed_automations(db)
+    for name in automations["created"]:
+        print(f"  {name} (DRAFT — needs approval before it can send)")
 
     with session_scope() as db:
         totals = summary(db)

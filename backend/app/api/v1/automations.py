@@ -60,6 +60,7 @@ def _get(db: Session, automation_id: int) -> Automation:
 
 def _out(db: Session, automation: Automation) -> AutomationOut:
     data = AutomationOut.model_validate(automation)
+    data.segment_name = cohort.segment_name(db, automation)
     data.steps = [
         step
         for step in db.execute(

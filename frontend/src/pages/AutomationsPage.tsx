@@ -16,7 +16,7 @@ import {
 } from '../components/ui';
 import { useQuery } from '../hooks/useApi';
 import type { Automation, AutomationKind } from '../types';
-import { formatDateTime, formatNumber } from '../utils/format';
+import { formatBusinessTime, formatNumber } from '../utils/format';
 import { AUTOMATION_KIND_LABEL, AUTOMATION_STATUS_BADGE } from '../utils/theme';
 
 const KINDS: { key: AutomationKind | 'ALL'; label: string; blurb: string }[] = [
@@ -53,7 +53,14 @@ export default function AutomationsPage() {
         title="Automations"
         description="Recurring texting built on the existing TNZ integration. Every send re-checks consent, respects NZ business hours, and never doubles up with another automation on the same day."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setCreating('NUDGE')}
+            >
+              New nudge
+            </button>
             <button
               type="button"
               className="btn-secondary"
@@ -154,7 +161,7 @@ export default function AutomationsPage() {
                     {formatNumber(automation.total_skipped)}
                   </td>
                   <td className="table-cell text-sm text-slate-600">
-                    {automation.next_run_at ? formatDateTime(automation.next_run_at) : '—'}
+                    {automation.next_run_at ? formatBusinessTime(automation.next_run_at) : '—'}
                   </td>
                   <td className="table-cell text-right">
                     <Link

@@ -50,6 +50,30 @@ export function formatDateTime(value: string | null | undefined): string {
   });
 }
 
+/** The business timezone every send decision is made in. */
+export const BUSINESS_TIMEZONE = 'Pacific/Auckland';
+
+/**
+ * Render a timestamp in New Zealand time, whatever the viewer's own clock is.
+ *
+ * Send windows, quiet hours and per-day capping are all decided in NZ time, so
+ * a screen labelled "NZ" has to show NZ — formatting in the browser's timezone
+ * would tell an operator in another country, or a CI container running in UTC,
+ * that an 18:00 send goes out at 06:00.
+ */
+export function formatBusinessTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('en-NZ', {
+    timeZone: BUSINESS_TIMEZONE,
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export function formatRelative(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);

@@ -953,6 +953,87 @@ class TestBehaviouralNudge:
             assert 9 <= local.hour < 19, f"{local} is outside business hours"
             assert moment > MONDAY_10AM, f"{local} is already in the past"
 
+    # -- previewing before anyone is enrolled -------------------------------
+    def test_a_nudge_can_be_previewed_before_anyone_is_enrolled(
+        self, db, make_customer, make_automation
+    ):
+        """Enrollment happens on a live run, so a naive preview would be empty
+        — and an operator deciding whether to approve would learn nothing."""
+        customer = make_customer()
+        for order in friday_orders(customer.id, 6):
+            db.add(order)
+        db.commit()
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value,
+            manual_customer_ids=[customer.id],
+            message_template="Hi {first_name}, your usual {usual_day}? Reply STOP to opt out.",
+        )
+
+        assert nudge._active(db, automation) == []  # nobody enrolled yet
+
+        result = preview(db, automation, now=MONDAY_10AM)
+
+        assert result["previewed"] == 1
+        recipient = result["recipients"][0]
+        assert recipient["customer_id"] == customer.id
+        assert "Friday" in recipient["body"]
+        assert recipient["context"]["usual_day"] == "Friday"
+
+    def test_previewing_a_nudge_enrolls_nobody(self, db, make_customer, make_automation):
+        customer = make_customer()
+        for order in friday_orders(customer.id, 6):
+            db.add(order)
+        db.commit()
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value, manual_customer_ids=[customer.id]
+        )
+
+        preview(db, automation, now=MONDAY_10AM)
+
+        assert nudge._active(db, automation) == []
+        assert automation.status == AutomationStatus.ACTIVE.value
+
+    def test_a_preview_shows_the_whole_audience_not_just_todays_slot(
+        self, db, make_customer, make_automation
+    ):
+        """A live run sends only what is due; a preview shows the standing set."""
+        ids = []
+        for _ in range(3):
+            customer = make_customer()
+            for order in friday_orders(customer.id, 5):
+                db.add(order)
+            ids.append(customer.id)
+        db.commit()
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value, manual_customer_ids=ids
+        )
+
+        # MONDAY_10AM is nowhere near a Friday slot, so a live run sends none.
+        assert run_automation(db, automation, now=MONDAY_10AM).sent == 0
+        # ...but the preview still accounts for all three customers.
+        assert preview(db, automation, now=MONDAY_10AM)["candidates"] == 3
+
+    def test_a_customer_without_a_pattern_is_absent_from_the_preview_too(
+        self, db, make_customer, make_automation
+    ):
+        """The preview count must match what a live run would actually enrol."""
+        with_pattern = make_customer()
+        for order in friday_orders(with_pattern.id, 5):
+            db.add(order)
+        too_few = make_customer()
+        for order in friday_orders(too_few.id, 2):
+            db.add(order)
+        db.commit()
+
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value,
+            manual_customer_ids=[with_pattern.id, too_few.id],
+        )
+        result = preview(db, automation, now=MONDAY_10AM)
+
+        assert result["candidates"] == 1
+        assert result["recipients"][0]["customer_id"] == with_pattern.id
+
     # -- offers ------------------------------------------------------------
     def test_no_discount_for_a_customer_who_buys_at_full_price(
         self, db, make_customer, bootstrapped
@@ -1095,3 +1176,170 @@ class TestDeliveryTracking:
         assert stats["total_sent"] == 1
         assert stats["total_skipped"] == 1
         assert stats["skips_by_reason"] == {SkipReason.NO_CONSENT.value: 1}
+
+# ==========================================================================
+# Integration with the existing campaign reporting
+# ==========================================================================
+class TestReportingIntegration:
+    def test_an_automation_send_is_attributed_like_any_campaign(
+        self, db, make_customer, make_automation
+    ):
+        """The reason every automation carries a backing campaign.
+
+        Without it an automated send would be invisible to attribution,
+        campaign analytics and the Customer 360 history — a parallel reporting
+        world that inevitably disagrees with the first one.
+        """
+        from app.services.attribution import attribute_order
+        from app.models.entities import Campaign, CommunicationEvent
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        report = run_automation(db, automation, now=MONDAY_10AM)
+        assert report.sent == 1
+
+        # The send is a real communication event against the backing campaign.
+        touch = db.execute(
+            select(CommunicationEvent).where(
+                CommunicationEvent.customer_id == customer.id,
+                CommunicationEvent.campaign_id == automation.campaign_id,
+            )
+        ).scalars().first()
+        assert touch is not None
+
+        order = Order(
+            external_id=f"ord-attrib-{customer.id}",
+            customer_id=customer.id,
+            ordered_at=MONDAY_10AM + timedelta(hours=6),
+            status=OrderStatus.COMPLETED.value,
+            total_amount=94.50,
+        )
+        db.add(order)
+        db.commit()
+
+        record = attribute_order(db, order)
+        assert record is not None
+        assert record.campaign_id == automation.campaign_id
+        assert record.revenue == 94.50
+
+        campaign = db.get(Campaign, automation.campaign_id)
+        assert campaign.conversions == 1
+        assert campaign.attributed_revenue == 94.50
+
+    def test_a_skipped_customer_generates_no_touch_to_attribute(
+        self, db, make_customer, make_automation
+    ):
+        """A message that was never sent must not earn credit for an order."""
+        from app.services.attribution import attribute_order
+
+        customer = make_customer(sms_consent=False)
+        automation = make_automation(manual_customer_ids=[customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+
+        order = Order(
+            external_id=f"ord-noattrib-{customer.id}",
+            customer_id=customer.id,
+            ordered_at=MONDAY_10AM + timedelta(hours=6),
+            status=OrderStatus.COMPLETED.value,
+            total_amount=61.00,
+        )
+        db.add(order)
+        db.commit()
+
+        assert attribute_order(db, order) is None
+
+    def test_a_dry_run_earns_no_attribution(self, db, make_customer, make_automation):
+        from app.services.attribution import attribute_order
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        preview(db, automation, now=MONDAY_10AM)
+
+        order = Order(
+            external_id=f"ord-dryrun-{customer.id}",
+            customer_id=customer.id,
+            ordered_at=MONDAY_10AM + timedelta(hours=6),
+            status=OrderStatus.COMPLETED.value,
+            total_amount=55.00,
+        )
+        db.add(order)
+        db.commit()
+
+        assert attribute_order(db, order) is None
+
+# ==========================================================================
+# Seeded examples
+# ==========================================================================
+class TestSeededExamples:
+    def test_examples_cover_all_three_campaign_types(self, db, bootstrapped):
+        from app.services.seed_automations import seed_automations
+
+        seed_automations(db)
+        kinds = set(
+            db.execute(
+                select(Automation.kind).where(
+                    Automation.name.in_(
+                        ["Weekly win-back", "Second-order series", "Reorder nudge"]
+                    )
+                )
+            ).scalars()
+        )
+        assert kinds == {"COHORT_BULK", "SEQUENCE", "NUDGE"}
+
+    def test_every_seeded_automation_is_an_unapproved_draft(self, db, bootstrapped):
+        """Seed data must not be able to start texting customers by itself."""
+        from app.services.seed_automations import EXAMPLES, seed_automations
+
+        seed_automations(db)
+        rows = (
+            db.execute(
+                select(Automation).where(
+                    Automation.name.in_([spec["name"] for spec in EXAMPLES])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows
+        for row in rows:
+            assert row.status == AutomationStatus.DRAFT.value
+            assert row.require_approval is True
+            assert row.approved_at is None
+            assert row.next_run_at is None
+
+    def test_seeding_twice_creates_nothing_new(self, db, bootstrapped):
+        from app.services.seed_automations import seed_automations
+
+        seed_automations(db)
+        second = seed_automations(db)
+        assert second["created"] == []
+        assert second["skipped"]
+
+    def test_the_seeded_sequence_uses_day_offsets(self, db, bootstrapped):
+        from app.models.entities import AutomationStep
+        from app.services.seed_automations import seed_automations
+
+        seed_automations(db)
+        automation = db.execute(
+            select(Automation).where(Automation.name == "Second-order series")
+        ).scalar_one()
+        offsets = (
+            db.execute(
+                select(AutomationStep.offset_days)
+                .where(AutomationStep.automation_id == automation.id)
+                .order_by(AutomationStep.position)
+            )
+            .scalars()
+            .all()
+        )
+        assert list(offsets) == [0, 7, 14]
+
+    def test_seeded_copy_carries_an_opt_out_instruction(self, db, bootstrapped):
+        from app.models.entities import AutomationStep
+        from app.services.seed_automations import seed_automations
+
+        seed_automations(db)
+        bodies = db.execute(select(AutomationStep.message_template)).scalars().all()
+        assert bodies
+        for body in bodies:
+            assert "STOP" in body

@@ -361,15 +361,23 @@ def build_candidates(
     *,
     now: datetime,
     enrollments: list[AutomationEnrollment] | None = None,
+    ignore_due_time: bool = False,
 ) -> tuple[list[Candidate], dict[int, AutomationEnrollment]]:
+    """Build the nudges that have come due.
+
+    ``ignore_due_time`` is for previews: a live run should only send what is
+    due right now, but an operator previewing the automation wants to see the
+    whole standing audience and each customer's scheduled slot, not just the
+    handful whose slot happens to fall in this minute.
+    """
     cfg = config_of(automation)
     enrollments = enrollments if enrollments is not None else _active(db, automation)
     due = [
         e
         for e in enrollments
         if e.next_due_at is not None
-        and e.next_due_at <= now
-        and not _too_soon(e, now=now, min_gap_days=cfg["min_gap_days"])
+        and (ignore_due_time or e.next_due_at <= now)
+        and (ignore_due_time or not _too_soon(e, now=now, min_gap_days=cfg["min_gap_days"]))
     ]
     if not due:
         return [], {}
@@ -429,6 +437,48 @@ def build_candidates(
     return candidates, by_customer
 
 
+def _prospective_enrollments(
+    db: Session, automation: Automation, *, now: datetime
+) -> list[AutomationEnrollment]:
+    """Transient enrollments for customers who would join on a live run.
+
+    Never added to the session — a dry run must not change state. Customers
+    without a usable order pattern are left out here exactly as they would be
+    by :func:`enroll`, so the preview count matches what a live run produces.
+    """
+    cfg = config_of(automation)
+    enrolled = set(
+        db.execute(
+            select(AutomationEnrollment.customer_id).where(
+                AutomationEnrollment.automation_id == automation.id
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    prospective: list[AutomationEnrollment] = []
+    for customer_id in resolve_audience(db, automation, now=now):
+        if customer_id in enrolled:
+            continue
+        pattern = compute_pattern(db, customer_id, now=now, min_orders=cfg["min_orders"])
+        if not pattern.has_pattern:
+            continue
+        prospective.append(
+            AutomationEnrollment(
+                automation_id=automation.id,
+                customer_id=customer_id,
+                status=EnrollmentStatus.ACTIVE.value,
+                enrolled_at=now,
+                pattern=pattern.as_dict(),
+                next_due_at=_due_from_pattern(
+                    pattern, after=now, lead_days=cfg["lead_days"]
+                ),
+            )
+        )
+    return prospective
+
+
 def _pattern_fields(blob: dict | None) -> dict:
     """Rebuild an OrderPattern from its stored JSON, ignoring stray keys."""
     from datetime import datetime as _dt
@@ -457,16 +507,24 @@ def run(
     now = now or utcnow()
     cfg = config_of(automation)
 
-    if not dry_run:
+    if dry_run:
+        # Enrollment only happens on a live run, so a preview of a nudge
+        # nobody has joined yet would be empty and would tell an operator
+        # nothing — which defeats the point of previewing before approving.
+        # Simulate it in memory instead.
+        enrollments = _active(db, automation) + _prospective_enrollments(
+            db, automation, now=now
+        )
+    else:
         enroll(db, automation, now=now, commit=False)
         db.flush()
         refresh_patterns(db, automation, now=now, commit=False)
         _stop_opted_out(db, automation, now=now)
         db.commit()
+        enrollments = _active(db, automation)
 
-    enrollments = _active(db, automation)
     candidates, by_customer = build_candidates(
-        db, automation, now=now, enrollments=enrollments
+        db, automation, now=now, enrollments=enrollments, ignore_due_time=dry_run
     )
 
     # Pending-order candidates carry no body; short-circuit them here so they

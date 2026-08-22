@@ -515,6 +515,7 @@ export interface Automation {
   channel: string;
   objective: string;
   segment_id: number | null;
+  segment_name: string | null;
   manual_customer_ids: number[];
   enrollment_mode: 'ROLLING' | 'FIXED_COHORT';
   recurrence: 'ONCE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';

@@ -212,3 +212,253 @@ output, the database and `.env`.
 
 **Preventive action:** A `.dockerignore` belongs in the same commit as the
 first Dockerfile, not after the first slow or broken build.
+
+---
+
+## 2026-08-22 — Quiet hours were being checked against UTC, not New Zealand time
+
+**Found by:** Reading `compliance/engine.py` before building the automation
+send window, rather than by a failing test — nothing tested it, because every
+test passed naive datetimes that were implicitly treated as local.
+
+**Failure:** The database stores naive UTC throughout and `in_quiet_hours()`
+compared that value directly against a wall-clock window. New Zealand is UTC+12
+or UTC+13, so the check was wrong by half a day in the worst possible
+direction: 09:00 UTC is 21:00 in Auckland and passed as "daytime", while 02:00
+UTC is a perfectly reasonable 14:00 and was blocked as quiet hours. Any
+automation built on this would have texted customers late at night while
+refusing to send in the afternoon.
+
+**Fix:** Added `app/core/timezones.py` as the single place anything reasons
+about the customer's clock, made `in_quiet_hours()` convert through it, and
+corrected the default window to 19:00–09:00 local (the complement of a
+9am–7pm send window; it had been 21:00). Exclusion messages now quote the
+customer's local time, so the reason an operator reads matches the clock the
+customer was looking at.
+
+**Preventive action:** The four existing quiet-hours tests were rewritten to
+say which clock they mean: pure window logic runs with
+`use_business_timezone=False`, and a new test asserts the conversion itself
+(02:00 UTC allowed, 09:00 UTC blocked with "21:00 local" in the reason). A
+test that passes a bare `datetime` to a time-of-day rule is not testing what it
+appears to.
+
+---
+
+## 2026-08-22 — STOP suppressed one channel, not the customer
+
+**Found by:** Tracing what a `CUSTOMER_OPTED_OUT` event actually did before
+wiring automations into it.
+
+**Failure:** `_apply_opt_out()` cleared the consent flag for the channel the
+opt-out arrived on and wrote a per-channel suppression row. A customer who
+replied STOP to an SMS therefore kept receiving email, stayed enrolled in every
+sequence, and would have been re-enabled entirely by any data import that
+restored a consent flag. For alcohol marketing that is not a rough edge, it is
+a compliance failure.
+
+**Fix:** `app/services/optout.py` now clears all four consent flags, writes a
+`ConsentEvent` per type, sets `is_suppressed`, writes an **ALL**-channel
+suppression record, stops every active automation enrollment, and writes an
+audit entry. Eligibility reads the suppression row as well as the flags, so
+restoring a flag alone cannot silently re-enable messaging. The campaign engine
+now routes through the same function.
+
+**Preventive action:** A test asserts that opting out of one automation stops
+an unrelated one. Keyword matching is deliberately narrow — the keyword must be
+the entire message — so "I couldn't stop drinking that IPA" is not an opt-out,
+which is also tested.
+
+---
+
+## 2026-08-22 — TNZ webhook could not see a STOP reply at all
+
+**Found by:** Working backwards from "what makes the opt-out fire?" after
+building the opt-out service.
+
+**Failure:** `TnzSmsAdapter.process_webhook()` only read delivery *status*
+fields. An inbound reply carries no status, just the text the customer sent, so
+every STOP arriving as a reply was dropped on the floor. The webhook endpoint
+also ignored any event whose `provider_message_id` did not match a message we
+had stored — meaning an opt-out could be lost because the provider echoed an id
+back differently.
+
+**Fix:** The adapter now reads reply bodies and classifies them as opt-out or
+opt-in. The webhook resolves the customer by message id *or* by the address the
+reply came from (matching on the last nine digits, since NZ numbers arrive as
+`+64…`, `0064…` or `021…`), and applies the consent change even when no message
+matches. Delivery receipts now also advance the automation ledger, and progress
+is one-way so a late "sent" event cannot walk a delivery backwards.
+
+**Preventive action:** Withdrawal of consent must never depend on an external
+system getting our own identifier right on the way back.
+
+---
+
+## 2026-08-22 — Adding a model field broke every existing database at startup
+
+**Found by:** Starting the server after adding two columns to `BrandSettings` —
+the API had passed its whole test suite, because tests build the schema fresh.
+
+**Failure:** `Base.metadata.create_all()` creates missing *tables* but never
+missing *columns*. The new automation tables appeared; the new brand columns did
+not, and the app died on `no such column: brand_settings.signatory_name`. For a
+local-first tool the affected case is anyone with data they have accumulated —
+i.e. the normal case, not an edge case.
+
+**Fix:** Added `app/core/schema.py`. It compares model metadata against the live
+schema and adds what is missing, additively only: it never drops, renames or
+retypes, backfills Python-side defaults so existing rows are correct, and
+**refuses** a NOT NULL column with no default rather than half-applying,
+logging that it needs a real migration. Alembic stays in `requirements.txt` for
+everything beyond adding a column.
+
+**Preventive action:** Seven tests build a database from an older schema with a
+row already in it and assert the row survives, the defaults backfill, a second
+run is a no-op, and an unsafe column is refused with the table left untouched.
+A green test suite says nothing about upgrade behaviour when the tests always
+start from an empty database.
+
+---
+
+## 2026-08-22 — Behavioural nudges were being deferred past the moment they aimed at
+
+**Found by:** Running the nudge enrollment against the real seeded data and
+reading the resulting schedule, rather than trusting that the shared
+quiet-hours rule was right for every campaign type.
+
+**Failure:** Feature 2 times a message to when a customer usually orders, and
+drinks orders skew heavily to the evening — the seeded data peaks at 7pm. The
+generic rule deferred anything outside 09:00–19:00 *forward*, so a customer who
+reliably orders at 9pm on Saturday was scheduled for 9am Sunday: after they
+would already have bought, which is precisely the message the feature exists to
+avoid sending. The stored `next_due_at` was also untruthful, showing 21:00 for a
+send that would actually go at 09:00 the next day.
+
+**Fix:** Nudges clamp *backwards* into the customer's own local day — 21:00
+becomes 18:00, and an overnight pattern moves to 18:00 the evening before, with
+a guard that rolls to the next weekly occurrence if that lands in the past.
+Other sends still defer forward, which remains right for them: a bulk send that
+is a few hours late is fine, a nudge that is a day late is pointless.
+
+**Preventive action:** A test enrolls customers whose patterns span 02:00 to
+23:00 and asserts every resulting `next_due_at` falls inside business hours and
+in the future. Sharing a pipeline is only correct where the shared behaviour is
+actually right for every case — this one needed a documented exception, not a
+uniform rule.
+
+---
+
+## 2026-08-22 — Mock SMS adapter crashed on a message with no subject
+
+**Found by:** The first automation send test.
+
+**Failure:** `BaseMockAdapter.send_message()` did `subject[:80]` when building
+its simulated response. Every existing caller passed a string, because the
+campaign engine always supplies a subject even for SMS. The automation runtime
+passes `None`, which is what an SMS actually has, and the adapter raised
+`TypeError: 'NoneType' object is not subscriptable` — 28 tests failing from one
+line.
+
+**Fix:** `(subject or "")[:80]`.
+
+**Preventive action:** A mock has to accept everything its live counterpart
+accepts. `subject` was already `str | None` in the interface; only the mock had
+quietly assumed otherwise.
+
+---
+
+## 2026-08-22 — The send ledger's idempotency key could not record two outcomes on one day
+
+**Found by:** A test asserting that one automation cannot double-send to the
+same customer within a single batch.
+
+**Failure:** `automation_sends.idempotency_key` was
+`(automation, step, customer, local_date)` — correct as a replay guard for a
+*send*, but it also had to cover *skips*. The second candidate for the same
+customer was correctly skipped as `DEDUPED`, then failed to write its ledger row
+on a UNIQUE violation, taking down the whole run. The safety mechanism was
+destroying the audit trail that proves the safety mechanism worked.
+
+**Fix:** A skip's reason is part of its key, so one customer can carry both a
+send and a `DEDUPED` skip for the same day. The write is wrapped in a savepoint
+that treats a collision as "already recorded" and returns the existing row, so a
+crash mid-batch or two workers racing still cannot produce a duplicate message.
+
+**Preventive action:** An idempotency key encodes what may happen at most once.
+Sends and skips are different things and needed different keys.
+
+---
+
+## 2026-08-22 — End-to-end order timestamps depended on the wall clock
+
+**Found by:** The full suite failing on a re-run, having passed an hour
+earlier with no relevant change in between.
+
+**Failure:** `test_e2e_retention_loop.py` built orders with
+`(NOW - timedelta(days=160)).replace(hour=18)`. Pinning the hour without
+adjusting the date means only 159 whole days have elapsed if the suite runs
+before 18:00 UTC, so `days_since_last_order >= 160` failed — and took a second
+test with it, which read state the first one was supposed to store. Confirmed
+pre-existing by stashing the branch's changes and reproducing it on the original
+code.
+
+**Fix:** `iso()` steps back one further day when the requested hour has not yet
+passed today, making the elapsed-day count exact whenever the suite runs.
+
+**Preventive action:** A test whose result depends on the time of day it runs
+will eventually fail for a reason unrelated to the change in front of you, and
+send you looking in the wrong place.
+
+---
+
+## 2026-08-22 — A behavioural nudge could never be previewed before approval
+
+**Found by:** Screenshotting the automation detail page after a dry run, rather
+than reading the JSON the endpoint returned.
+
+**Failure:** The page said "Nobody matches right now — 0 would receive" for a
+nudge whose segment held 249 customers. Enrollment only happens on a live run,
+and the nudge preview read the enrollment table, so a nudge nobody had joined
+yet previewed as empty. Since a nudge cannot be approved without being
+previewed and cannot be previewed meaningfully without being approved, the
+safest campaign type had the least visible one. Feature 1 already solved this
+with in-memory prospective enrollment; Feature 2 had simply not been given the
+same treatment.
+
+**Fix:** A nudge dry run now simulates enrollment in memory — computing each
+customer's real order pattern and due time without writing anything — and
+ignores the "is it due right now" filter, because a preview should show the
+whole standing audience rather than the handful whose slot falls in this
+minute. A live run still sends only what is due. The seeded nudge now previews
+249 candidates: 91 would receive, 158 excluded with reasons.
+
+**Preventive action:** Four tests cover it, including that previewing enrolls
+nobody and that a customer with too few orders is absent from the preview
+exactly as they would be from a live run — the preview count has to match what
+running it would actually do.
+
+---
+
+## 2026-08-22 — Times labelled "NZ" were rendered in the viewer's timezone
+
+**Found by:** The same screenshot. The row read "23 Aug 2026, 06:00 am NZ"
+while the API had scheduled that send for 18:00 NZ.
+
+**Failure:** `formatDateTime()` does `new Date(value).toLocaleString('en-NZ')`,
+which picks the locale's *formatting* but the *browser's* timezone. Given an
+already-local `2026-08-23T18:00:00+12:00`, a browser running in UTC rendered
+06:00 and the UI labelled it "NZ". Every send window, quiet-hours and per-day
+decision in this system is made in New Zealand time, so a screen that says NZ
+and shows something else is worse than showing nothing.
+
+**Fix:** Added `formatBusinessTime()`, which passes
+`timeZone: 'Pacific/Auckland'` explicitly, and used it for every automation
+timestamp — scheduled sends, next run, and per-customer nudge due times. It is
+now correct whether the operator is in Auckland, in London, or a CI container
+running in UTC.
+
+**Preventive action:** Five tests, including one asserting that the same
+instant written three ways (`+12:00`, `Z`, `-04:00`) renders identically.
+`toLocaleString('en-NZ')` selects a language, not a place; the timezone has to
+be named separately or it silently follows the machine.
