@@ -3,6 +3,8 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { LoadingState, ToastHost } from './components/ui';
 import { useAuth } from './hooks/useAuth';
 import AppLayout from './layouts/AppLayout';
+import AutomationDetailPage from './pages/AutomationDetailPage';
+import AutomationsPage from './pages/AutomationsPage';
 import BrandPage from './pages/BrandPage';
 import CampaignAnalyticsPage from './pages/CampaignAnalyticsPage';
 import CampaignDetailPage from './pages/CampaignDetailPage';
@@ -56,6 +58,8 @@ export default function App() {
               <Route path="segments" element={<SegmentsPage />} />
               <Route path="campaigns" element={<CampaignsPage />} />
               <Route path="campaigns/:id" element={<CampaignDetailPage />} />
+              <Route path="automations" element={<AutomationsPage />} />
+              <Route path="automations/:id" element={<AutomationDetailPage />} />
               <Route path="studio" element={<MessageStudioPage />} />
               <Route path="journeys" element={<JourneysPage />} />
               <Route path="data" element={<DataPage />} />

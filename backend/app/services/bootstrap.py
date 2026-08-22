@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import Base, engine
 from app.core.enums import UserRole
+from app.core.schema import reconcile_schema
 from app.core.security import hash_password
 from app.integrations.registry import ensure_default_integrations
 from app.models.entities import User
@@ -22,6 +23,15 @@ def create_tables() -> None:
     import app.models  # noqa: F401 - registers every table
 
     Base.metadata.create_all(engine)
+    # create_all adds missing tables but never missing columns, which would
+    # leave an existing local database failing at startup after a model gains
+    # a field. Reconcile additively so nobody has to delete their data.
+    added = reconcile_schema(engine)
+    if added:
+        logger.info(
+            "Schema reconciled: added %s",
+            ", ".join(f"{table}.{column}" for table, columns in added.items() for column in columns),
+        )
 
 
 def ensure_admin_user(db: Session) -> User:

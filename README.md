@@ -110,7 +110,7 @@ frontend/         React + TypeScript + Vite + Tailwind + Recharts
   src/
     api/ components/ features/ hooks/ layouts/ pages/ types/ utils/
   e2e/            Playwright browser tests
-docs/             architecture, API, compliance, integrations
+docs/             architecture, API, automations, compliance, integrations
 sample-data/      example CSVs matching the import formats
 docker/           Dockerfiles and nginx config
 ```
@@ -187,6 +187,7 @@ See [`docs/integrations.md`](docs/integrations.md) for what each provider needs.
 
 - [Architecture](docs/architecture.md) — how the pieces fit and why
 - [API reference](docs/api.md) — every endpoint, with examples
+- [Automations](docs/automations.md) — the three recurring campaign types, and the consent/dedup/quiet-hours rules they share
 - [Compliance](docs/compliance.md) — the alcohol-marketing rules and how they are enforced
 - [Integrations](docs/integrations.md) — provider setup and webhooks
 - [DECISIONS.md](DECISIONS.md) — architecture decisions and their tradeoffs

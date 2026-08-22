@@ -52,6 +52,11 @@ const NAV_SECTIONS: { heading: string; items: { to: string; label: string; icon:
         icon: 'M3 10v4h4l5 5V5L7 10H3z',
       },
       {
+        to: '/automations',
+        label: 'Automations',
+        icon: 'M12 2v4m0 12v4M2 12h4m12 0h4M5.6 5.6l2.8 2.8m7.2 7.2l2.8 2.8m0-12.8l-2.8 2.8m-7.2 7.2l-2.8 2.8',
+      },
+      {
         to: '/studio',
         label: 'Message Studio',
         icon: 'M4 4h16v12H5.17L4 17.17V4zm4 3h8v2H8V7zm0 4h5v2H8v-2z',

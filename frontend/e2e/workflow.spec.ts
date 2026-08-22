@@ -82,6 +82,7 @@ test.describe('Navigation', () => {
       ['Customers', /^Customers$/],
       ['Segments', /^Segments$/],
       ['Campaigns', /^Campaigns$/],
+      ['Automations', /^Automations$/],
       ['Message Studio', /Message Studio/],
       ['Journeys', /^Journeys$/],
       ['Data & imports', /Data & imports/],
@@ -238,6 +239,84 @@ test.describe('Campaigns', () => {
     await expect(page.getByRole('heading', { name: 'Actions' })).toBeVisible();
 
     expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
+});
+
+test.describe('Automations', () => {
+  test('a cohort send can be created, previewed and approved without sending', async ({
+    page,
+  }) => {
+    const { errors, failedRequests } = guard(page);
+    await login(page);
+
+    const name = `E2E cohort ${Date.now()}`;
+    await page.getByRole('link', { name: 'Automations', exact: true }).click();
+    await page.getByRole('button', { name: 'New cohort send' }).click();
+
+    await page.getByLabel('Name').fill(name);
+    await page.getByLabel('Audience').selectOption({ index: 1 });
+    await page
+      .getByLabel(/^Message/)
+      .fill('Hi {first_name}, your usual is a tap away. Reply STOP to opt out.');
+    await page.getByRole('button', { name: 'Create as draft' }).click();
+
+    // Lands on the list as a draft that cannot send yet.
+    await expect(page.getByRole('link', { name })).toBeVisible();
+    await page.getByRole('link', { name }).click();
+    await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+    await expect(page.getByText('has not been approved yet')).toBeVisible();
+
+    // A dry run is available before approval, and it must send nothing: the
+    // ledger stays empty and the panel reports a dry run explicitly.
+    await page.getByRole('button', { name: 'Dry run' }).click();
+    const preview = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Dry run — nothing was sent' }),
+    });
+    await expect(preview).toBeVisible();
+
+    // The preview names the audience or says plainly that nobody matches,
+    // and either way the live ledger stays empty: nothing was sent.
+    await expect(
+      preview.getByText('Recipients').or(preview.getByText('Nobody matches right now')),
+    ).toBeVisible();
+    await expect(page.getByText('No sends yet')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByRole('button', { name: 'Activate' })).toBeVisible();
+    await expect(page.getByText('has not been approved yet')).toHaveCount(0);
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+    expect(failedRequests, `failed API calls: ${failedRequests.join(' | ')}`).toEqual([]);
+  });
+
+  test('a sequence is authored as day offsets, not calendar dates', async ({ page }) => {
+    const { errors, failedRequests } = guard(page);
+    await login(page);
+
+    const name = `E2E sequence ${Date.now()}`;
+    await page.getByRole('link', { name: 'Automations', exact: true }).click();
+    await page.getByRole('button', { name: 'New sequence' }).click();
+
+    await page.getByLabel('Name').fill(name);
+    await page.getByLabel('Audience').selectOption({ index: 1 });
+    await page.locator('#step-body-0').fill('Day zero. Reply STOP to opt out.');
+    await page.locator('#step-body-1').fill('Day seven. Reply STOP to opt out.');
+    await page.getByRole('button', { name: 'Create as draft' }).click();
+
+    await page.getByRole('link', { name }).click();
+    await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+    const steps = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Steps' }),
+    });
+    await expect(steps.getByText('Day zero. Reply STOP to opt out.')).toBeVisible();
+    await expect(steps.getByText('Day seven. Reply STOP to opt out.')).toBeVisible();
+    // Offsets, not dates — that is what makes the sequence reusable.
+    await expect(steps.getByText(/^Day 0$/)).toBeVisible();
+    await expect(steps.getByText(/^Day 7$/)).toBeVisible();
+    await expect(page.getByText(/counted from each customer/)).toBeVisible();
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+    expect(failedRequests, `failed API calls: ${failedRequests.join(' | ')}`).toEqual([]);
   });
 });
 

@@ -491,3 +491,132 @@ export interface SystemStatus {
   scheduler: { running: boolean; jobs: { id: string; next_run_at: string | null }[] };
   data: Record<string, number>;
 }
+
+export type AutomationKind = 'SEQUENCE' | 'NUDGE' | 'COHORT_BULK';
+export type AutomationStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED';
+
+export interface AutomationStep {
+  id: number;
+  position: number;
+  name: string;
+  /** Days after the customer's own enrollment, not a calendar date. */
+  offset_days: number;
+  send_time_local: string | null;
+  message_template: string;
+  use_llm: boolean;
+}
+
+export interface Automation {
+  id: number;
+  name: string;
+  description: string;
+  kind: AutomationKind;
+  status: AutomationStatus;
+  channel: string;
+  objective: string;
+  segment_id: number | null;
+  manual_customer_ids: number[];
+  enrollment_mode: 'ROLLING' | 'FIXED_COHORT';
+  recurrence: 'ONCE' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
+  recurrence_day: number | null;
+  send_time_local: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  message_template: string;
+  template_overrides: Record<string, string>;
+  config: Record<string, unknown>;
+  campaign_id: number | null;
+  stop_on_order: boolean;
+  require_approval: boolean;
+  approved_at: string | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  total_sent: number;
+  total_skipped: number;
+  total_failed: number;
+  created_at: string;
+  steps: AutomationStep[];
+}
+
+export interface AutomationRecipientPreview {
+  customer_id: number;
+  customer_name: string;
+  /** Partially redacted, so a preview is safe to screenshot. */
+  to: string | null;
+  status: string;
+  scheduled_for: string;
+  scheduled_for_local: string;
+  local_date: string;
+  skip_reason: string | null;
+  skip_detail: string | null;
+  body: string;
+  context: Record<string, unknown>;
+}
+
+export interface AutomationRunReport {
+  automation_id: number;
+  automation_name: string;
+  kind: AutomationKind;
+  dry_run: boolean;
+  ran_at: string;
+  candidates: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  previewed: number;
+  skips_by_reason: Record<string, number>;
+  provider: string;
+  is_mock: boolean;
+  recipients: AutomationRecipientPreview[];
+  truncated: boolean;
+}
+
+export interface AutomationStats {
+  automation_id: number;
+  name: string;
+  kind: AutomationKind;
+  status: AutomationStatus;
+  sends_by_status: Record<string, number>;
+  skips_by_reason: Record<string, number>;
+  enrollments: Record<string, number>;
+  active_enrollments: number;
+  total_sent: number;
+  total_failed: number;
+  total_skipped: number;
+  last_run_at: string | null;
+  next_run_at: string | null;
+}
+
+export interface AutomationSend {
+  id: number;
+  automation_id: number;
+  customer_id: number;
+  step_id: number | null;
+  status: string;
+  skip_reason: string | null;
+  skip_detail: string | null;
+  scheduled_for: string;
+  local_date: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  body: string;
+  provider: string;
+  provider_message_id: string | null;
+  error_message: string | null;
+  is_dry_run: boolean;
+  priority: number;
+}
+
+export interface AutomationEnrollment {
+  id: number;
+  automation_id: number;
+  customer_id: number;
+  status: string;
+  enrolled_at: string;
+  current_step: number;
+  last_sent_at: string | null;
+  next_due_at: string | null;
+  stopped_at: string | null;
+  stop_reason: string | null;
+  pattern: Record<string, unknown>;
+}

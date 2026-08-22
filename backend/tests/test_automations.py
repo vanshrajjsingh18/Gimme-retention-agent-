@@ -909,6 +909,50 @@ class TestBehaviouralNudge:
         assert result["dropped"] == 1
         assert nudge._active(db, automation) == []
 
+    # -- timing the nudge into business hours ------------------------------
+    def test_a_late_evening_buyer_is_nudged_earlier_the_same_day(self):
+        """Not pushed to tomorrow morning — that is after they would have ordered."""
+        from app.automations.nudge import clamp_to_window
+
+        saturday_9pm = datetime(2026, 8, 22, 21, 0)
+        assert clamp_to_window(saturday_9pm) == datetime(2026, 8, 22, 18, 0)
+
+    def test_an_overnight_buyer_is_nudged_the_evening_before(self):
+        from app.automations.nudge import clamp_to_window
+
+        assert clamp_to_window(datetime(2026, 8, 22, 3, 0)) == datetime(2026, 8, 21, 18, 0)
+
+    def test_a_pattern_already_inside_business_hours_is_left_alone(self):
+        from app.automations.nudge import clamp_to_window
+
+        for hour in (9, 12, 17, 18):
+            moment = datetime(2026, 8, 22, hour, 0)
+            assert clamp_to_window(moment) == moment
+
+    def test_every_scheduled_nudge_lands_inside_the_send_window(
+        self, db, make_customer, make_automation
+    ):
+        """Whatever hour a customer buys at, the nudge itself is in business hours."""
+        ids = []
+        for hour in (2, 8, 11, 15, 18, 21, 23):
+            customer = make_customer()
+            for order in friday_orders(customer.id, 5, hour=hour):
+                db.add(order)
+            ids.append(customer.id)
+        db.commit()
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value, manual_customer_ids=ids
+        )
+
+        nudge.enroll(db, automation, now=MONDAY_10AM)
+
+        due = [e.next_due_at for e in nudge._active(db, automation) if e.next_due_at]
+        assert len(due) == len(ids)
+        for moment in due:
+            local = to_local(moment)
+            assert 9 <= local.hour < 19, f"{local} is outside business hours"
+            assert moment > MONDAY_10AM, f"{local} is already in the past"
+
     # -- offers ------------------------------------------------------------
     def test_no_discount_for_a_customer_who_buys_at_full_price(
         self, db, make_customer, bootstrapped

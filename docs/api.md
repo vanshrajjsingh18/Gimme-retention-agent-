@@ -253,6 +253,115 @@ Audience response:
 
 ---
 
+## Automations
+
+Recurring campaign types built on the existing TNZ integration. See
+[`automations.md`](automations.md) for the rules behind them.
+
+| Method | Path                                            | Purpose                                            |
+| ------ | ----------------------------------------------- | -------------------------------------------------- |
+| GET    | `/api/v1/automations`                           | List; filter by `kind` and `status`                |
+| POST   | `/api/v1/automations`                           | Create — always as a draft                         |
+| GET    | `/api/v1/automations/{id}`                      | One automation with its steps                      |
+| PATCH  | `/api/v1/automations/{id}`                      | Update                                             |
+| PUT    | `/api/v1/automations/{id}/steps`                | Replace a sequence's steps                         |
+| DELETE | `/api/v1/automations/{id}`                      | Delete (409 while active)                          |
+| POST   | `/api/v1/automations/{id}/approve`              | Record human approval                              |
+| POST   | `/api/v1/automations/{id}/activate`             | Switch on (409 without approval)                   |
+| POST   | `/api/v1/automations/{id}/pause`                | Pause                                              |
+| POST   | `/api/v1/automations/{id}/resume`               | Resume                                             |
+| POST   | `/api/v1/automations/{id}/preview`              | **Dry run** — nothing is sent                      |
+| POST   | `/api/v1/automations/{id}/run`                  | Run now, outside the schedule                      |
+| GET    | `/api/v1/automations/{id}/audience`             | Audience resolved live                             |
+| GET    | `/api/v1/automations/{id}/stats`                | Delivery and enrollment counts                     |
+| GET    | `/api/v1/automations/{id}/sends`                | The delivery ledger                                |
+| GET    | `/api/v1/automations/{id}/enrollments`          | Per-customer enrollment state                      |
+| POST   | `/api/v1/automations/{id}/enroll`               | Update enrollments without sending                 |
+| POST   | `/api/v1/automations/{id}/refresh-patterns`     | Recompute nudge order patterns                     |
+
+Create a weekly cohort send:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/automations \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+        "name": "Monday win-back",
+        "kind": "COHORT_BULK",
+        "channel": "SMS",
+        "segment_id": 9,
+        "recurrence": "WEEKLY",
+        "recurrence_day": 0,
+        "send_time_local": "10:00"
+      }'
+```
+
+Create a three-step sequence. Offsets are days from each customer's own
+enrollment, not calendar dates:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/automations \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+        "name": "Second-order series",
+        "kind": "SEQUENCE",
+        "segment_id": 2,
+        "enrollment_mode": "ROLLING",
+        "stop_on_order": true,
+        "steps": [
+          {"name": "Day 0",  "offset_days": 0,
+           "message_template": "Hi {first_name}, thanks for your first order. Reply STOP to opt out."},
+          {"name": "Day 7",  "offset_days": 7,
+           "message_template": "Hi {first_name}, ready for round two? Reply STOP to opt out."},
+          {"name": "Day 14", "offset_days": 14,
+           "message_template": "Hi {first_name}, we are here whenever you need us. Reply STOP to opt out."}
+        ]
+      }'
+```
+
+Dry run — works on a draft, sends nothing:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/automations/3/preview \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "dry_run": true,
+  "candidates": 108,
+  "previewed": 35,
+  "skipped": 73,
+  "sent": 0,
+  "skips_by_reason": { "NO_CONSENT": 65, "AGE_NOT_VERIFIED": 8 },
+  "is_mock": true,
+  "recipients": [
+    {
+      "customer_id": 412,
+      "customer_name": "Dylan Ngata",
+      "to": "+642***021",
+      "status": "PREVIEW",
+      "scheduled_for_local": "2026-08-24T10:00:00+12:00",
+      "local_date": "2026-08-24",
+      "skip_reason": null,
+      "body": "Hi Dylan, it's been a while. We're still delivering to Christchurch…"
+    },
+    {
+      "customer_id": 418,
+      "customer_name": "Mere Tahana",
+      "status": "SKIPPED",
+      "skip_reason": "NO_CONSENT",
+      "skip_detail": "Customer has not given marketing consent."
+    }
+  ]
+}
+```
+
+A live run needs `status = ACTIVE` and, when `require_approval` is set,
+a recorded approval — otherwise it returns `409`. Viewers get `403` on
+approve, run and delete.
+
+---
+
 ## Analytics
 
 | Method | Path                              | Returns                                       |

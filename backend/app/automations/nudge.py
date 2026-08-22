@@ -40,6 +40,7 @@ from app.analytics.order_patterns import (
 from app.automations.cohort import resolve_audience
 from app.automations.runtime import Candidate, RunReport, execute_candidates
 from app.automations.templates import build_context, get_brand, render
+from app.core.config import settings
 from app.core.enums import (
     AutomationKind,
     EnrollmentStatus,
@@ -216,7 +217,43 @@ def _due_from_pattern(
     """Next due time in naive UTC, from a pattern expressed in local time."""
     local_after = to_local(after).replace(tzinfo=None)
     local_due = next_nudge_time(pattern, after=local_after, lead_days=lead_days)
-    return to_utc_naive(local_due) if local_due else None
+    if local_due is None:
+        return None
+    clamped = clamp_to_window(local_due)
+    # Clamping an overnight pattern moves it to the evening before, which can
+    # land in the past. Roll to the next weekly occurrence rather than firing
+    # a nudge that was already due.
+    while clamped <= local_after:
+        clamped = clamp_to_window(local_due + timedelta(days=7))
+        local_due += timedelta(days=7)
+    return to_utc_naive(clamped)
+
+
+def clamp_to_window(local_due: datetime) -> datetime:
+    """Pull a nudge into business hours **on the customer's own day**.
+
+    A large share of drinks orders land after 7pm, and the generic
+    quiet-hours deferral would push those nudges to 9am the following
+    morning — past the moment the customer would have ordered, which defeats
+    the point of timing the message to their habit. So a late-evening pattern
+    is nudged *earlier the same day* instead, arriving while they are still
+    deciding. An overnight pattern is the mirror image: it belongs to the
+    evening before, not to a 9am the customer is asleep for.
+    """
+    start, end = settings.send_window
+    last_slot = (datetime.combine(local_due.date(), end) - timedelta(hours=1)).time()
+
+    if local_due.time() >= end:
+        return local_due.replace(
+            hour=last_slot.hour, minute=last_slot.minute, second=0, microsecond=0
+        )
+    if local_due.time() < start:
+        # Before opening: the previous evening is nearer their habit than
+        # waiting all morning, but never earlier than the window allows.
+        return (local_due - timedelta(days=1)).replace(
+            hour=last_slot.hour, minute=last_slot.minute, second=0, microsecond=0
+        )
+    return local_due
 
 
 # --------------------------------------------------------------------------

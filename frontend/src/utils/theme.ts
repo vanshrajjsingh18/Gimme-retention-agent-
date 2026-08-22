@@ -69,6 +69,44 @@ export const MESSAGE_STATUS_BADGE: Record<string, string> = {
   FAILED: 'bg-red-50 text-red-700 ring-red-200',
 };
 
+export const AUTOMATION_STATUS_BADGE: Record<string, string> = {
+  DRAFT: 'bg-slate-100 text-slate-700 ring-slate-200',
+  ACTIVE: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  PAUSED: 'bg-amber-50 text-amber-800 ring-amber-200',
+  COMPLETED: 'bg-slate-100 text-slate-500 ring-slate-200',
+};
+
+export const SEND_STATUS_BADGE: Record<string, string> = {
+  SCHEDULED: 'bg-slate-100 text-slate-700 ring-slate-200',
+  QUEUED: 'bg-sky-50 text-sky-700 ring-sky-200',
+  SENT: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  DELIVERED: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  FAILED: 'bg-red-50 text-red-700 ring-red-200',
+  SKIPPED: 'bg-amber-50 text-amber-800 ring-amber-200',
+  PREVIEW: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+};
+
+/** Plain-English explanations for the reasons a send was withheld. */
+export const SKIP_REASON_LABEL: Record<string, string> = {
+  NO_CONSENT: 'No marketing consent',
+  SUPPRESSED: 'Suppressed (opted out)',
+  AGE_NOT_VERIFIED: 'Age not verified',
+  MISSING_CONTACT: 'No contact details',
+  FREQUENCY_CAP: 'Frequency cap reached',
+  QUIET_HOURS: 'Outside send window',
+  DEDUPED: 'Already messaged today',
+  ALREADY_ORDERED: 'Already ordered',
+  PENDING_ORDER: 'Order in flight',
+  LEFT_SEGMENT: 'No longer matches segment',
+  VALIDATION_FAILED: 'Failed content checks',
+};
+
+export const AUTOMATION_KIND_LABEL: Record<string, string> = {
+  COHORT_BULK: 'Cohort bulk send',
+  SEQUENCE: 'Recurring sequence',
+  NUDGE: 'Behavioural nudge',
+};
+
 /** Categorical palette for charts with an arbitrary number of series. */
 export const CHART_COLORS = [
   '#1b6ef5',
