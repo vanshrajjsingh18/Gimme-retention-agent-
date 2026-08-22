@@ -26,11 +26,18 @@ NOW = datetime.utcnow()
 
 
 def iso(days_ago: float, hour: int = 18) -> str:
-    return (
-        (NOW - timedelta(days=days_ago))
-        .replace(hour=hour, minute=0, second=0, microsecond=0)
-        .isoformat()
-    )
+    """A timestamp ``days_ago`` whole days in the past, at a plausible hour.
+
+    Pinning the hour without adjusting the date makes the elapsed-day count
+    depend on the wall clock: an order stamped 18:00 is only 159 full days old
+    if the suite runs at 08:00. Stepping back one further day when the
+    requested hour has not yet passed today keeps ``days_since_last_order``
+    exact whenever the tests happen to run.
+    """
+    moment = NOW - timedelta(days=days_ago)
+    if hour > NOW.hour:
+        moment -= timedelta(days=1)
+    return moment.replace(hour=hour, minute=0, second=0, microsecond=0).isoformat()
 
 
 # The scenario builds one lapsed high-value customer plus supporting cast, so

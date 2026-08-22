@@ -20,10 +20,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.core.enums import (
+    AutomationStatus,
     CampaignObjective,
     CampaignStatus,
     Channel,
     ChurnRiskBand,
+    EnrollmentMode,
+    EnrollmentStatus,
     IngestionStatus,
     JourneyExecutionStatus,
     JourneyStatus,
@@ -32,6 +35,8 @@ from app.core.enums import (
     NextBestAction,
     OrderStatus,
     RecipientStatus,
+    RecurrenceKind,
+    SendStatus,
     SegmentStatus,
     SegmentType,
     UserRole,
@@ -415,6 +420,10 @@ class BrandSettings(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     company_name: Mapped[str] = mapped_column(String(160), nullable=False, default="GIMME")
     company_description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: Person messages are signed off by. Deliberately empty until a real name
+    #: is configured — templates omit the sign-off rather than invent one.
+    signatory_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    signatory_title: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     brand_voice: Mapped[str] = mapped_column(Text, nullable=False, default="")
     tone: Mapped[str] = mapped_column(String(120), nullable=False, default="Friendly and direct")
     communication_principles: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
@@ -830,6 +839,209 @@ class SystemLog(Base):
     source: Mapped[str] = mapped_column(String(80), nullable=False, default="app")
     message: Mapped[str] = mapped_column(Text, nullable=False)
     context: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, index=True
+    )
+
+
+# --------------------------------------------------------------------------
+# Campaign automations
+#
+# One table backs all three campaign types. They share audience selection,
+# consent gating, dedup and delivery tracking; they differ only in how a send
+# time is derived, so a discriminator plus a config blob is cheaper and
+# clearer than three near-identical tables.
+# --------------------------------------------------------------------------
+class Automation(Base, TimestampMixin):
+    __tablename__ = "automations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=AutomationStatus.DRAFT.value, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, default=Channel.SMS.value)
+    objective: Mapped[str] = mapped_column(String(40), nullable=False, default="RETENTION")
+
+    # Audience: a live segment re-evaluated at send time, or a manual list.
+    segment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("segments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    manual_customer_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    enrollment_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=EnrollmentMode.ROLLING.value
+    )
+
+    # Recurrence (COHORT_BULK). SEQUENCE uses steps; NUDGE uses order patterns.
+    recurrence: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=RecurrenceKind.ONCE.value
+    )
+    #: 0=Monday..6=Sunday for WEEKLY; day-of-month for MONTHLY.
+    recurrence_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Local wall-clock send time, "HH:MM".
+    send_time_local: Mapped[str] = mapped_column(String(5), nullable=False, default="10:00")
+
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+    #: Per-kind settings (nudge window sizes, offer rules, stop conditions).
+    config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    #: Single-message body for COHORT_BULK and NUDGE. SEQUENCE uses steps.
+    message_template: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: Optional per-segment copy overrides, keyed by segment name.
+    template_overrides: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    #: Backing campaign, so sends flow through existing attribution/analytics.
+    campaign_id: Mapped[int | None] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    stop_on_order: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    require_approval: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    approved_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    total_sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    steps: Mapped[list["AutomationStep"]] = relationship(
+        back_populates="automation",
+        cascade="all, delete-orphan",
+        order_by="AutomationStep.position",
+    )
+    enrollments: Mapped[list["AutomationEnrollment"]] = relationship(
+        back_populates="automation", cascade="all, delete-orphan"
+    )
+    segment: Mapped["Segment | None"] = relationship()
+
+
+class AutomationStep(Base, TimestampMixin):
+    """One message in a SEQUENCE, timed by offset from enrollment."""
+
+    __tablename__ = "automation_steps"
+    __table_args__ = (
+        UniqueConstraint("automation_id", "position", name="uq_automation_step_position"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    name: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    #: Days after the customer's own enrollment, not a calendar date, so a
+    #: sequence can be reused and supports rolling enrollment.
+    offset_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Optional local wall-clock time; falls back to the automation default.
+    send_time_local: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    message_template: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: Generate per-customer copy with the LLM instead of using the template.
+    use_llm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    automation: Mapped["Automation"] = relationship(back_populates="steps")
+
+
+class AutomationEnrollment(Base, TimestampMixin):
+    """A customer's membership of an automation, carrying their own clock."""
+
+    __tablename__ = "automation_enrollments"
+    __table_args__ = (
+        UniqueConstraint("automation_id", "customer_id", name="uq_automation_enrollment"),
+        Index("ix_enrollment_status", "automation_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=EnrollmentStatus.ACTIVE.value, index=True
+    )
+    #: The customer's clock start. Step offsets are measured from here.
+    enrolled_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, index=True
+    )
+    current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: NUDGE only: when this customer's next nudge is due.
+    next_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    stop_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: Snapshot of the customer's order pattern at enrollment (NUDGE).
+    pattern: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    automation: Mapped["Automation"] = relationship(back_populates="enrollments")
+
+
+class AutomationSend(Base):
+    """The delivery ledger: one row per customer per attempted message.
+
+    Also the dedup source of truth — "has this customer already been messaged
+    today" is a query against this table.
+    """
+
+    __tablename__ = "automation_sends"
+    __table_args__ = (
+        Index("ix_send_customer_day", "customer_id", "local_date"),
+        Index("ix_send_automation_status", "automation_id", "status"),
+        UniqueConstraint("idempotency_key", name="uq_automation_send_idempotency"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    step_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_steps.id", ondelete="SET NULL"), nullable=True
+    )
+    enrollment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_enrollments.id", ondelete="CASCADE"), nullable=True
+    )
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
+    campaign_id: Mapped[int | None] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, default=Channel.SMS.value)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=SendStatus.SCHEDULED.value, index=True
+    )
+    skip_reason: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    skip_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    #: The customer's LOCAL calendar date for scheduled_for. Per-day capping
+    #: has to mean the customer's day, not a UTC day straddling their evening.
+    local_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="mock")
+    provider_message_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, index=True
     )

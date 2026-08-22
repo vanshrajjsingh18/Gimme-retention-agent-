@@ -144,6 +144,11 @@ class TnzSmsAdapter(MessagingAdapter):
             name = str(raw.get("Status") or raw.get("status") or raw.get("event") or "").lower()
             event_type = mapping.get(name)
             if event_type is None:
+                # An inbound reply carries no status, just the text the
+                # customer sent. A STOP arrives this way, so it must be read
+                # here or opt-outs would be silently dropped.
+                event_type = _reply_event(raw)
+            if event_type is None:
                 continue
             results.append(
                 NormalizedEvent(
@@ -159,6 +164,35 @@ class TnzSmsAdapter(MessagingAdapter):
                 )
             )
         return results
+
+
+#: Fields TNZ may carry an inbound reply body in.
+REPLY_FIELDS = ("Reply", "reply", "MessageText", "message_text", "Body", "body", "Text", "text")
+
+
+def reply_body(raw: dict) -> str | None:
+    """The customer's reply text, if this payload is an inbound message."""
+    for field in REPLY_FIELDS:
+        value = raw.get(field)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _reply_event(raw: dict) -> EventType | None:
+    """Classify an inbound reply as an opt-out, an opt-in, or neither."""
+    body = reply_body(raw)
+    if body is None:
+        return None
+    # Imported here: the opt-out service imports model code, and adapters are
+    # deliberately model-free.
+    from app.services.optout import is_opt_in, is_opt_out
+
+    if is_opt_out(body):
+        return EventType.CUSTOMER_OPTED_OUT
+    if is_opt_in(body):
+        return EventType.CUSTOMER_REACTIVATED
+    return None
 
 
 def _parse_ts(value) -> datetime | None:

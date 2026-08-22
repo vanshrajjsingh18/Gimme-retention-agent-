@@ -116,7 +116,8 @@ class BaseMockAdapter(MessagingAdapter):
             success=True,
             provider_message_id=f"mock-{self.provider}-{uuid.uuid4().hex[:16]}",
             is_simulated=True,
-            raw={"simulated": True, "to": _mask(to), "subject": subject[:80]},
+            # SMS and WhatsApp have no subject, so it is legitimately None.
+            raw={"simulated": True, "to": _mask(to), "subject": (subject or "")[:80]},
         )
 
     def fetch_delivery_status(self, provider_message_id: str) -> dict:

@@ -145,37 +145,73 @@ def test_under_frequency_cap_passes():
     assert status == RecipientStatus.ELIGIBLE
 
 
+def local_config(**overrides) -> ComplianceConfig:
+    """Config that reads send times as wall-clock, for testing the rule itself.
+
+    The timezone conversion is exercised separately below; these cases are
+    about the window comparison, so they skip it.
+    """
+    overrides.setdefault("use_business_timezone", False)
+    return config(**overrides)
+
+
 def test_quiet_hours_block_sms_but_not_email():
     late = datetime(2025, 6, 1, 23, 30)
     assert (
-        check_recipient(recipient(), Channel.SMS, config(), send_time=late)[0]
+        check_recipient(recipient(), Channel.SMS, local_config(), send_time=late)[0]
         == RecipientStatus.EXCLUDED_QUIET_HOURS
     )
     assert (
-        check_recipient(recipient(), Channel.EMAIL, config(), send_time=late)[0]
+        check_recipient(recipient(), Channel.EMAIL, local_config(), send_time=late)[0]
         == RecipientStatus.ELIGIBLE
     )
 
 
 def test_quiet_hours_wrap_midnight():
-    cfg = config()
+    cfg = local_config()
     assert in_quiet_hours(datetime(2025, 6, 1, 22, 0), cfg)
     assert in_quiet_hours(datetime(2025, 6, 1, 3, 0), cfg)
     assert not in_quiet_hours(datetime(2025, 6, 1, 12, 0), cfg)
-    assert not in_quiet_hours(datetime(2025, 6, 1, 20, 59), cfg)
+    assert not in_quiet_hours(datetime(2025, 6, 1, 18, 59), cfg)
+
+
+def test_quiet_hours_start_is_closed_at_seven_pm():
+    """The allowed window is 09:00-19:00 local, so 19:00 itself is blocked."""
+    cfg = local_config()
+    assert in_quiet_hours(datetime(2025, 6, 1, 19, 0), cfg)
+    assert not in_quiet_hours(datetime(2025, 6, 1, 9, 0), cfg)
 
 
 def test_non_wrapping_quiet_hours_supported():
-    cfg = config(quiet_hours_start=time(1, 0), quiet_hours_end=time(6, 0))
+    cfg = local_config(quiet_hours_start=time(1, 0), quiet_hours_end=time(6, 0))
     assert in_quiet_hours(datetime(2025, 6, 1, 3, 0), cfg)
     assert not in_quiet_hours(datetime(2025, 6, 1, 23, 0), cfg)
 
 
 def test_daytime_sms_allowed():
     status, _ = check_recipient(
-        recipient(), Channel.SMS, config(), send_time=datetime(2025, 6, 1, 14, 0)
+        recipient(), Channel.SMS, local_config(), send_time=datetime(2025, 6, 1, 14, 0)
     )
     assert status == RecipientStatus.ELIGIBLE
+
+
+def test_quiet_hours_judged_in_business_timezone():
+    """Stored times are naive UTC; the customer's clock is what matters.
+
+    A job running at 02:00 UTC in June is reaching an Auckland customer at
+    14:00 their time — fine. The same job at 09:00 UTC reaches them at
+    21:00, which is not.
+    """
+    cfg = config()  # use_business_timezone left on
+    assert not in_quiet_hours(datetime(2025, 6, 1, 2, 0), cfg)
+    assert in_quiet_hours(datetime(2025, 6, 1, 9, 0), cfg)
+
+    blocked, reason = check_recipient(
+        recipient(), Channel.SMS, cfg, send_time=datetime(2025, 6, 1, 9, 0)
+    )
+    assert blocked == RecipientStatus.EXCLUDED_QUIET_HOURS
+    # The reason quotes the customer's local time, not the UTC one.
+    assert "21:00 local" in reason
 
 
 def test_age_gate_takes_precedence_over_consent():

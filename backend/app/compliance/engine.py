@@ -113,7 +113,10 @@ STOCK_CLAIM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-DEFAULT_QUIET_HOURS_START = time(21, 0)
+# Quiet hours are the complement of the allowed business window: sends are
+# blocked from 19:00 until 09:00 the following morning, in BUSINESS LOCAL
+# TIME. Evaluated via app.core.timezones, never against naive UTC.
+DEFAULT_QUIET_HOURS_START = time(19, 0)
 DEFAULT_QUIET_HOURS_END = time(9, 0)
 
 
@@ -169,6 +172,8 @@ class ComplianceConfig:
     quiet_hours_start: time = DEFAULT_QUIET_HOURS_START
     quiet_hours_end: time = DEFAULT_QUIET_HOURS_END
     enforce_quiet_hours: bool = True
+    #: Resolve quiet hours in business local time rather than raw UTC.
+    use_business_timezone: bool = True
     require_responsible_drinking_statement: bool = True
     require_age_statement_on_email: bool = True
     allowed_coupon_codes: list[str] = field(default_factory=list)
@@ -290,9 +295,12 @@ def check_recipient(
         and channel in (Channel.SMS, Channel.WHATSAPP)
         and in_quiet_hours(send_time, config)
     ):
+        from app.core.timezones import to_local
+
+        local = to_local(send_time) if config.use_business_timezone else send_time
         return (
             RecipientStatus.EXCLUDED_QUIET_HOURS,
-            f"Send time {send_time:%H:%M} falls inside quiet hours "
+            f"Send time {local:%H:%M} local falls inside quiet hours "
             f"({config.quiet_hours_start:%H:%M}-{config.quiet_hours_end:%H:%M}).",
         )
 
@@ -300,8 +308,15 @@ def check_recipient(
 
 
 def in_quiet_hours(moment: datetime, config: ComplianceConfig) -> bool:
-    """Quiet hours normally wrap midnight (e.g. 21:00 -> 09:00)."""
-    t = moment.time()
+    """True when the customer's LOCAL time falls inside quiet hours.
+
+    ``moment`` is the naive-UTC instant of the send. It is converted to
+    business local time first: checking a New Zealand quiet-hours window
+    against UTC would be wrong by twelve or thirteen hours.
+    """
+    from app.core.timezones import to_local
+
+    t = to_local(moment).time() if config.use_business_timezone else moment.time()
     start, end = config.quiet_hours_start, config.quiet_hours_end
     if start <= end:
         return start <= t < end

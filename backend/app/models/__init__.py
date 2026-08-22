@@ -3,6 +3,10 @@ from app.models.base import TimestampMixin  # noqa: F401
 from app.models.entities import (  # noqa: F401
     ApiKey,
     ApiRequestLog,
+    Automation,
+    AutomationEnrollment,
+    AutomationSend,
+    AutomationStep,
     AttributionRecord,
     AuditLog,
     BrandSettings,
@@ -38,6 +42,10 @@ from app.models.entities import (  # noqa: F401
 
 __all__ = [
     "ApiKey",
+    "Automation",
+    "AutomationEnrollment",
+    "AutomationSend",
+    "AutomationStep",
     "ApiRequestLog",
     "AttributionRecord",
     "AuditLog",

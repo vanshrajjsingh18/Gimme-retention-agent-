@@ -206,3 +206,84 @@ class UserRole(StrEnum):
     ADMIN = "ADMIN"
     MARKETER = "MARKETER"
     VIEWER = "VIEWER"
+
+
+# --------------------------------------------------------------------------
+# Campaign automations (recurring sequences, behavioural nudges, cohort bulk)
+# --------------------------------------------------------------------------
+class AutomationKind(StrEnum):
+    """The three campaign types, which share plumbing but differ in timing."""
+
+    #: Feature 1 — an ordered series of steps on a per-customer clock.
+    SEQUENCE = "SEQUENCE"
+    #: Feature 2 — a standing per-customer nudge on their own order pattern.
+    NUDGE = "NUDGE"
+    #: Feature 3 — a one-off or recurring send to whoever matches a segment.
+    COHORT_BULK = "COHORT_BULK"
+
+
+class AutomationStatus(StrEnum):
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"
+
+
+class EnrollmentMode(StrEnum):
+    #: New matching customers join after the automation has started.
+    ROLLING = "ROLLING"
+    #: The audience is locked at launch.
+    FIXED_COHORT = "FIXED_COHORT"
+
+
+class EnrollmentStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    #: Reached the end of the step list.
+    COMPLETED = "COMPLETED"
+    #: Left early — opted out, ordered, or fell out of the segment.
+    STOPPED = "STOPPED"
+
+
+class SendStatus(StrEnum):
+    """Per-customer, per-message delivery state."""
+
+    SCHEDULED = "SCHEDULED"
+    QUEUED = "QUEUED"
+    SENT = "SENT"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
+    #: Deliberately not sent — consent, quiet hours, dedup, cap.
+    SKIPPED = "SKIPPED"
+    #: Produced by a dry run; never dispatched.
+    PREVIEW = "PREVIEW"
+
+
+class SkipReason(StrEnum):
+    NO_CONSENT = "NO_CONSENT"
+    SUPPRESSED = "SUPPRESSED"
+    AGE_NOT_VERIFIED = "AGE_NOT_VERIFIED"
+    MISSING_CONTACT = "MISSING_CONTACT"
+    FREQUENCY_CAP = "FREQUENCY_CAP"
+    QUIET_HOURS = "QUIET_HOURS"
+    #: Lost a same-day contest to a higher-priority automation.
+    DEDUPED = "DEDUPED"
+    ALREADY_ORDERED = "ALREADY_ORDERED"
+    PENDING_ORDER = "PENDING_ORDER"
+    LEFT_SEGMENT = "LEFT_SEGMENT"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+
+
+class RecurrenceKind(StrEnum):
+    ONCE = "ONCE"
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+
+
+#: Dedup priority when two automations would message the same customer on the
+#: same local day. Higher wins; the loser is skipped and logged.
+AUTOMATION_PRIORITY: dict[str, int] = {
+    AutomationKind.NUDGE.value: 30,
+    AutomationKind.SEQUENCE.value: 20,
+    AutomationKind.COHORT_BULK.value: 10,
+}

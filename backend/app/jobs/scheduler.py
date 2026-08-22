@@ -92,6 +92,67 @@ def dispatch_scheduled_campaigns_job() -> None:
             _log(db, "ERROR", "scheduler", f"Campaign dispatch failed: {exc}")
 
 
+def run_automations_job() -> None:
+    """Run every automation whose next run is due.
+
+    Deliberately the same simple interval poll the campaign dispatcher uses,
+    rather than a queue: the per-customer timing lives in ``next_run_at`` and
+    ``next_due_at`` columns, so a five-minute tick is enough resolution for a
+    business that only sends between 9am and 7pm, and it needs no broker to
+    operate.
+    """
+    from app.automations.service import run_due
+
+    try:
+        with session_scope() as db:
+            reports = run_due(db)
+            for report in reports:
+                if "error" in report:
+                    _log(
+                        db,
+                        "ERROR",
+                        "automations",
+                        f"Automation {report['automation_id']} failed to run.",
+                        report,
+                    )
+                elif report["sent"] or report["skipped"] or report["failed"]:
+                    _log(
+                        db,
+                        "INFO",
+                        "automations",
+                        f"Ran automation '{report['automation_name']}': "
+                        f"{report['sent']} sent, {report['skipped']} skipped, "
+                        f"{report['failed']} failed.",
+                        report,
+                    )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Automation run failed")
+        with session_scope() as db:
+            _log(db, "ERROR", "automations", f"Automation run failed: {exc}")
+
+
+def refresh_order_patterns_job() -> None:
+    """Recompute behavioural-nudge order patterns. Habits drift."""
+    from app.automations.service import refresh_nudge_patterns
+
+    try:
+        with session_scope() as db:
+            totals = refresh_nudge_patterns(db)
+            if totals["refreshed"] or totals["dropped"]:
+                _log(
+                    db,
+                    "INFO",
+                    "automations",
+                    f"Refreshed order patterns: {totals['refreshed']} updated, "
+                    f"{totals['dropped']} customers dropped for lack of a pattern.",
+                    totals,
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Order pattern refresh failed")
+        with session_scope() as db:
+            _log(db, "ERROR", "automations", f"Order pattern refresh failed: {exc}")
+
+
 def ingest_inbox_job() -> None:
     """Import any CSV dropped into the inbox folder.
 
@@ -187,6 +248,22 @@ def start_scheduler() -> BackgroundScheduler | None:
         ingest_inbox_job,
         IntervalTrigger(minutes=2),
         id="ingest_inbox",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        run_automations_job,
+        IntervalTrigger(minutes=settings.AUTOMATION_TICK_MINUTES),
+        id="run_automations",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        refresh_order_patterns_job,
+        # Daily, so a customer whose pattern went stale overnight is picked up
+        # promptly; the recompute itself only touches patterns past their age.
+        IntervalTrigger(hours=24),
+        id="refresh_order_patterns",
         replace_existing=True,
         max_instances=1,
     )

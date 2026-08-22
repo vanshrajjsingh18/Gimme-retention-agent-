@@ -41,6 +41,7 @@ from app.models.entities import (
     SuppressionList,
 )
 from app.services.brand import build_compliance_config
+from app.services.optout import apply_global_opt_out
 from app.services.events import make_idempotency_key, record_communication_event
 from app.services.intelligence import load_engagement
 from app.services.messaging import generate_message
@@ -631,32 +632,15 @@ def _simulate_recipient_engagement(
 
 
 def _apply_opt_out(db: Session, customer: Customer, channel: Channel) -> None:
-    """Honour an opt-out immediately: revoke consent and suppress the channel."""
-    if channel == Channel.EMAIL:
-        customer.email_consent = False
-    elif channel == Channel.SMS:
-        customer.sms_consent = False
-    elif channel == Channel.WHATSAPP:
-        customer.whatsapp_consent = False
+    """Honour an opt-out immediately, across every channel.
 
-    existing = db.execute(
-        select(SuppressionList).where(
-            SuppressionList.customer_id == customer.id,
-            SuppressionList.channel == channel.value,
-        )
-    ).scalar_one_or_none()
-    if existing is None:
-        db.add(
-            SuppressionList(
-                customer_id=customer.id,
-                channel=channel.value,
-                reason="Customer opted out via message footer.",
-                created_by="system",
-                active=True,
-            )
-        )
-    else:
-        existing.active = True
+    A customer who replies STOP to one SMS has withdrawn permission to
+    contact them, not expressed a preference about one campaign — so this
+    suppresses everything, including any automation they are enrolled in.
+    """
+    apply_global_opt_out(
+        db, customer, source="message_footer", channel=channel, commit=False
+    )
 
 
 def pause_campaign(db: Session, campaign: Campaign) -> Campaign:

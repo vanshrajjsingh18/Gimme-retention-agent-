@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_admin, require_write
 from app.core.database import get_db
-from app.core.enums import Channel
+from app.automations.delivery import apply_delivery_event, find_customer_by_contact
+from app.core.enums import Channel, EventType
 from app.integrations.base import MessagingAdapter
 from app.integrations.mock_adapters import BaseMockAdapter
 from app.integrations.registry import (
@@ -21,13 +22,21 @@ from app.integrations.registry import (
 from app.integrations.whatsapp import PROVIDER_PROFILES
 from app.llm.factory import get_llm_provider
 from app.models.base import utcnow
-from app.models.entities import AuditLog, CommunicationEvent, Integration, Message, User
+from app.models.entities import (
+    AuditLog,
+    CommunicationEvent,
+    Customer,
+    Integration,
+    Message,
+    User,
+)
 from app.schemas.models import (
     IntegrationOut,
     IntegrationTestMessage,
     IntegrationUpdate,
 )
 from app.services.events import make_idempotency_key, record_communication_event
+from app.services.optout import apply_global_opt_out, apply_opt_in
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +278,7 @@ async def receive_webhook(
 
     recorded = 0
     ignored = 0
+    opt_outs = 0
     for event in events:
         message = None
         if event.provider_message_id:
@@ -277,9 +287,51 @@ async def receive_webhook(
                     Message.provider_message_id == event.provider_message_id
                 )
             ).scalar_one_or_none()
+
+        if event.event_type in (
+            EventType.CUSTOMER_OPTED_OUT,
+            EventType.CUSTOMER_REACTIVATED,
+        ):
+            # An opt-out is honoured even when the message it replies to
+            # cannot be found: withdrawal of permission must never depend on
+            # a provider echoing our own message id back correctly.
+            customer = (
+                db.get(Customer, message.customer_id)
+                if message and message.customer_id
+                else find_customer_by_contact(db, event.recipient, channel=channel)
+            )
+            if customer is not None:
+                if event.event_type == EventType.CUSTOMER_OPTED_OUT:
+                    apply_global_opt_out(
+                        db,
+                        customer,
+                        source=f"{provider}_webhook",
+                        channel=channel,
+                        occurred_at=event.occurred_at or utcnow(),
+                        commit=False,
+                    )
+                else:
+                    apply_opt_in(
+                        db,
+                        customer,
+                        source=f"{provider}_webhook",
+                        occurred_at=event.occurred_at or utcnow(),
+                        commit=False,
+                    )
+                opt_outs += 1
+
         if message is None:
             ignored += 1
             continue
+
+        apply_delivery_event(
+            db,
+            event_type=event.event_type,
+            provider_message_id=event.provider_message_id,
+            message_id=message.id,
+            occurred_at=event.occurred_at or utcnow(),
+            error=(event.payload or {}).get("error"),
+        )
 
         created = record_communication_event(
             db,
@@ -306,4 +358,5 @@ async def receive_webhook(
         "events_received": len(events),
         "events_recorded": recorded,
         "events_ignored_unknown_message": ignored,
+        "consent_changes_applied": opt_outs,
     }
