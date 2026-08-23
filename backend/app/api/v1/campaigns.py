@@ -23,6 +23,7 @@ from app.core.database import get_db
 from app.core.enums import CampaignObjective, CampaignStatus, Channel
 from app.models.entities import (
     AuditLog,
+    Automation,
     Campaign,
     CampaignRecipient,
     Customer,
@@ -82,13 +83,33 @@ def campaign_options(_: User = Depends(get_current_user)) -> dict:
 @router.get("/campaigns", response_model=list[CampaignOut], tags=["campaigns"])
 def list_campaigns(
     status: str | None = None,
+    include_automations: bool = False,
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[CampaignOut]:
+    """Campaigns a person manages.
+
+    Every automation carries a backing campaign so its sends flow through the
+    existing attribution and analytics. Those are plumbing, not campaigns
+    somebody created — listing them here would show an operator a pile of
+    drafts they never made and cannot meaningfully act on, so they are hidden
+    unless explicitly asked for.
+
+    Derived from `automations.campaign_id` rather than a flag on the campaign,
+    so the two can never drift apart.
+    """
     stmt = select(Campaign)
     if status:
         stmt = stmt.where(Campaign.status == status.upper())
+    if not include_automations:
+        stmt = stmt.where(
+            Campaign.id.not_in(
+                select(Automation.campaign_id).where(Automation.campaign_id.is_not(None))
+            )
+        )
+    # Filter before paging: a filtered page must not come back short while
+    # matches exist further down the table.
     stmt = stmt.order_by(Campaign.created_at.desc()).limit(limit)
     return [_out(db, c) for c in db.execute(stmt).scalars().all()]
 

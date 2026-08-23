@@ -1248,6 +1248,40 @@ class TestReportingIntegration:
 
         assert attribute_order(db, order) is None
 
+    def test_backing_campaigns_are_hidden_from_the_campaigns_list(
+        self, client, auth_headers, db, make_customer, make_automation
+    ):
+        """They are plumbing, not campaigns anybody created."""
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+
+        listed = client.get("/api/v1/campaigns?limit=500", headers=auth_headers).json()
+        assert all(row["id"] != automation.campaign_id for row in listed)
+
+        with_automations = client.get(
+            "/api/v1/campaigns?limit=500&include_automations=true", headers=auth_headers
+        ).json()
+        assert any(row["id"] == automation.campaign_id for row in with_automations)
+
+    def test_a_campaign_somebody_created_is_still_listed(
+        self, client, auth_headers, db, make_automation, make_customer
+    ):
+        """Hiding backing campaigns must not hide real ones."""
+        make_automation(manual_customer_ids=[make_customer().id])
+        created = client.post(
+            "/api/v1/campaigns",
+            json={
+                "name": f"Hand-made campaign {next(_SEQ)}",
+                "objective": "RETENTION",
+                "channel": "EMAIL",
+            },
+            headers=auth_headers,
+        )
+        assert created.status_code == 201, created.text
+
+        listed = client.get("/api/v1/campaigns?limit=500", headers=auth_headers).json()
+        assert any(row["id"] == created.json()["id"] for row in listed)
+
     def test_a_dry_run_earns_no_attribution(self, db, make_customer, make_automation):
         from app.services.attribution import attribute_order
 
@@ -1488,3 +1522,139 @@ class TestApprovalFollowsTheMessage:
 
         with pytest.raises(AutomationError, match="enrolled"):
             replace_steps(db, automation, [{"offset_days": 0, "message_template": "x"}])
+
+# ==========================================================================
+# Frequency caps across the whole system
+# ==========================================================================
+class TestFrequencyCaps:
+    """Dedup stops two messages on one day; the caps stop too many over weeks.
+
+    The two rules are independent and both matter: without the cap, a customer
+    enrolled in several automations could legitimately receive one message
+    every single day and never trip the per-day rule once.
+    """
+
+    def test_the_seven_day_cap_binds_across_different_automations(
+        self, db, make_customer, make_automation
+    ):
+        customer = make_customer()
+        days = [MONDAY_10AM + timedelta(days=offset) for offset in range(4)]
+
+        delivered = 0
+        capped = 0
+        for day in days:
+            automation = make_automation(manual_customer_ids=[customer.id])
+            report = run_automation(db, automation, now=day)
+            delivered += report.sent
+            capped += sum(
+                1 for r in report.results if r.skip_reason == SkipReason.FREQUENCY_CAP
+            )
+
+        # Four separate automations on four separate days — no dedup contest at
+        # all — yet the customer never receives more than the cap allows, and
+        # the excess is recorded as capped rather than vanishing.
+        assert delivered <= 2, f"{delivered} messages got through a cap of 2"
+        assert capped >= 1
+        assert delivered + capped == 4
+
+    def test_an_automation_send_counts_toward_the_cap_like_any_message(
+        self, db, make_customer, make_automation
+    ):
+        """The claim that automations flow through existing reporting, tested."""
+        from app.services.intelligence import load_engagement
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        assert load_engagement(db, customer.id, now=MONDAY_10AM)["messages_last_7d"] == 0
+
+        report = run_automation(db, automation, now=MONDAY_10AM)
+
+        after = load_engagement(db, customer.id, now=MONDAY_10AM + timedelta(hours=1))
+        assert after["messages_last_7d"] == report.sent
+        assert after["messages_last_30d"] == report.sent
+
+    def test_a_message_that_never_reached_the_customer_does_not_count(
+        self, db, make_customer, make_automation
+    ):
+        """Only a successful send consumes the customer's allowance.
+
+        A skip never reaches the provider, and a provider failure never reaches
+        the customer — neither should count against how often they may be
+        messaged.
+        """
+        from app.services.intelligence import load_engagement
+
+        from app.services.intelligence import load_engagement
+
+        customer = make_customer(sms_consent=False)
+        automation = make_automation(manual_customer_ids=[customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+
+        after = load_engagement(db, customer.id, now=MONDAY_10AM + timedelta(hours=1))
+        assert after["messages_last_7d"] == 0
+
+    def test_a_provider_failure_does_not_count_toward_the_cap(
+        self, db, make_customer, make_automation, monkeypatch
+    ):
+        """The provider rejected it, so the customer never heard from us."""
+        from app.integrations.base import SendResult
+        from app.integrations.mock_adapters import BaseMockAdapter
+        from app.services.intelligence import load_engagement
+
+        monkeypatch.setattr(
+            BaseMockAdapter,
+            "send_message",
+            lambda *args, **kwargs: SendResult(
+                success=False, error="Handset unreachable.", is_simulated=True
+            ),
+        )
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        report = run_automation(db, automation, now=MONDAY_10AM)
+
+        assert report.failed == 1
+        after = load_engagement(db, customer.id, now=MONDAY_10AM + timedelta(hours=1))
+        assert after["messages_last_7d"] == 0
+
+    def test_a_failed_send_is_still_recorded_in_the_ledger(
+        self, db, make_customer, make_automation, monkeypatch
+    ):
+        """Not counting toward the cap is not the same as not happening."""
+        from app.integrations.base import SendResult
+        from app.integrations.mock_adapters import BaseMockAdapter
+
+        monkeypatch.setattr(
+            BaseMockAdapter,
+            "send_message",
+            lambda *args, **kwargs: SendResult(
+                success=False, error="Handset unreachable.", is_simulated=True
+            ),
+        )
+
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+
+        row = sends_for(db, automation)[0]
+        assert row.status == SendStatus.FAILED.value
+        assert row.error_message == "Handset unreachable."
+
+    def test_the_cap_lifts_once_the_window_passes(
+        self, db, make_customer, make_automation
+    ):
+        customer = make_customer()
+        for offset in range(4):
+            automation = make_automation(manual_customer_ids=[customer.id])
+            run_automation(db, automation, now=MONDAY_10AM + timedelta(days=offset))
+
+        # A fortnight later the earlier sends have aged out of the 7-day window,
+        # so the customer is eligible again — whatever the mock provider then
+        # does with the message.
+        later = make_automation(manual_customer_ids=[customer.id])
+        report = run_automation(db, later, now=MONDAY_10AM + timedelta(days=14))
+        assert report.skipped == 0, [
+            (r.skip_reason.value if r.skip_reason else None, r.skip_detail)
+            for r in report.results
+        ]
+        assert len(report.results) == 1

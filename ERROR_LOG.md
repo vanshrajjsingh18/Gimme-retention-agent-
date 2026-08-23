@@ -462,3 +462,49 @@ running in UTC.
 instant written three ways (`+12:00`, `Z`, `-04:00`) renders identically.
 `toLocaleString('en-NZ')` selects a language, not a place; the timezone has to
 be named separately or it silently follows the machine.
+
+---
+
+## 2026-08-22 — Automation plumbing filled up the campaigns list
+
+**Found by:** Querying `/api/v1/campaigns` while checking something else, and
+noticing 20 of the 26 rows were named "… (automation)".
+
+**Failure:** Every automation carries a backing `Campaign` so its sends flow
+through the existing attribution and analytics rather than a parallel reporting
+world. That decision is right, but those campaigns were also being listed on
+the Campaigns screen — showing an operator a pile of drafts they never created,
+cannot meaningfully edit, and whose status reads DRAFT forever because they are
+never sent through the campaign engine.
+
+**Fix:** The campaigns list now excludes any campaign referenced by
+`automations.campaign_id`, with `include_automations=true` to see them.
+Derived from the automation table rather than a flag on the campaign, so the
+two cannot drift apart — a flag would need maintaining in two places and would
+be wrong the first time somebody forgot.
+
+**Preventive action:** Two tests: a backing campaign is absent from the default
+listing and present with the flag, and a campaign somebody actually created is
+still listed — hiding plumbing must not hide real work.
+
+---
+
+## 2026-08-22 — A frequency-cap test asserted the mock provider's mood
+
+**Found by:** The test passing alone and failing as part of its class.
+
+**Failure:** A new test asserted `report.sent == 1` after the 7-day window had
+cleared. The mock adapter deliberately fails a deterministic share of
+recipients so the failure path is exercised in every demo run, and this
+customer's phone number happened to draw one. The test was asserting that the
+simulated provider cooperated, not that the cap had lifted.
+
+**Fix:** Assert the actual property — that nothing was *skipped* — rather than
+that the send succeeded. Writing it correctly then exposed a rule worth pinning
+down: only a successful send counts toward the cap, because a message the
+provider rejected never reached the customer and should not consume their
+allowance. That now has its own tests, including that a failed send is still
+recorded in the ledger — not counting is not the same as not happening.
+
+**Preventive action:** When a test involves a deliberately non-deterministic
+collaborator, assert the property under test, not the collaborator's output.

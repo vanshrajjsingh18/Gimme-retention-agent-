@@ -268,6 +268,35 @@ Every decision carries its reason, visible in the dry-run preview.
 
 ---
 
+## Frequency caps
+
+Deduplication stops two messages on one day. The 7-day and 30-day caps stop too
+many over weeks — independent rules, both needed: without the cap, a customer
+enrolled in several automations could receive one message every single day and
+never trip the per-day rule once.
+
+Only a **successful send** counts toward a customer's allowance. A skip never
+reached the provider, and a provider failure never reached the customer, so
+neither consumes it. Both are still written to the ledger — not counting is not
+the same as not happening.
+
+---
+
+## The backing campaign
+
+Every automation owns a `Campaign` row, so its sends carry a `campaign_id` and
+flow through the existing attribution, campaign analytics and Customer 360
+message history unchanged. An order placed inside the attribution window after
+an automation send is credited to that automation's campaign exactly as it
+would be for a hand-built one.
+
+Those campaigns are plumbing rather than campaigns anybody created, so the
+Campaigns screen hides them — pass `include_automations=true` to see them. The
+exclusion is derived from `automations.campaign_id` rather than a flag on the
+campaign, so the two cannot drift apart.
+
+---
+
 ## Scheduling
 
 Two APScheduler jobs, no queue broker. Per-customer timing lives in
