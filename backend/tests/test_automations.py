@@ -1263,6 +1263,21 @@ class TestReportingIntegration:
         ).json()
         assert any(row["id"] == automation.campaign_id for row in with_automations)
 
+    def test_the_seed_summary_counts_campaigns_and_automations_apart(
+        self, db, make_customer, make_automation
+    ):
+        """A bare campaign total would say nine when six were created."""
+        from app.services.seed import summary
+
+        before = summary(db)
+        make_automation(manual_customer_ids=[make_customer().id])
+        after = summary(db)
+
+        assert after["automations"] == before["automations"] + 1
+        assert after["campaigns"] == before["campaigns"], (
+            "a backing campaign was counted as one somebody created"
+        )
+
     def test_a_campaign_somebody_created_is_still_listed(
         self, client, auth_headers, db, make_automation, make_customer
     ):

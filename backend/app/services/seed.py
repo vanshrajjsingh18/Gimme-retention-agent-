@@ -28,6 +28,7 @@ from app.core.enums import (
 from app.models.base import utcnow
 from app.models.entities import (
     AttributionRecord,
+    Automation,
     Campaign,
     CampaignRecipient,
     ChurnScore,
@@ -467,13 +468,25 @@ def summary(db: Session) -> dict:
     def count(model) -> int:
         return db.execute(select(func.count()).select_from(model)).scalar_one()
 
+    # Campaigns backing an automation are plumbing rather than campaigns
+    # anybody made, so they are counted separately — a bare total would say
+    # nine when six were created.
+    backing = db.execute(
+        select(func.count(func.distinct(Campaign.id))).where(
+            Campaign.id.in_(
+                select(Automation.campaign_id).where(Automation.campaign_id.is_not(None))
+            )
+        )
+    ).scalar_one()
+
     return {
         "customers": count(Customer),
         "orders": count(Order),
         "order_items": count(OrderItem),
         "customer_events": count(CustomerEvent),
         "consent_events": count(ConsentEvent),
-        "campaigns": count(Campaign),
+        "campaigns": count(Campaign) - backing,
+        "automations": count(Automation),
         "messages": count(Message),
         "communication_events": count(CommunicationEvent),
         "attribution_records": count(AttributionRecord),

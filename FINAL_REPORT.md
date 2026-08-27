@@ -1,7 +1,9 @@
 # Final report — GIMME Retention Engine
 
-**Delivered:** 2026-08-21
-**State:** Runnable, tested MVP. Verified from a clean install.
+**Delivered:** 2026-08-22
+**State:** Runnable, tested MVP plus campaign automations. Verified from a
+clean clone: `make setup` → `make test` → `make seed-small` → build, on an
+empty tree with no prior state.
 
 ---
 
@@ -234,26 +236,47 @@ curl -X POST http://127.0.0.1:8000/api/v1/orders \
 
 | Suite | Tests | Result |
 | --- | --- | --- |
-| Backend unit — metrics, lifecycle, RFM, churn, NBA, segmentation, compliance, LLM | 219 | pass |
-| Backend integration — auth, ingestion, API | 34 | pass |
+| Backend unit — metrics, lifecycle, RFM, churn, NBA, segmentation, compliance, LLM | 221 | pass |
+| Backend unit — timezones, order patterns, schema reconciliation | 43 | pass |
+| Backend integration — auth and ingestion APIs | 34 | pass |
+| Backend integration — automations API | 23 | pass |
+| Backend behaviour — the three campaign types and their shared pipeline | 100 | pass |
 | Backend end-to-end — 24-step retention loop | 24 | pass |
 | Backend security | 29 | pass |
-| Frontend unit — formatters, chart helpers, rule builder | 35 | pass |
-| Browser — Playwright against the live stack | 10 | pass |
-| **Total** | **351** | **all passing** |
+| Frontend unit — formatters, chart helpers, rule builder, automation forms | 53 | pass |
+| Browser — Playwright against the live stack | 13 | pass |
+| **Total** | **540** | **all passing** |
 
 Notable properties asserted rather than assumed:
 
 - All nine lifecycle stages are reachable (`test_every_stage_reachable`).
 - Churn risk rises monotonically with lateness, and the factor weights sum
   to exactly 100.
-- All 99 API routes carry an authentication dependency — checked by walking
-  the AST, so a new unguarded endpoint fails the build.
+- All 117 API routes carry an authentication dependency — checked by walking
+  the AST, so a new unguarded endpoint fails the build. The single exception,
+  `/health`, is deliberate and named in the test.
 - Consent, suppression or age verification withdrawn *after* approval still
   blocks the send.
 - A message failing grounding validation is never delivered, even mid-campaign.
 - Re-ingesting an order does not double-count campaign revenue.
 - The UI raises no console error and makes no failing API request.
+
+From the automation phase, where most of the value is in what the system
+*refuses* to do:
+
+- A customer who opted out between preview and send is dropped at dispatch.
+- `STOP` on one automation stops every other one the customer is in.
+- Two automations cannot message the same customer on the same **local** day,
+  and the loser is recorded with the reason rather than vanishing.
+- Four automations on four separate days — no dedup contest at all — still
+  cannot exceed the 7-day frequency cap.
+- A message the provider rejected does not consume the customer's allowance,
+  but is still written to the ledger.
+- A dry run touches no provider, reserves no customer's day, and earns no
+  attribution — while taking the identical code path as a live run.
+- Editing an approved automation's copy withdraws the approval and pauses it.
+- Every scheduled nudge lands inside business hours and in the future,
+  whatever hour the customer actually buys at.
 
 ---
 
@@ -268,6 +291,13 @@ every build path was checked, but no image was built.
 
 **Deliberately simple**
 
+- **One automation table with a `kind` discriminator**, not three
+  implementations. The three campaign types differ only in who and when;
+  everything after that is where a bug becomes a compliance incident, so it
+  lives in one place and is proved once.
+- **Schema changes are reconciled additively**, not migrated. Columns are
+  added and defaults backfilled; anything more (a type change, a constraint, a
+  backfill with logic) still needs Alembic, which stays installed.
 - **Churn scoring is additive, not learned.** There is no labelled churn
   history to train on, and a retention team must be able to defend a flag. The
   factor structure means a model can later replace the weights without changing
@@ -289,7 +319,15 @@ every build path was checked, but no image was built.
   worth keeping.
 - A/B variants can be stored and attributed but not created from the UI.
 - Scheduled campaign dispatch and inbox ingestion run on a timer but were not
-  observed firing over a real interval.
+  observed firing over a real interval. The automation runner *was* observed
+  firing on its five-minute tick against seeded data.
+- Behavioural nudges will act on a weak pattern (a modal weekday explaining
+  under half a customer's orders). The confidence is computed, stored and shown
+  in the preview, flagged as "weak", but there is no minimum-confidence gate —
+  the minimum order count is the only hard filter. Worth adding once there is
+  evidence about which confidence levels convert.
+- Sequence steps cannot be edited once anyone is enrolled, and there is no
+  versioning, so a mid-flight copy change means creating a new sequence.
 - One SQLite-specific call (`strftime` for month bucketing) sits behind a
   `_month_key()` helper and would need attention on PostgreSQL.
 

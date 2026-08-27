@@ -105,11 +105,11 @@ test (`tests/test_e2e_retention_loop.py`, 24 steps).
 
 | Requirement | Status | How verified |
 | --- | --- | --- |
-| Full backend tests | VERIFIED | 306 passing |
-| Full frontend tests | VERIFIED | 35 passing |
-| Browser end-to-end | VERIFIED | 10 passing, zero console errors, zero failed requests |
-| Security review | VERIFIED | 29 tests; AST check proves all 99 routes are guarded |
-| Documentation | VERIFIED | README, architecture, API, compliance, integrations |
+| Full backend tests | VERIFIED | 474 passing |
+| Full frontend tests | VERIFIED | 53 passing |
+| Browser end-to-end | VERIFIED | 13 passing, zero console errors, zero failed requests |
+| Security review | VERIFIED | 29 tests; an AST walk over 117 routes proves each carries an auth dependency, `/health` excepted by design |
+| Documentation | VERIFIED | README, architecture, API, automations, compliance, integrations |
 | Clean startup | VERIFIED | Fresh install from an empty tree, following the README |
 | Fresh database setup | VERIFIED | `make seed` on a clean checkout |
 
@@ -129,8 +129,38 @@ All 45 steps of the specified acceptance test were executed. Grouped by area:
 | 30-34 | Test send, approve, run in mock mode, store events, simulate engagement | VERIFIED |
 | 35-41 | Import order, recalculate, detect reactivation, update lifecycle, attribute, show revenue, update analytics | VERIFIED |
 | 42-43 | Restart, verify persistence | VERIFIED |
-| 44 | Run the complete test suite | VERIFIED — 351 tests |
+| 44 | Run the complete test suite | VERIFIED — 540 tests |
 | 45 | Fresh-install verification | VERIFIED — found and fixed a real bug (see below) |
+
+---
+
+## Campaign automations
+
+Added after the MVP. Each row was checked by running the system, not by reading
+the code.
+
+| Requirement | Status | How verified |
+| --- | --- | --- |
+| Order history available for all three features | VERIFIED | 5,713 orders / 10,553 items already in `orders` + `order_items`; 729 customers with 3+ completed orders. No import needed |
+| Cohort audience re-evaluated at send time | VERIFIED | A customer moved between segments changes the resolved audience without touching the campaign |
+| Segment-specific default copy | VERIFIED | Second-order and dormant cohorts produce different tone with no copy configured |
+| Sequence steps timed from enrollment | VERIFIED | Day 0 / 7 / 14 measured from each customer's own join date; a late joiner starts at Day 0 |
+| Rolling vs fixed-cohort enrollment | VERIFIED | A late joiner enters a rolling sequence and is refused by a locked one |
+| Sequence stop conditions | VERIFIED | Opt-out, a completed order and a passed end date each stop it; a *cancelled* order does not |
+| Nudge timed to each customer's own pattern | VERIFIED | 249 enrolled from live data, each with their own weekday/hour and confidence |
+| Minimum order count before a nudge | VERIFIED | Two orders produce no pattern and no enrollment |
+| Monthly pattern recompute | VERIFIED | Stale patterns refresh; a customer whose pattern disappears is stopped, not nudged on an old one |
+| Conditional offer logic | VERIFIED | Requires both discount-responsiveness and an approved promotion; never invents one |
+| Consent checked at send time | VERIFIED | Consent revoked between preview and send blocks the send |
+| Global opt-out across all campaign types | VERIFIED | `STOP` on one automation stops every other enrollment and clears all four consent flags |
+| Dedup with a priority order | VERIFIED | Nudge > sequence > bulk; the loser is logged with the reason, and a sent message is never displaced |
+| Quiet hours and timezone | VERIFIED | A 3am job still sends at 9am NZ; nudges clamp back into the same local day |
+| Frequency capping | VERIFIED | Four automations on four days cannot exceed the 7-day cap |
+| Delivery tracking | VERIFIED | Every attempt writes a ledger row; TNZ receipts advance it one-way |
+| Dry-run mode | VERIFIED | Takes the identical code path, touches no provider, reserves no day, earns no attribution |
+| Approval gate | VERIFIED | Editing approved copy withdraws approval and pauses the automation |
+| Attribution through existing reporting | VERIFIED | An order after an automation send is attributed to its backing campaign |
+| Job runner | VERIFIED | The five-minute tick was observed firing against seeded data |
 
 ---
 
@@ -150,6 +180,9 @@ Stated plainly rather than marked green:
 | Scheduled campaign dispatch | IMPLEMENTED | Job runs; not verified end to end over a real interval |
 | Inbox folder ingestion | IMPLEMENTED | Job runs; not verified end to end |
 | Journey execution over real time | IMPLEMENTED | Runs on demand and is unit-covered; multi-day delays not observed elapsing |
+| Nudge confidence gate | IMPLEMENTED | Pattern confidence is computed, stored and shown (flagged when weak), but only the minimum order count actually blocks a send. No evidence yet on which confidence levels convert |
+| Sequence versioning | NOT BUILT | Steps cannot be changed once anyone is enrolled, and there is no versioning — a mid-flight copy change means a new sequence |
+| Automation copy generated per customer by the LLM | NOT BUILT | `AutomationStep.use_llm` exists on the model and is not yet honoured; automation copy is templated, and templates cannot invent facts |
 
 ---
 
