@@ -104,6 +104,19 @@ Delivery receipts from TNZ advance the row through
 `SENT → DELIVERED` / `FAILED` (`app/automations/delivery.py`). Progress is
 one-way: a late-arriving "sent" event cannot walk a delivery backwards.
 
+### Per-customer history
+
+The same table read the other way — by customer rather than by automation — is
+the answer to "what have we sent this person?". `customer_history()` returns it,
+`GET /customers/{id}` carries it as `automation_history`, and the Automations
+tab on a customer profile renders it: which automation, when in NZ time, the
+delivery status, and the message body as it was actually sent.
+
+Withheld rows appear alongside sent ones, with the reason. That is the point of
+the tab: without them, a customer who was in the audience and deliberately
+skipped for consent looks identical to one who was never a candidate at all,
+and "why didn't they get it?" has no answer.
+
 ---
 
 ## Opt-out
@@ -192,6 +205,12 @@ are measured from this moment, which is not always when they joined:
 A customer for whom the trigger has not happened — no signup date, no completed
 order — is **not enrolled**, and the count is reported. Starting their clock
 "now" instead would quietly turn the campaign into a different one.
+
+A `MANUAL` sequence needs a way to add people, so the Enrollments card on a
+sequence has an **Add customers** button (`POST /automations/{id}/enrollments`
+with customer ids). It reports what happened to each id — enrolled, already in,
+or not found — rather than silently succeeding, and re-submitting the same ids
+enrolls nobody twice.
 
 **Back-dated triggers** need care. A signup-triggered Day 0 / 7 / 14 sequence
 enrolling somebody who signed up three months ago would otherwise fire all
@@ -337,8 +356,14 @@ would be for a hand-built one.
 
 Those campaigns are plumbing rather than campaigns anybody created, so the
 Campaigns screen hides them — pass `include_automations=true` to see them. The
-exclusion is derived from `automations.campaign_id` rather than a flag on the
-campaign, so the two cannot drift apart.
+exclusion is derived from `automations.campaign_id`, so a live automation and
+its plumbing cannot drift apart, *and* from a write-once
+`campaigns.is_automation_backing` flag, which is what keeps the campaign hidden
+once the automation is deleted and the join has nothing left to match.
+
+Deleting an automation deletes its backing campaign only when nothing was ever
+sent through it. Once messages have gone out, the campaign is the record their
+attribution hangs off, so it outlives the automation — hidden, but intact.
 
 ---
 

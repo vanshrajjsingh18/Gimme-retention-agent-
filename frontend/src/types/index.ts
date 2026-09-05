@@ -162,9 +162,30 @@ export interface Order {
   items: OrderItem[];
 }
 
+export interface CustomerAutomationSend {
+  id: number;
+  automation_id: number;
+  automation_name: string;
+  automation_kind: AutomationKind;
+  status: string;
+  skip_reason: string | null;
+  skip_detail: string | null;
+  scheduled_for: string;
+  local_date: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  body: string;
+  provider: string;
+  provider_message_id: string | null;
+  error_message: string | null;
+  variant_index: number | null;
+}
+
 export interface CustomerDetail {
   profile: CustomerProfile;
   orders: Order[];
+  /** Every automated message aimed at them — sent and withheld, with reasons. */
+  automation_history: CustomerAutomationSend[];
   lifecycle_history: {
     from_stage: string | null;
     to_stage: string;

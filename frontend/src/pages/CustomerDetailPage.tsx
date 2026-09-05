@@ -21,6 +21,7 @@ import {
 import { useMutation, useQuery } from '../hooks/useApi';
 import type { CustomerDetail, Segment } from '../types';
 import {
+  formatBusinessTime,
   formatCurrency,
   formatDate,
   formatDateTime,
@@ -29,9 +30,16 @@ import {
   formatPercent,
   humanize,
 } from '../utils/format';
-import { LIFECYCLE_BADGE, MESSAGE_STATUS_BADGE, RISK_BADGE } from '../utils/theme';
+import {
+  AUTOMATION_KIND_LABEL,
+  LIFECYCLE_BADGE,
+  MESSAGE_STATUS_BADGE,
+  RISK_BADGE,
+  SEND_STATUS_BADGE,
+  SKIP_REASON_LABEL,
+} from '../utils/theme';
 
-const TABS = ['Overview', 'Orders', 'Communications', 'Campaigns', 'History'] as const;
+const TABS = ['Overview', 'Orders', 'Communications', 'Automations', 'Campaigns', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function CustomerDetailPage() {
@@ -153,6 +161,7 @@ export default function CustomerDetailPage() {
             {t}
             {t === 'Orders' && ` (${data.orders.length})`}
             {t === 'Communications' && ` (${data.communication_events.length})`}
+            {t === 'Automations' && ` (${data.automation_history.length})`}
             {t === 'Campaigns' && ` (${data.campaigns.length})`}
           </button>
         ))}
@@ -161,6 +170,7 @@ export default function CustomerDetailPage() {
       {tab === 'Overview' && <OverviewTab data={data} />}
       {tab === 'Orders' && <OrdersTab data={data} />}
       {tab === 'Communications' && <CommunicationsTab data={data} />}
+      {tab === 'Automations' && <AutomationsTab data={data} />}
       {tab === 'Campaigns' && <CampaignsTab data={data} />}
       {tab === 'History' && <HistoryTab data={data} />}
 
@@ -502,6 +512,89 @@ function ScoreTile({ label, value }: { label: string; value: number | null }) {
 }
 
 // --------------------------------------------------------------------------
+/**
+ * Every automated message aimed at this customer, sent or withheld.
+ *
+ * The withheld ones are the point: without them, a customer who received
+ * nothing looks identical to one who was never in the audience, and "why
+ * didn't they get the campaign?" has no answer on their own profile.
+ */
+function AutomationsTab({ data }: { data: CustomerDetail }) {
+  const rows = data.automation_history;
+  if (rows.length === 0) {
+    return (
+      <Card>
+        <EmptyState
+          title="No automated messages"
+          description="This customer has not been in the audience of any automation run."
+        />
+      </Card>
+    );
+  }
+
+  const sent = rows.filter((r) => r.status === 'SENT' || r.status === 'DELIVERED').length;
+  const withheld = rows.filter((r) => r.status === 'SKIPPED').length;
+
+  return (
+    <Card
+      title="Automation history"
+      description={`${sent} sent, ${withheld} withheld. Times are NZ.`}
+      bodyClassName=""
+    >
+      <TableShell>
+        <thead className="bg-slate-50">
+          <tr>
+            <th className="table-head">Automation</th>
+            <th className="table-head">When</th>
+            <th className="table-head">Status</th>
+            <th className="table-head">Message or reason</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((row) => (
+            <tr key={row.id} className="hover:bg-slate-50">
+              <td className="table-cell">
+                <Link
+                  to={`/automations/${row.automation_id}`}
+                  className="font-medium text-brand-700 hover:underline"
+                >
+                  {row.automation_name}
+                </Link>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {AUTOMATION_KIND_LABEL[row.automation_kind] ?? row.automation_kind}
+                  {row.variant_index != null &&
+                    ` · variant ${String.fromCharCode(65 + row.variant_index)}`}
+                </p>
+              </td>
+              <td className="table-cell text-sm text-slate-600">
+                {formatBusinessTime(row.sent_at ?? row.scheduled_for)}
+              </td>
+              <td className="table-cell">
+                <Badge className={SEND_STATUS_BADGE[row.status]}>{row.status}</Badge>
+                {row.delivered_at && (
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    delivered {formatBusinessTime(row.delivered_at)}
+                  </p>
+                )}
+              </td>
+              <td className="table-cell max-w-lg whitespace-normal text-sm">
+                {row.skip_reason ? (
+                  <span className="text-amber-800">
+                    <strong>{SKIP_REASON_LABEL[row.skip_reason] ?? row.skip_reason}</strong>
+                    {row.skip_detail ? ` — ${row.skip_detail}` : ''}
+                  </span>
+                ) : (
+                  <span className="text-slate-600">{row.error_message ?? row.body}</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </TableShell>
+    </Card>
+  );
+}
+
 function OrdersTab({ data }: { data: CustomerDetail }) {
   const [expanded, setExpanded] = useState<number | null>(null);
 

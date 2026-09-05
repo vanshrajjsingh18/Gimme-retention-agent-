@@ -585,3 +585,63 @@ days ago → nothing, and the enrollment completes.
 **Preventive action:** Both cases are tested by name. The first version of the
 rule was defensible in isolation and wrong at the boundary, which is the usual
 shape of a rule written without a concrete example either side of it.
+
+---
+
+## 2026-09-05 — Deleting an automation resurrected its plumbing as a campaign
+
+**Found by:** Clearing three throwaway automations out of the dev database, then
+looking at the campaign list.
+
+**Failure:** Three campaigns nobody had written — `E2E cohort … (automation)`
+and friends — were sitting in the operator's campaign list. Every automation
+creates a backing campaign so its sends flow through the existing attribution,
+and the list hid those by asking which campaigns were referenced by
+`automations.campaign_id`. Deriving the fact rather than storing a flag was a
+deliberate choice: a flag can drift, a join cannot. But deleting the automation
+deletes the reference, so the derivation lost its source and the plumbing
+surfaced as a draft campaign — with a name ending in "(automation)" and no way
+for an operator to make sense of it.
+
+**Fix:** Two parts. A write-once `campaigns.is_automation_backing`, set when the
+automation creates the campaign and never cleared, keeps it hidden after the
+automation is gone; the join still covers live automations, so the two cannot
+disagree. And on delete, a backing campaign that never sent anything is deleted
+with the automation — there is no record in it to preserve. One that *did* send
+survives, because deleting it would orphan the attribution for messages that
+really went out.
+
+**Preventive action:** Two tests, one per branch: a backing campaign is absent
+from the list before and after its automation is deleted, and one that sent is
+kept but still hidden. The original test only checked the live case, which is
+the half that worked.
+
+---
+
+## 2026-09-05 — Every timestamp would have been 12 hours wrong in Auckland
+
+**Found by:** Reading an enrollment table that said a customer joined at
+`03:29 am` on a page whose send window is labelled "09:00–19:00 NZ time".
+
+**Failure:** The API returns naive UTC (`2026-09-05T03:29:52`, no `Z`), and
+`new Date()` reads a string with no zone as the *viewer's* local time. In this
+UTC container that coincidence produces the right instant, so everything looked
+correct. On an operator's machine in Auckland the same string would be read as
+NZ time — 12 or 13 hours off the actual moment — and `formatBusinessTime`,
+written specifically to stop timezone confusion, would have converted from the
+wrong instant and confidently displayed a wrong NZ time.
+
+The tests already asserted the right thing ("06:00 UTC on 23 June is 6pm in
+Auckland"). They passed because the test runner was also UTC, where the bug is
+invisible. A test that cannot fail is not coverage.
+
+**Fix:** A single `parseTimestamp()` that appends `Z` to a zone-less timestamp
+and leaves anything with an explicit offset alone; all five formatters go
+through it. The enrollment column also moved from viewer-local `formatDateTime`
+to `formatBusinessTime`, and its header now says "Enrolled (NZ)".
+
+**Preventive action:** Vitest now runs under `TZ=America/New_York` — neither UTC
+nor New Zealand. Reverting the parse makes the two existing assertions fail,
+which was verified rather than assumed. The lesson is that the environment a
+test runs in is part of the test: these ones had been passing for the wrong
+reason since they were written.

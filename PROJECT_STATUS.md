@@ -106,7 +106,7 @@ and who would not with the reason in plain English.
 
 | Suite | Count | Command |
 | --- | --- | --- |
-| Backend | 496 | `make test-backend` |
+| Backend | 498 | `make test-backend` |
 | Frontend | 53 | `make test-frontend` |
 | Browser (Playwright) | 13 | `make test-e2e` |
 | **Total** | **562** | `make test` |
@@ -150,7 +150,7 @@ Each has working code that could not be exercised here:
 Both servers started against the seeded database, all three automation types
 exercised end to end on real data (cohort send 35 sent / 73 skipped with
 reasons; sequence advanced customers through Day 0 → Day 7; nudge enrolled 249
-customers with per-customer order patterns), then 496 backend, 53 frontend and
+customers with per-customer order patterns), then 498 backend, 53 frontend and
 13 Playwright tests run green with zero console errors.
 
 ## Open configuration item

@@ -96,17 +96,21 @@ def list_campaigns(
     drafts they never made and cannot meaningfully act on, so they are hidden
     unless explicitly asked for.
 
-    Derived from `automations.campaign_id` rather than a flag on the campaign,
-    so the two can never drift apart.
+    Primarily derived from `automations.campaign_id`, so a live automation and
+    its plumbing can never drift apart. That derivation alone is not enough:
+    deleting an automation takes the reference with it, and the backing
+    campaign would resurface here as a campaign nobody wrote. The write-once
+    `is_automation_backing` flag covers that case.
     """
     stmt = select(Campaign)
     if status:
         stmt = stmt.where(Campaign.status == status.upper())
     if not include_automations:
         stmt = stmt.where(
+            Campaign.is_automation_backing.is_(False),
             Campaign.id.not_in(
                 select(Automation.campaign_id).where(Automation.campaign_id.is_not(None))
-            )
+            ),
         )
     # Filter before paging: a filtered page must not come back short while
     # matches exist further down the table.

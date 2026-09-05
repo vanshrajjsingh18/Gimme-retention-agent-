@@ -15,6 +15,23 @@ const currencyPrecise = new Intl.NumberFormat('en-NZ', {
 
 const number = new Intl.NumberFormat('en-NZ');
 
+/** A date-time string carrying no zone: `2026-09-05T03:29:52`, with optional fraction. */
+const NAIVE_TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+
+/**
+ * Parse a timestamp from the API, which stores and returns naive UTC.
+ *
+ * `new Date('2026-09-05T03:29:52')` is read as the *viewer's* local time, so
+ * the same row lands on a different instant depending on where the browser is.
+ * In a UTC container that coincidence hides the bug; in Auckland — where this
+ * actually runs — every naive timestamp would be read 12 or 13 hours early,
+ * throwing off the NZ times the send windows are stated in. Anything that
+ * already carries a zone or offset is left exactly as it is.
+ */
+function parseTimestamp(value: string): Date {
+  return new Date(NAIVE_TIMESTAMP.test(value) ? `${value}Z` : value);
+}
+
 export function formatCurrency(value: number | null | undefined, precise = false): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
   return precise ? currencyPrecise.format(value) : currency.format(value);
@@ -32,14 +49,14 @@ export function formatPercent(value: number | null | undefined, digits = 1): str
 
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
-  const date = new Date(value);
+  const date = parseTimestamp(value);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleDateString('en-NZ', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
-  const date = new Date(value);
+  const date = parseTimestamp(value);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString('en-NZ', {
     day: '2-digit',
@@ -63,7 +80,7 @@ export const BUSINESS_TIMEZONE = 'Pacific/Auckland';
  */
 export function formatBusinessTime(value: string | null | undefined): string {
   if (!value) return '—';
-  const date = new Date(value);
+  const date = parseTimestamp(value);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString('en-NZ', {
     timeZone: BUSINESS_TIMEZONE,
@@ -76,7 +93,7 @@ export function formatBusinessTime(value: string | null | undefined): string {
 
 export function formatRelative(value: string | null | undefined): string {
   if (!value) return '—';
-  const date = new Date(value);
+  const date = parseTimestamp(value);
   if (Number.isNaN(date.getTime())) return '—';
   const seconds = Math.round((Date.now() - date.getTime()) / 1000);
   const units: [Intl.RelativeTimeFormatUnit, number][] = [

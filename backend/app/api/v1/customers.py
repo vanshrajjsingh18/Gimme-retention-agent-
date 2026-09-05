@@ -6,6 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_write
+from app.automations.service import customer_history
 from app.core.database import get_db
 from app.core.enums import Channel, ConsentType, LifecycleStage
 from app.models.base import utcnow
@@ -371,6 +372,7 @@ def get_customer(
         lifecycle_history=[LifecycleHistoryOut.model_validate(h) for h in history],
         communication_events=[CommunicationEventOut.model_validate(e) for e in events],
         messages=[MessageOut.model_validate(m) for m in messages],
+        automation_history=customer_history(db, customer_id),
         campaigns=campaigns,
         segments=segments,
         attribution=attribution,

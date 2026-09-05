@@ -524,6 +524,13 @@ class Campaign(Base, TimestampMixin):
     audience_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     compliance_result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
+    # Set once, when an automation creates this campaign as its plumbing, and
+    # never cleared. The campaign list also derives the same fact from
+    # automations.campaign_id; this flag is what keeps a backing campaign
+    # hidden after its automation is deleted and that derivation loses its
+    # source. Write-once, so the two can't drift.
+    is_automation_backing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     created_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

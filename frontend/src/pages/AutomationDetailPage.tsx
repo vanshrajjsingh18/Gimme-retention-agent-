@@ -98,6 +98,8 @@ export default function AutomationDetailPage() {
   const [report, setReport] = useState<AutomationRunReport | null>(null);
   const [confirmRun, setConfirmRun] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
+  const [enrolIds, setEnrolIds] = useState('');
 
   const dryRun = useMutation(async () => api.post<AutomationRunReport>(`${base}/preview`));
   const liveRun = useMutation(async () => api.post<AutomationRunReport>(`${base}/run`));
@@ -106,6 +108,12 @@ export default function AutomationDetailPage() {
   );
   const enrollmentHold = useMutation(async (id: number, action: 'pause' | 'resume') =>
     api.post<AutomationEnrollment>(`${base}/enrollments/${id}/${action}`),
+  );
+  const addEnrollments = useMutation(async (ids: number[]) =>
+    api.post<{ enrolled: number; already_enrolled: number; unknown_customers: number }>(
+      `${base}/enrollments`,
+      ids,
+    ),
   );
 
   if (loading) return <LoadingState label="Loading automation…" />;
@@ -417,7 +425,20 @@ export default function AutomationDetailPage() {
           )}
 
           {automation.kind !== 'COHORT_BULK' && (
-            <Card title="Enrollments">
+            <Card
+              title="Enrollments"
+              actions={
+                automation.kind === 'SEQUENCE' ? (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setEnrolling(true)}
+                  >
+                    Add customers
+                  </button>
+                ) : undefined
+              }
+            >
               {!enrollments || enrollments.length === 0 ? (
                 <EmptyState
                   title="Nobody enrolled yet"
@@ -429,9 +450,9 @@ export default function AutomationDetailPage() {
                     <tr>
                       <th className="table-head">Customer</th>
                       <th className="table-head">Status</th>
-                      <th className="table-head">Enrolled</th>
+                      <th className="table-head">Enrolled (NZ)</th>
                       <th className="table-head">
-                        {automation.kind === 'NUDGE' ? 'Next nudge' : 'Step'}
+                        {automation.kind === 'NUDGE' ? 'Next nudge (NZ)' : 'Step'}
                       </th>
                       <th className="table-head" />
                     </tr>
@@ -462,7 +483,7 @@ export default function AutomationDetailPage() {
                           )}
                         </td>
                         <td className="table-cell text-sm text-slate-600">
-                          {formatDateTime(enrollment.enrolled_at)}
+                          {formatBusinessTime(enrollment.enrolled_at)}
                         </td>
                         <td className="table-cell text-sm text-slate-600">
                           {automation.kind === 'NUDGE'
@@ -562,6 +583,68 @@ export default function AutomationDetailPage() {
               refetchStats();
             }}
           />
+        </Modal>
+      )}
+
+      {enrolling && (
+        <Modal
+          open
+          title="Add customers to this sequence"
+          description="Each one starts at the step matching their trigger, not necessarily step one."
+          onClose={() => setEnrolling(false)}
+          footer={
+            <>
+              <button type="button" className="btn-secondary" onClick={() => setEnrolling(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={addEnrollments.loading || !enrolIds.trim()}
+                onClick={async () => {
+                  const ids = enrolIds
+                    .split(/[\s,]+/)
+                    .map((value) => Number(value.trim()))
+                    .filter((value) => Number.isInteger(value) && value > 0);
+                  const result = await addEnrollments.run(ids);
+                  if (result) {
+                    notify(
+                      `Enrolled ${result.enrolled}. ` +
+                        `${result.already_enrolled} already in, ` +
+                        `${result.unknown_customers} not found.`,
+                    );
+                    setEnrolling(false);
+                    setEnrolIds('');
+                    refetchEnrollments();
+                  }
+                }}
+              >
+                {addEnrollments.loading && <Spinner className="h-4 w-4 text-white" />}
+                Enrol
+              </button>
+            </>
+          }
+        >
+          <label className="label" htmlFor="enrol-ids">
+            Customer IDs
+          </label>
+          <textarea
+            id="enrol-ids"
+            className="input"
+            rows={3}
+            value={enrolIds}
+            onChange={(event) => setEnrolIds(event.target.value)}
+            placeholder="14, 92, 318"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Separated by commas or spaces. Somebody already enrolled keeps the progress they
+            have rather than being reset to the first step.
+          </p>
+          {addEnrollments.error && (
+            <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              {addEnrollments.error}
+            </p>
+          )}
         </Modal>
       )}
 

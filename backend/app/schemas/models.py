@@ -280,6 +280,9 @@ class CustomerDetail(BaseModel):
     lifecycle_history: list[LifecycleHistoryOut]
     communication_events: list[CommunicationEventOut]
     messages: list[MessageOut]
+    #: Every automated message aimed at them, including the ones withheld and
+    #: why — the sends alone cannot answer "why didn't they get it?".
+    automation_history: list[dict] = Field(default_factory=list)
     campaigns: list[dict]
     segments: list[dict]
     attribution: list[dict]

@@ -113,6 +113,45 @@ class TestLifecycle:
         assert client.delete(f"{BASE}/{created['id']}", headers=auth_headers).status_code == 200
         assert client.get(f"{BASE}/{created['id']}", headers=auth_headers).status_code == 404
 
+    def test_a_backing_campaign_never_surfaces_as_a_campaign_somebody_wrote(
+        self, client, auth_headers, created
+    ):
+        # While the automation lives, the campaign list derives the fact from
+        # automations.campaign_id.
+        def campaign_ids(**params):
+            response = client.get("/api/v1/campaigns", params=params, headers=auth_headers)
+            assert response.status_code == 200, response.text
+            return [c["id"] for c in response.json()]
+
+        assert created["campaign_id"] not in campaign_ids()
+        assert created["campaign_id"] in campaign_ids(include_automations=True)
+
+        # Deleting the automation takes that reference away. The plumbing must
+        # not reappear in its place as a draft nobody created.
+        assert client.delete(f"{BASE}/{created['id']}", headers=auth_headers).status_code == 200
+        assert created["campaign_id"] not in campaign_ids()
+        # Nothing was ever sent through it, so the row is gone entirely.
+        assert created["campaign_id"] not in campaign_ids(include_automations=True)
+
+    def test_a_backing_campaign_that_sent_outlives_its_automation_but_stays_hidden(
+        self, client, auth_headers, created
+    ):
+        client.post(f"{BASE}/{created['id']}/approve", headers=auth_headers)
+        client.post(f"{BASE}/{created['id']}/activate", headers=auth_headers)
+        client.post(f"{BASE}/{created['id']}/run", headers=auth_headers)
+        client.post(f"{BASE}/{created['id']}/pause", headers=auth_headers)
+        assert client.delete(f"{BASE}/{created['id']}", headers=auth_headers).status_code == 200
+
+        def campaign_ids(**params):
+            response = client.get("/api/v1/campaigns", params=params, headers=auth_headers)
+            return [c["id"] for c in response.json()]
+
+        # Messages really went out under this campaign, so the record stays —
+        # deleting it would orphan their attribution. It is still plumbing
+        # though, so it stays out of the list of campaigns somebody wrote.
+        assert created["campaign_id"] in campaign_ids(include_automations=True)
+        assert created["campaign_id"] not in campaign_ids()
+
 
 class TestDryRun:
     def test_a_draft_can_be_previewed_before_it_is_approved(

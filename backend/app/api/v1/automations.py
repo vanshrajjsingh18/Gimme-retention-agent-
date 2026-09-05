@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_write
@@ -37,6 +37,8 @@ from app.models.entities import (
     AutomationEnrollment,
     AutomationSend,
     AutomationStep,
+    Campaign,
+    Message,
     User,
 )
 from app.schemas.common import OperationResult
@@ -207,6 +209,16 @@ def delete_automation(
             detail={"name": automation.name, "kind": automation.kind},
         )
     )
+    # The backing campaign outlives the automation only when it holds a record
+    # worth keeping. One that never sent anything is pure plumbing, and leaving
+    # it behind accumulates rows nobody can explain.
+    campaign = db.get(Campaign, automation.campaign_id) if automation.campaign_id else None
+    if campaign is not None:
+        sent = db.execute(
+            select(func.count(Message.id)).where(Message.campaign_id == campaign.id)
+        ).scalar_one()
+        if sent == 0:
+            db.delete(campaign)
     db.delete(automation)
     db.commit()
     return OperationResult(success=True, message=f"Automation '{automation.name}' deleted.")

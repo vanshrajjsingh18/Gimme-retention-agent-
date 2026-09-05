@@ -101,6 +101,7 @@ def create_automation(
         status=CampaignStatus.DRAFT.value,
         subject=None,
         body=message_template,
+        is_automation_backing=True,
     )
     db.add(campaign)
     db.flush()
@@ -551,6 +552,48 @@ def refresh_nudge_patterns(db: Session, *, now: datetime | None = None) -> dict:
 # --------------------------------------------------------------------------
 # Reporting
 # --------------------------------------------------------------------------
+def customer_history(db: Session, customer_id: int, *, limit: int = 100) -> list[dict]:
+    """Every automated message aimed at one customer — sent *and* withheld.
+
+    The skips matter as much as the sends. "Why didn't this customer get the
+    campaign?" is the question an operator actually asks, and answering it from
+    the sends alone is impossible: a customer who received nothing looks
+    identical to one who was never in the audience.
+    """
+    rows = db.execute(
+        select(AutomationSend, Automation.name, Automation.kind)
+        .join(Automation, Automation.id == AutomationSend.automation_id)
+        .where(
+            AutomationSend.customer_id == customer_id,
+            AutomationSend.is_dry_run.is_(False),
+        )
+        .order_by(AutomationSend.scheduled_for.desc())
+        .limit(limit)
+    ).all()
+
+    return [
+        {
+            "id": send.id,
+            "automation_id": send.automation_id,
+            "automation_name": name,
+            "automation_kind": kind,
+            "status": send.status,
+            "skip_reason": send.skip_reason,
+            "skip_detail": send.skip_detail,
+            "scheduled_for": send.scheduled_for.isoformat(),
+            "local_date": send.local_date.isoformat(),
+            "sent_at": send.sent_at.isoformat() if send.sent_at else None,
+            "delivered_at": send.delivered_at.isoformat() if send.delivered_at else None,
+            "body": send.body,
+            "provider": send.provider,
+            "provider_message_id": send.provider_message_id,
+            "error_message": send.error_message,
+            "variant_index": send.variant_index,
+        }
+        for send, name, kind in rows
+    ]
+
+
 def automation_stats(db: Session, automation: Automation) -> dict:
     """Delivery and enrollment counts for one automation."""
     by_status = dict(
