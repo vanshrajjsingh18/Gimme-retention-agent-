@@ -19,6 +19,7 @@ is a real migration and belongs in Alembic, which is already a dependency.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy import Engine, inspect, text
@@ -61,11 +62,17 @@ def reconcile_schema(engine: Engine) -> dict[str, list[str]]:
         table = tables[table_name]
         for column_name in column_names:
             column = table.columns[column_name]
-            if not column.nullable and column.server_default is None and column.default is None:
+            default = _literal_default(column)
+            # A NOT NULL column needs a value the DDL can actually carry.
+            # "Has a default" is not enough: a Python-side callable default
+            # (``default=list``) exists but cannot be written into an ALTER,
+            # so SQLite rejects the statement. What matters is whether a
+            # literal could be derived.
+            if not column.nullable and column.server_default is None and default is None:
                 logger.error(
-                    "Cannot add %s.%s automatically: it is NOT NULL with no default. "
-                    "Existing rows would have no value for it, so this needs a real "
-                    "migration.",
+                    "Cannot add %s.%s automatically: it is NOT NULL and no literal "
+                    "default can be derived for it. Existing rows would have no value, "
+                    "so this needs a real migration.",
                     table_name,
                     column_name,
                 )
@@ -79,7 +86,6 @@ def reconcile_schema(engine: Engine) -> dict[str, list[str]]:
             table_sql, column_sql = quote(table_name), quote(column_name)
 
             spec = CreateColumn(column).compile(engine).string
-            default = _literal_default(column)
             statement = f"ALTER TABLE {table_sql} ADD COLUMN {spec}"
             if default is not None and "DEFAULT" not in spec.upper():
                 statement += f" DEFAULT {default}"
@@ -94,7 +100,7 @@ def reconcile_schema(engine: Engine) -> dict[str, list[str]]:
                             f"UPDATE {table_sql} SET {column_sql} = :value "
                             f"WHERE {column_sql} IS NULL"
                         ),
-                        {"value": column.default.arg},
+                        {"value": _default_value(column)},
                     )
             added.setdefault(table_name, []).append(column_name)
             logger.info("Added column %s.%s", table_name, column_name)
@@ -102,14 +108,44 @@ def reconcile_schema(engine: Engine) -> dict[str, list[str]]:
     return added
 
 
+def _default_value(column):
+    """The Python value a column's default produces, or None.
+
+    A callable default is invoked: ``default=list`` on a JSON column is the
+    normal way to say "empty list", and refusing to add such a column would
+    make every JSON field un-addable.
+    """
+    default = column.default
+    if default is None or column.server_default is not None:
+        return None
+    if default.is_callable:
+        try:
+            value = default.arg(None)
+        except TypeError:
+            try:
+                value = default.arg()
+            except Exception:  # noqa: BLE001 - a default we cannot evaluate
+                return None
+        except Exception:  # noqa: BLE001
+            return None
+    elif default.is_scalar:
+        value = default.arg
+    else:
+        return None
+
+    if isinstance(value, (list, dict)):
+        # JSON columns round-trip through the serialiser, not a raw literal.
+        return json.dumps(value)
+    return value
+
+
 def _literal_default(column) -> str | None:
-    """A SQL literal for a column's Python-side default, if it has a simple one."""
+    """A SQL literal for a column's default, if one can be derived."""
     if column.server_default is not None:
         return None  # The DDL already carries it.
-    default = column.default
-    if default is None or default.is_callable or not default.is_scalar:
+    value = _default_value(column)
+    if value is None:
         return None
-    value = default.arg
     if isinstance(value, bool):
         return "1" if value else "0"
     if isinstance(value, (int, float)):

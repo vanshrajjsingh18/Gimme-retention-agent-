@@ -37,6 +37,7 @@ from app.core.enums import (
     RecipientStatus,
     RecurrenceKind,
     SendStatus,
+    SequenceTrigger,
     SegmentStatus,
     SegmentType,
     UserRole,
@@ -889,8 +890,18 @@ class Automation(Base, TimestampMixin):
     #: Per-kind settings (nudge window sizes, offer rules, stop conditions).
     config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
+    #: SEQUENCE only: what starts each customer's clock. The step offsets are
+    #: measured from this, which is not always when they were enrolled.
+    trigger_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=SequenceTrigger.SEGMENT_ENTRY.value
+    )
+
     #: Single-message body for COHORT_BULK and NUDGE. SEQUENCE uses steps.
     message_template: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: Optional alternative wordings for a bulk send. Assigned deterministically
+    #: by customer id, so a given customer always gets the same one and a
+    #: preview matches what a live run will do.
+    message_variants: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     #: Optional per-segment copy overrides, keyed by segment name.
     template_overrides: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
@@ -971,10 +982,15 @@ class AutomationEnrollment(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=EnrollmentStatus.ACTIVE.value, index=True
     )
-    #: The customer's clock start. Step offsets are measured from here.
+    #: When this customer joined the automation.
     enrolled_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, index=True
     )
+    #: The customer's clock start — step offsets are measured from here. Equal
+    #: to ``enrolled_at`` for a segment-entry trigger, but back-dated for a
+    #: signup or last-order trigger. Kept apart so a step that came due before
+    #: they joined can be recognised rather than replayed at them.
+    trigger_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     #: NUDGE only: when this customer's next nudge is due.
@@ -1041,6 +1057,8 @@ class AutomationSend(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Which wording this recipient got, when the automation has variants.
+    variant_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, index=True

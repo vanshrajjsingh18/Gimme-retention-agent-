@@ -130,7 +130,7 @@ docker/           Dockerfiles and nginx config
 
 ```bash
 make test          # backend (pytest) + frontend (vitest)
-make test-backend  # 474 tests
+make test-backend  # 496 tests
 make test-frontend # 53 tests
 make test-e2e      # 13 Playwright tests — needs both servers running
 ```

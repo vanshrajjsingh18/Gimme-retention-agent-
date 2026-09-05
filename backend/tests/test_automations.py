@@ -39,6 +39,7 @@ from app.core.enums import (
     OrderStatus,
     RecurrenceKind,
     SendStatus,
+    SequenceTrigger,
     SkipReason,
 )
 from app.core.timezones import combine_local, to_local
@@ -1673,3 +1674,320 @@ class TestFrequencyCaps:
             for r in report.results
         ]
         assert len(report.results) == 1
+
+# ==========================================================================
+# Sequence trigger types
+# ==========================================================================
+class TestSequenceTriggers:
+    """The clock a sequence counts from is not always when somebody joined."""
+
+    def test_segment_entry_starts_the_clock_now(self, db, make_customer, sequence):
+        customer = make_customer()
+        automation = sequence([customer.id], trigger_type=SequenceTrigger.SEGMENT_ENTRY.value)
+        sequences.enroll(db, automation, now=MONDAY_10AM)
+
+        enrollment = sequences.active_enrollments(db, automation)[0]
+        assert enrollment.trigger_at == MONDAY_10AM
+
+    def test_signup_trigger_counts_from_their_signup_date(
+        self, db, make_customer, sequence
+    ):
+        signed_up = MONDAY_10AM - timedelta(days=3)
+        customer = make_customer(signup_date=signed_up)
+        automation = sequence([customer.id], trigger_type=SequenceTrigger.SIGNUP.value)
+        sequences.enroll(db, automation, now=MONDAY_10AM)
+
+        enrollment = sequences.active_enrollments(db, automation)[0]
+        assert enrollment.trigger_at == signed_up
+        # Enrolled today, but the clock started three days ago.
+        assert enrollment.enrolled_at == MONDAY_10AM
+
+    def test_last_order_trigger_counts_from_their_most_recent_order(
+        self, db, make_customer, sequence
+    ):
+        customer = make_customer()
+        for order in friday_orders(customer.id, 3):
+            db.add(order)
+        db.commit()
+        latest = max(o.ordered_at for o in customer.orders)
+
+        automation = sequence([customer.id], trigger_type=SequenceTrigger.LAST_ORDER.value)
+        sequences.enroll(db, automation, now=MONDAY_10AM)
+
+        assert sequences.active_enrollments(db, automation)[0].trigger_at == latest
+
+    def test_a_customer_without_the_trigger_is_not_enrolled(
+        self, db, make_customer, sequence
+    ):
+        """Pretending the clock starts now would silently change the sequence."""
+        customer = make_customer(signup_date=None)
+        automation = sequence([customer.id], trigger_type=SequenceTrigger.SIGNUP.value)
+
+        result = sequences.enroll(db, automation, now=MONDAY_10AM)
+
+        assert result["enrolled"] == 0
+        assert result["skipped_no_trigger"] == 1
+        assert sequences.active_enrollments(db, automation) == []
+
+    def test_a_manual_sequence_enrols_nobody_on_its_own(
+        self, db, make_customer, sequence
+    ):
+        customer = make_customer()
+        automation = sequence([customer.id], trigger_type=SequenceTrigger.MANUAL.value)
+
+        assert sequences.enroll(db, automation, now=MONDAY_10AM)["enrolled"] == 0
+        assert run_automation(db, automation, now=MONDAY_10AM).sent == 0
+
+    def test_manual_enrollment_adds_named_customers(self, db, make_customer, sequence):
+        from app.automations.service import enroll_customers
+
+        customer = make_customer()
+        automation = sequence([customer.id], trigger_type=SequenceTrigger.MANUAL.value)
+
+        result = enroll_customers(db, automation, [customer.id], now=MONDAY_10AM)
+
+        assert result["enrolled"] == 1
+        assert run_automation(db, automation, now=MONDAY_10AM).sent == 1
+
+    def test_manual_enrollment_does_not_reset_someone_already_partway(
+        self, db, make_customer, sequence
+    ):
+        from app.automations.service import enroll_customers
+
+        customer = make_customer()
+        automation = sequence([customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+        assert sequences.active_enrollments(db, automation)[0].current_step == 1
+
+        result = enroll_customers(db, automation, [customer.id], now=MONDAY_10AM)
+
+        assert result["enrolled"] == 0
+        assert result["already_enrolled"] == 1
+        assert sequences.active_enrollments(db, automation)[0].current_step == 1
+
+    def test_a_back_dated_trigger_skips_steps_that_already_came_due(
+        self, db, make_customer, sequence
+    ):
+        """Enrolling somebody today must not text them about last month.
+
+        A Day 0 / 7 / 14 sequence triggered on a signup 30 days ago would
+        otherwise fire all three in three consecutive runs.
+        """
+        customer = make_customer(signup_date=MONDAY_10AM - timedelta(days=30))
+        automation = sequence([customer.id], trigger_type=SequenceTrigger.SIGNUP.value)
+        sequences.enroll(db, automation, now=MONDAY_10AM)
+
+        report = run_automation(db, automation, now=MONDAY_10AM)
+
+        # Every step's due date is in the past, so none is replayed and the
+        # customer finishes the sequence without being messaged at all.
+        assert report.sent == 0
+        enrollment = db.execute(
+            select(AutomationEnrollment).where(
+                AutomationEnrollment.automation_id == automation.id
+            )
+        ).scalar_one()
+        assert enrollment.current_step == len(STEPS)
+
+    def test_a_partly_elapsed_trigger_resumes_at_the_right_step(
+        self, db, make_customer, sequence
+    ):
+        """Signed up 8 days ago: Day 0 is past, Day 7 is due, Day 14 is not."""
+        customer = make_customer(signup_date=MONDAY_10AM - timedelta(days=8))
+        automation = sequence([customer.id], trigger_type=SequenceTrigger.SIGNUP.value)
+        sequences.enroll(db, automation, now=MONDAY_10AM)
+
+        report = run_automation(db, automation, now=MONDAY_10AM)
+
+        assert report.sent == 1
+        assert report.results[0].body.startswith("Day seven")
+
+
+# ==========================================================================
+# Pausing one customer
+# ==========================================================================
+class TestEnrollmentPause:
+    """A pause is a human saying "not this one"; STOPPED is the system
+    deciding they are done. Conflating them loses the difference between
+    resumable and finished."""
+
+    def test_a_paused_customer_receives_no_further_steps(
+        self, db, make_customer, sequence
+    ):
+        from app.automations.service import set_enrollment_paused
+
+        customer = make_customer()
+        automation = sequence([customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+        enrollment = sequences.active_enrollments(db, automation)[0]
+
+        set_enrollment_paused(db, enrollment, paused=True)
+
+        assert run_automation(db, automation, now=MONDAY_10AM + timedelta(days=7)).sent == 0
+
+    def test_resuming_picks_up_where_they_left_off(self, db, make_customer, sequence):
+        from app.automations.service import set_enrollment_paused
+
+        customer = make_customer()
+        automation = sequence([customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+        enrollment = sequences.active_enrollments(db, automation)[0]
+        set_enrollment_paused(db, enrollment, paused=True)
+        set_enrollment_paused(db, enrollment, paused=False)
+
+        report = run_automation(db, automation, now=MONDAY_10AM + timedelta(days=7))
+
+        assert report.sent == 1
+        # Step two, not step one — their progress survived the pause.
+        assert report.results[0].body.startswith("Day seven")
+
+    def test_a_stopped_enrollment_cannot_be_paused(self, db, make_customer, sequence):
+        from app.automations.service import set_enrollment_paused
+
+        customer = make_customer()
+        automation = sequence([customer.id])
+        sequences.enroll(db, automation, now=MONDAY_10AM)
+        enrollment = sequences.active_enrollments(db, automation)[0]
+        sequences.stop_enrollment(enrollment, "Opted out.", at=MONDAY_10AM)
+        db.commit()
+
+        with pytest.raises(AutomationError, match="active"):
+            set_enrollment_paused(db, enrollment, paused=True)
+
+    def test_pausing_the_whole_automation_is_still_separate(
+        self, db, make_customer, sequence
+    ):
+        """Per-customer pause must not be confused with pausing the campaign."""
+        from app.automations.service import pause as pause_automation
+
+        customer = make_customer()
+        automation = sequence([customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+        pause_automation(db, automation)
+
+        assert sequences.active_enrollments(db, automation)[0].status == (
+            EnrollmentStatus.ACTIVE.value
+        )
+        with pytest.raises(AutomationError):
+            run_automation(db, automation, now=MONDAY_10AM + timedelta(days=7))
+
+
+# ==========================================================================
+# Message variants
+# ==========================================================================
+class TestMessageVariants:
+    VARIANTS = [
+        "Variant A for {first_name}. Reply STOP to opt out.",
+        "Variant B for {first_name}. Reply STOP to opt out.",
+    ]
+
+    def test_variants_are_spread_across_the_audience(
+        self, db, make_customer, make_automation
+    ):
+        ids = [make_customer().id for _ in range(6)]
+        automation = make_automation(
+            manual_customer_ids=ids, message_variants=self.VARIANTS
+        )
+
+        result = preview(db, automation, now=MONDAY_10AM)
+        bodies = {r["body"].split(" for ")[0] for r in result["recipients"]}
+
+        assert bodies == {"Variant A", "Variant B"}
+
+    def test_a_customer_always_gets_the_same_variant(
+        self, db, make_customer, make_automation
+    ):
+        """Otherwise the preview is a lie about what the live run will send."""
+        customer = make_customer()
+        automation = make_automation(
+            manual_customer_ids=[customer.id], message_variants=self.VARIANTS
+        )
+
+        first = preview(db, automation, now=MONDAY_10AM)["recipients"][0]["body"]
+        second = preview(db, automation, now=MONDAY_10AM)["recipients"][0]["body"]
+        live = run_automation(db, automation, now=MONDAY_10AM).results[0].body
+
+        assert first == second == live
+
+    def test_the_ledger_records_which_variant_went_out(
+        self, db, make_customer, make_automation
+    ):
+        customer = make_customer()
+        automation = make_automation(
+            manual_customer_ids=[customer.id], message_variants=self.VARIANTS
+        )
+        run_automation(db, automation, now=MONDAY_10AM)
+
+        row = sends_for(db, automation)[0]
+        assert row.variant_index in (0, 1)
+        assert f"Variant {'AB'[row.variant_index]}" in row.body
+
+    def test_no_variants_falls_back_to_the_single_template(
+        self, db, make_customer, make_automation
+    ):
+        customer = make_customer()
+        automation = make_automation(manual_customer_ids=[customer.id])
+        run_automation(db, automation, now=MONDAY_10AM)
+
+        assert sends_for(db, automation)[0].variant_index is None
+
+    def test_blank_variants_are_ignored(self, db, make_customer, make_automation):
+        customer = make_customer()
+        automation = make_automation(
+            manual_customer_ids=[customer.id],
+            message_variants=["", "   "],
+            message_template="Fallback. Reply STOP to opt out.",
+        )
+        report = run_automation(db, automation, now=MONDAY_10AM)
+        assert report.results[0].body == "Fallback. Reply STOP to opt out."
+
+
+# ==========================================================================
+# Nudge lead time
+# ==========================================================================
+class TestNudgeLeadTime:
+    def test_the_nudge_arrives_before_their_usual_window(
+        self, db, make_customer, make_automation
+    ):
+        """The point is to reach them while they are still deciding."""
+        customer = make_customer()
+        for order in friday_orders(customer.id, 6, hour=15):
+            db.add(order)
+        db.commit()
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value, manual_customer_ids=[customer.id]
+        )
+        nudge.enroll(db, automation, now=MONDAY_10AM)
+
+        due = to_local(nudge._active(db, automation)[0].next_due_at)
+        assert due.hour == 13, f"expected 15:00 minus a 2h lead, got {due}"
+
+    def test_the_lead_is_configurable(self, db, make_customer, make_automation):
+        customer = make_customer()
+        for order in friday_orders(customer.id, 6, hour=15):
+            db.add(order)
+        db.commit()
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value,
+            manual_customer_ids=[customer.id],
+            config={"lead_hours": 0},
+        )
+        nudge.enroll(db, automation, now=MONDAY_10AM)
+
+        assert to_local(nudge._active(db, automation)[0].next_due_at).hour == 15
+
+    def test_the_lead_never_pushes_a_nudge_outside_business_hours(
+        self, db, make_customer, make_automation
+    ):
+        """A 10am buyer minus two hours would be 08:00, before the window."""
+        customer = make_customer()
+        for order in friday_orders(customer.id, 6, hour=10):
+            db.add(order)
+        db.commit()
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value, manual_customer_ids=[customer.id]
+        )
+        nudge.enroll(db, automation, now=MONDAY_10AM)
+
+        due = to_local(nudge._active(db, automation)[0].next_due_at)
+        assert 9 <= due.hour < 19, f"{due} is outside business hours"

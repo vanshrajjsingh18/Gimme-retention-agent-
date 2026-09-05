@@ -22,11 +22,13 @@ from app.core.enums import (
     EnrollmentStatus,
     RecurrenceKind,
     SendStatus,
+    SequenceTrigger,
 )
 from app.models.base import utcnow
 from app.models.entities import (
     AuditLog,
     Automation,
+    Customer,
     AutomationEnrollment,
     AutomationSend,
     AutomationStep,
@@ -61,7 +63,9 @@ def create_automation(
     send_time_local: str = "10:00",
     starts_at: datetime | None = None,
     ends_at: datetime | None = None,
+    trigger_type: str | None = None,
     message_template: str = "",
+    message_variants: list[str] | None = None,
     template_overrides: dict | None = None,
     config: dict | None = None,
     stop_on_order: bool = True,
@@ -117,7 +121,9 @@ def create_automation(
         starts_at=starts_at,
         ends_at=ends_at,
         config=config or {},
+        trigger_type=trigger_type or SequenceTrigger.SEGMENT_ENTRY.value,
         message_template=message_template,
+        message_variants=list(message_variants or []),
         template_overrides=template_overrides or {},
         campaign_id=campaign.id,
         stop_on_order=stop_on_order,
@@ -343,6 +349,119 @@ def resume(db: Session, automation: Automation, *, now: datetime | None = None) 
     if automation.status != AutomationStatus.PAUSED.value:
         raise AutomationError("Only a paused automation can be resumed.")
     return activate(db, automation, now=now)
+
+
+def set_enrollment_paused(
+    db: Session, enrollment: AutomationEnrollment, *, paused: bool, actor: str = "system"
+) -> AutomationEnrollment:
+    """Hold or release one customer's place in an automation.
+
+    Distinct from STOPPED, which is the system deciding they are done (opted
+    out, ordered, campaign ended). A pause is a human saying "not this one, not
+    now", and it is reversible without losing their progress.
+    """
+    if paused and enrollment.status != EnrollmentStatus.ACTIVE.value:
+        raise AutomationError(
+            f"Only an active enrollment can be paused (currently {enrollment.status})."
+        )
+    if not paused and enrollment.status != EnrollmentStatus.PAUSED.value:
+        raise AutomationError(
+            f"Only a paused enrollment can be resumed (currently {enrollment.status})."
+        )
+
+    enrollment.status = (
+        EnrollmentStatus.PAUSED.value if paused else EnrollmentStatus.ACTIVE.value
+    )
+    enrollment.stop_reason = "Paused by an operator." if paused else None
+    db.add(
+        AuditLog(
+            actor=actor,
+            action="ENROLLMENT_PAUSED" if paused else "ENROLLMENT_RESUMED",
+            entity_type="automation_enrollment",
+            entity_id=str(enrollment.id),
+            detail={
+                "automation_id": enrollment.automation_id,
+                "customer_id": enrollment.customer_id,
+                "current_step": enrollment.current_step,
+            },
+        )
+    )
+    db.commit()
+    return enrollment
+
+
+def enroll_customers(
+    db: Session,
+    automation: Automation,
+    customer_ids: list[int],
+    *,
+    now: datetime | None = None,
+    actor: str = "system",
+) -> dict:
+    """Enrol named customers by hand — the MANUAL sequence trigger.
+
+    Also usable to add somebody to any sequence out of band. Already-enrolled
+    customers are left exactly as they are rather than being reset to step one.
+    """
+    from app.automations.sequences import resolve_trigger_at
+
+    if automation.kind != AutomationKind.SEQUENCE.value:
+        raise AutomationError("Only a sequence takes manual enrollments.")
+
+    now = now or utcnow()
+    existing = set(
+        db.execute(
+            select(AutomationEnrollment.customer_id).where(
+                AutomationEnrollment.automation_id == automation.id
+            )
+        )
+        .scalars()
+        .all()
+    )
+    wanted = [cid for cid in customer_ids if cid not in existing]
+    customers = {
+        c.id: c
+        for c in db.execute(select(Customer).where(Customer.id.in_(wanted))).scalars().all()
+    } if wanted else {}
+
+    enrolled, missing, no_trigger = 0, 0, 0
+    for customer_id in wanted:
+        customer = customers.get(customer_id)
+        if customer is None:
+            missing += 1
+            continue
+        trigger_at = resolve_trigger_at(automation, customer, now=now)
+        if trigger_at is None:
+            no_trigger += 1
+            continue
+        db.add(
+            AutomationEnrollment(
+                automation_id=automation.id,
+                customer_id=customer_id,
+                status=EnrollmentStatus.ACTIVE.value,
+                enrolled_at=now,
+                trigger_at=trigger_at,
+                current_step=0,
+            )
+        )
+        enrolled += 1
+
+    db.add(
+        AuditLog(
+            actor=actor,
+            action="ENROLLMENTS_ADDED",
+            entity_type="automation",
+            entity_id=str(automation.id),
+            detail={"requested": len(customer_ids), "enrolled": enrolled},
+        )
+    )
+    db.commit()
+    return {
+        "enrolled": enrolled,
+        "already_enrolled": len(customer_ids) - len(wanted),
+        "unknown_customers": missing,
+        "skipped_no_trigger": no_trigger,
+    }
 
 
 # --------------------------------------------------------------------------

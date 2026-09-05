@@ -238,10 +238,31 @@ class EnrollmentMode(StrEnum):
 
 class EnrollmentStatus(StrEnum):
     ACTIVE = "ACTIVE"
+    #: Held by a human for this customer only, and resumable. Distinct from
+    #: STOPPED, which is the system deciding they are done.
+    PAUSED = "PAUSED"
     #: Reached the end of the step list.
     COMPLETED = "COMPLETED"
     #: Left early — opted out, ordered, or fell out of the segment.
     STOPPED = "STOPPED"
+
+
+class SequenceTrigger(StrEnum):
+    """What starts a customer's clock in a sequence.
+
+    The step offsets are measured from this moment, which is not always the
+    moment they were enrolled — a signup-triggered sequence enrolled today
+    counts from a signup date that may be weeks old.
+    """
+
+    #: The moment they joined the audience. The clock starts now.
+    SEGMENT_ENTRY = "SEGMENT_ENTRY"
+    #: Their signup date, however long ago that was.
+    SIGNUP = "SIGNUP"
+    #: Their most recent completed order.
+    LAST_ORDER = "LAST_ORDER"
+    #: Nobody is enrolled automatically; an operator enrolls them by hand.
+    MANUAL = "MANUAL"
 
 
 class SendStatus(StrEnum):
@@ -271,6 +292,12 @@ class SkipReason(StrEnum):
     PENDING_ORDER = "PENDING_ORDER"
     LEFT_SEGMENT = "LEFT_SEGMENT"
     VALIDATION_FAILED = "VALIDATION_FAILED"
+    #: The step's due date fell before the customer joined, because the
+    #: trigger is back-dated. Sending it would text them about a moment that
+    #: has already passed.
+    TRIGGER_IN_PAST = "TRIGGER_IN_PAST"
+    #: An operator paused this specific customer's enrollment.
+    ENROLLMENT_PAUSED = "ENROLLMENT_PAUSED"
 
 
 class RecurrenceKind(StrEnum):

@@ -536,3 +536,52 @@ after lapsing, however they found us". Same relabelling on the churn page's
 one they are, especially when they sit in the same panel. The number was right
 in both places; only the English was wrong, which is exactly the kind of defect
 a test suite will never catch and a screenshot catches immediately.
+
+---
+
+## 2026-09-05 — The schema reconciler crashed on a JSON column instead of refusing
+
+**Found by:** Adding `message_variants: Mapped[list] = mapped_column(JSON,
+nullable=False, default=list)` and starting the app.
+
+**Failure:** `sqlite3.OperationalError: Cannot add a NOT NULL column with
+default value NULL`. The reconciler's safety guard checked
+`column.default is None` before adding a NOT NULL column — but `default=list`
+is a *callable* default. It exists, so the guard passed it as safe, and then
+the generated ALTER carried no DEFAULT clause because a Python callable cannot
+be written into DDL. So the guard let through exactly the case it was meant to
+catch, and the tool I wrote to make schema changes painless crashed on the
+first schema change after writing it.
+
+**Fix:** The guard now asks whether a *literal* can be derived, not whether a
+default exists. Callable defaults are evaluated — `list` → `[]`, `dict` → `{}`
+— and serialised as JSON, which is what makes JSON columns addable at all;
+anything that cannot be evaluated is refused and reported as needing a real
+migration, as before.
+
+**Preventive action:** A test adds two JSON columns with callable defaults to a
+table containing a row and asserts both land with `[]` and `{}` backfilled.
+"Has a default" and "has a default the DDL can express" are different
+questions, and only the second one matters here.
+
+---
+
+## 2026-09-05 — Skipping back-dated sequence steps was too aggressive by a day
+
+**Found by:** A test written from the spec — enrol somebody who signed up eight
+days ago into a Day 0 / 7 / 14 sequence and expect the Day 7 message.
+
+**Failure:** Nothing was sent. The rule was "skip any step whose due date falls
+before the customer joined", which is right for a Day 0 welcome to somebody who
+signed up three months ago, but also silently swallowed a Day 7 message whose
+moment passed *yesterday*. A step one day stale is still worth sending; the
+rule made no distinction between one day and one year.
+
+**Fix:** A `catch_up_days` grace window, default 3. Steps that came due within
+it are sent; older ones are skipped and the customer resumes at the first step
+still worth sending. Signed up eight days ago → Day 7 arrives; signed up thirty
+days ago → nothing, and the enrollment completes.
+
+**Preventive action:** Both cases are tested by name. The first version of the
+rule was defensible in isolation and wrong at the boundary, which is the usual
+shape of a rule written without a concrete example either side of it.

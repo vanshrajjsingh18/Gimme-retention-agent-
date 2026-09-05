@@ -37,6 +37,8 @@ export default function AutomationForm({
   const [stopOnOrder, setStopOnOrder] = useState(true);
   const [endsAt, setEndsAt] = useState('');
   const [steps, setSteps] = useState<StepDraft[]>(STARTER_STEPS);
+  const [triggerType, setTriggerType] = useState('SEGMENT_ENTRY');
+  const [variants, setVariants] = useState<string[]>([]);
   const [minOrders, setMinOrders] = useState(3);
   const [minGapDays, setMinGapDays] = useState(7);
   const [saving, setSaving] = useState(false);
@@ -64,6 +66,8 @@ export default function AutomationForm({
         stop_on_order: stopOnOrder,
         ends_at: isNudge || !endsAt ? null : new Date(endsAt).toISOString(),
         steps: isSequence ? steps : [],
+        trigger_type: isSequence ? triggerType : 'SEGMENT_ENTRY',
+        message_variants: isSequence || isNudge ? [] : variants.filter((v) => v.trim()),
         config: isNudge ? { min_orders: minOrders, min_gap_days: minGapDays } : {},
       });
       onCreated(automation);
@@ -200,6 +204,28 @@ export default function AutomationForm({
 
       {isSequence && (
         <>
+          <div>
+            <label className="label" htmlFor="automation-trigger">
+              Start the clock from
+            </label>
+            <select
+              id="automation-trigger"
+              className="input"
+              value={triggerType}
+              onChange={(event) => setTriggerType(event.target.value)}
+            >
+              <option value="SEGMENT_ENTRY">When they join the audience</option>
+              <option value="SIGNUP">Their signup date</option>
+              <option value="LAST_ORDER">Their last order</option>
+              <option value="MANUAL">Nobody automatically — I’ll enrol them</option>
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              Step offsets are counted from this moment. A signup or last-order trigger can
+              be weeks in the past, so steps that came due more than three days before
+              somebody joined are skipped rather than fired at them all at once.
+            </p>
+          </div>
+
           <div>
             <label className="label" htmlFor="automation-enrollment">
               Enrollment
@@ -395,6 +421,56 @@ export default function AutomationForm({
             {isNudge ? ', {usual_day}, {usual_category}, {offer_line}' : ''}
           </p>
         </div>
+      )}
+
+      {!isSequence && !isNudge && (
+        <fieldset className="rounded-lg border border-slate-200 p-3">
+          <legend className="px-1 text-xs font-medium text-slate-600">
+            Wording variants (optional)
+          </legend>
+          <p className="mb-3 text-xs text-slate-500">
+            Split the audience across alternative wordings. Each customer is assigned by
+            their id, not at random, so the preview shows exactly what they will get.
+          </p>
+          {variants.map((variant, index) => (
+            <div key={index} className="mb-2">
+              <label className="label" htmlFor={`variant-${index}`}>
+                Variant {String.fromCharCode(65 + index)}
+              </label>
+              <textarea
+                id={`variant-${index}`}
+                className="input"
+                rows={2}
+                value={variant}
+                onChange={(event) =>
+                  setVariants((current) =>
+                    current.map((entry, i) => (i === index ? event.target.value : entry)),
+                  )
+                }
+                placeholder="Hi {first_name}, … Reply STOP to opt out."
+              />
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setVariants((current) => [...current, ''])}
+              disabled={variants.length >= 10}
+            >
+              Add variant
+            </button>
+            {variants.length > 0 && (
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setVariants((current) => current.slice(0, -1))}
+              >
+                Remove last
+              </button>
+            )}
+          </div>
+        </fieldset>
       )}
 
       {error && (

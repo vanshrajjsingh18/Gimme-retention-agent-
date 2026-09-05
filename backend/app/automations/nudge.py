@@ -66,6 +66,11 @@ logger = logging.getLogger(__name__)
 #: lands the evening before they would typically order.
 DEFAULT_LEAD_DAYS = 0
 
+#: Hours ahead of their usual slot. The point of the feature is to arrive
+#: *before* they would have ordered, while they are still deciding — sending at
+#: the exact hour they usually buy is often too late to change anything.
+DEFAULT_LEAD_HOURS = 2
+
 #: Never nudge the same customer more often than this, regardless of pattern.
 #: A weekly buyer gets a weekly nudge; a monthly buyer does not get four.
 DEFAULT_MIN_GAP_DAYS = 7
@@ -81,6 +86,7 @@ STOP_OPTED_OUT = "Customer opted out."
 def config_of(automation: Automation) -> dict:
     cfg = dict(automation.config or {})
     cfg.setdefault("lead_days", DEFAULT_LEAD_DAYS)
+    cfg.setdefault("lead_hours", DEFAULT_LEAD_HOURS)
     cfg.setdefault("min_gap_days", DEFAULT_MIN_GAP_DAYS)
     cfg.setdefault("min_orders", MIN_ORDERS_FOR_PATTERN)
     cfg.setdefault("pattern_max_age_days", PATTERN_STALE_AFTER_DAYS)
@@ -131,7 +137,7 @@ def enroll(
                 status=EnrollmentStatus.ACTIVE.value,
                 enrolled_at=now,
                 pattern=pattern.as_dict(),
-                next_due_at=_due_from_pattern(pattern, after=now, lead_days=cfg["lead_days"]),
+                next_due_at=_due_from_pattern(pattern, after=now, lead_days=cfg["lead_days"], lead_hours=cfg["lead_hours"]),
             )
         )
         enrolled += 1
@@ -189,7 +195,10 @@ def refresh_patterns(
             dropped += 1
             continue
         enrollment.next_due_at = _due_from_pattern(
-            pattern, after=max(now, enrollment.last_sent_at or now), lead_days=cfg["lead_days"]
+            pattern,
+            after=max(now, enrollment.last_sent_at or now),
+            lead_days=cfg["lead_days"],
+            lead_hours=cfg["lead_hours"],
         )
         refreshed += 1
 
@@ -212,13 +221,15 @@ def _active(db: Session, automation: Automation) -> list[AutomationEnrollment]:
 
 
 def _due_from_pattern(
-    pattern: OrderPattern, *, after: datetime, lead_days: int
+    pattern: OrderPattern, *, after: datetime, lead_days: int, lead_hours: int = 0
 ) -> datetime | None:
     """Next due time in naive UTC, from a pattern expressed in local time."""
     local_after = to_local(after).replace(tzinfo=None)
     local_due = next_nudge_time(pattern, after=local_after, lead_days=lead_days)
     if local_due is None:
         return None
+    # Arrive shortly before their usual window rather than during it.
+    local_due -= timedelta(hours=lead_hours)
     clamped = clamp_to_window(local_due)
     # Clamping an overnight pattern moves it to the evening before, which can
     # land in the past. Roll to the next weekly occurrence rather than firing
@@ -472,7 +483,8 @@ def _prospective_enrollments(
                 enrolled_at=now,
                 pattern=pattern.as_dict(),
                 next_due_at=_due_from_pattern(
-                    pattern, after=now, lead_days=cfg["lead_days"]
+                    pattern, after=now, lead_days=cfg["lead_days"],
+                    lead_hours=cfg["lead_hours"],
                 ),
             )
         )
@@ -538,7 +550,10 @@ def run(
             )
 
     if not dry_run:
-        _reschedule(db, report, by_customer, lead_days=cfg["lead_days"], now=now)
+        _reschedule(
+            db, report, by_customer,
+            lead_days=cfg["lead_days"], lead_hours=cfg["lead_hours"], now=now,
+        )
         db.commit()
     return report
 
@@ -602,6 +617,7 @@ def _reschedule(
     by_customer: dict[int, AutomationEnrollment],
     *,
     lead_days: int,
+    lead_hours: int,
     now: datetime,
 ) -> None:
     """Set each customer's next due time after a run.
@@ -618,6 +634,6 @@ def _reschedule(
         if result.status == SendStatus.SENT:
             enrollment.last_sent_at = now
         enrollment.next_due_at = _due_from_pattern(
-            pattern, after=now, lead_days=lead_days
+            pattern, after=now, lead_days=lead_days, lead_hours=lead_hours
         )
     db.flush()

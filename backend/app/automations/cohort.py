@@ -80,6 +80,20 @@ def template_for(db: Session, automation: Automation) -> str:
     return default_template(segment_name=name, objective=automation.objective)
 
 
+def variant_for(automation: Automation, customer_id: int) -> tuple[str | None, int | None]:
+    """Which wording this customer gets, and its index.
+
+    Assigned by customer id rather than at random, so the same customer always
+    gets the same variant and a preview shows exactly what a live run will
+    send. Random assignment would make the preview a lie.
+    """
+    variants = [v for v in (automation.message_variants or []) if v and v.strip()]
+    if not variants:
+        return None, None
+    index = customer_id % len(variants)
+    return variants[index], index
+
+
 def build_candidates(
     db: Session, automation: Automation, *, now: datetime | None = None
 ) -> list[Candidate]:
@@ -98,17 +112,22 @@ def build_candidates(
     )
     candidates = []
     for customer in customers:
-        body = render(template, build_context(customer, brand, now=now))
+        variant, variant_index = variant_for(automation, customer.id)
+        body = render(variant or template, build_context(customer, brand, now=now))
+        context = {
+            "source": "cohort",
+            "segment": name,
+            "matched_at": now.isoformat(),
+        }
+        if variant_index is not None:
+            context["variant_index"] = variant_index
         candidates.append(
             Candidate(
                 customer_id=customer.id,
                 scheduled_for=when,
                 body=body,
-                context={
-                    "source": "cohort",
-                    "segment": name,
-                    "matched_at": now.isoformat(),
-                },
+                variant_index=variant_index,
+                context=context,
             )
         )
     return candidates

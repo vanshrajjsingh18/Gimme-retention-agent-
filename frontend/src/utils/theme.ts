@@ -99,6 +99,15 @@ export const SKIP_REASON_LABEL: Record<string, string> = {
   PENDING_ORDER: 'Order in flight',
   LEFT_SEGMENT: 'No longer matches segment',
   VALIDATION_FAILED: 'Failed content checks',
+  TRIGGER_IN_PAST: 'Step already past when they joined',
+  ENROLLMENT_PAUSED: 'This customer is paused',
+};
+
+export const SEQUENCE_TRIGGER_LABEL: Record<string, string> = {
+  SEGMENT_ENTRY: 'When they join the audience',
+  SIGNUP: 'Their signup date',
+  LAST_ORDER: 'Their last order',
+  MANUAL: 'Enrolled by hand',
 };
 
 export const AUTOMATION_KIND_LABEL: Record<string, string> = {

@@ -16,6 +16,7 @@ from app.core.enums import (
     LifecycleStage,
     OrderStatus,
     RecurrenceKind,
+    SequenceTrigger,
 )
 
 
@@ -653,6 +654,12 @@ class AutomationStepOut(AutomationStepIn):
 
 
 class AutomationCreate(BaseModel):
+    #: SEQUENCE only: what starts each customer's clock.
+    trigger_type: SequenceTrigger = SequenceTrigger.SEGMENT_ENTRY
+    #: COHORT_BULK: alternative wordings, assigned deterministically by
+    #: customer id so a preview matches the live send.
+    message_variants: list[str] = Field(default_factory=list, max_length=10)
+
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
     kind: AutomationKind
@@ -676,6 +683,9 @@ class AutomationCreate(BaseModel):
 
 
 class AutomationUpdate(BaseModel):
+    trigger_type: SequenceTrigger | None = None
+    message_variants: list[str] | None = Field(default=None, max_length=10)
+
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
     segment_id: int | None = None
@@ -711,7 +721,9 @@ class AutomationOut(BaseModel):
     send_time_local: str
     starts_at: datetime | None
     ends_at: datetime | None
+    trigger_type: str
     message_template: str
+    message_variants: list
     template_overrides: dict
     config: dict
     campaign_id: int | None
@@ -747,6 +759,7 @@ class AutomationSendOut(BaseModel):
     error_message: str | None
     is_dry_run: bool
     priority: int
+    variant_index: int | None = None
 
 
 class AutomationEnrollmentOut(BaseModel):
@@ -757,6 +770,7 @@ class AutomationEnrollmentOut(BaseModel):
     customer_id: int
     status: str
     enrolled_at: datetime
+    trigger_at: datetime | None = None
     current_step: int
     last_sent_at: datetime | None
     next_due_at: datetime | None

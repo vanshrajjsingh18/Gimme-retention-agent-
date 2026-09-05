@@ -34,6 +34,7 @@ from app.core.enums import (
     EnrollmentMode,
     EnrollmentStatus,
     OrderStatus,
+    SequenceTrigger,
 )
 from app.core.timezones import combine_local, local_date, to_local
 from app.models.base import utcnow
@@ -51,6 +52,40 @@ STOP_OPTED_OUT = "Customer opted out."
 STOP_ORDERED = "Customer placed an order — sequence goal met."
 STOP_ENDED = "Campaign end date passed."
 STOP_LEFT_SEGMENT = "Customer no longer matches the audience."
+
+#: How stale an already-due step may be and still be worth sending, for a
+#: back-dated trigger. A Day 7 message whose moment passed yesterday is still
+#: relevant; one from three weeks ago is not, and firing the whole backlog at
+#: somebody who just joined would be worse than sending nothing.
+DEFAULT_CATCH_UP_DAYS = 3
+
+
+def resolve_trigger_at(
+    automation: Automation, customer: Customer, *, now: datetime
+) -> datetime | None:
+    """When this customer's clock starts, per the sequence's trigger type.
+
+    Returns None when the trigger has not happened for them — a signup-triggered
+    sequence cannot enrol somebody with no signup date, and pretending it starts
+    now would silently turn it into a different sequence.
+    """
+    trigger = automation.trigger_type or SequenceTrigger.SEGMENT_ENTRY.value
+
+    if trigger == SequenceTrigger.SIGNUP.value:
+        return customer.signup_date
+    if trigger == SequenceTrigger.LAST_ORDER.value:
+        return _last_completed_order_at(customer)
+    # SEGMENT_ENTRY and MANUAL both start the clock when they join.
+    return now
+
+
+def _last_completed_order_at(customer: Customer) -> datetime | None:
+    dates = [
+        order.ordered_at
+        for order in customer.orders
+        if order.status == OrderStatus.COMPLETED.value
+    ]
+    return max(dates) if dates else None
 
 
 # --------------------------------------------------------------------------
@@ -83,18 +118,46 @@ def enroll(
     if automation.enrollment_mode == EnrollmentMode.FIXED_COHORT.value and existing:
         return {"enrolled": 0, "already_enrolled": len(existing), "mode": "FIXED_COHORT"}
 
-    candidate_ids = resolve_audience(db, automation, now=now)
+    # A manual sequence enrols nobody on its own; that is the whole point of
+    # choosing it.
+    if automation.trigger_type == SequenceTrigger.MANUAL.value:
+        return {
+            "enrolled": 0,
+            "already_enrolled": len(existing),
+            "mode": automation.enrollment_mode,
+            "skipped_no_trigger": 0,
+            "trigger": automation.trigger_type,
+        }
+
+    candidate_ids = [c for c in resolve_audience(db, automation, now=now) if c not in existing]
+    customers = {
+        c.id: c
+        for c in db.execute(select(Customer).where(Customer.id.in_(candidate_ids)))
+        .scalars()
+        .all()
+    } if candidate_ids else {}
+
     added = 0
+    no_trigger = 0
     for customer_id in candidate_ids:
-        if customer_id in existing:
+        customer = customers.get(customer_id)
+        if customer is None:
+            continue
+        trigger_at = resolve_trigger_at(automation, customer, now=now)
+        if trigger_at is None:
+            # No signup date, or no completed order — the trigger this sequence
+            # is defined by has not happened for them.
+            no_trigger += 1
             continue
         db.add(
             AutomationEnrollment(
                 automation_id=automation.id,
                 customer_id=customer_id,
                 status=EnrollmentStatus.ACTIVE.value,
-                # The clock starts here, not when the campaign was created.
                 enrolled_at=now,
+                # Step offsets count from here, which for a back-dated trigger
+                # is not the same as when they joined.
+                trigger_at=trigger_at,
                 current_step=0,
             )
         )
@@ -106,10 +169,13 @@ def enroll(
         "enrolled": added,
         "already_enrolled": len(existing),
         "mode": automation.enrollment_mode,
+        "skipped_no_trigger": no_trigger,
+        "trigger": automation.trigger_type or SequenceTrigger.SEGMENT_ENTRY.value,
     }
 
 
 def active_enrollments(db: Session, automation: Automation) -> list[AutomationEnrollment]:
+    """Enrolments the runner should act on. A paused customer is excluded."""
     return list(
         db.execute(
             select(AutomationEnrollment).where(
@@ -231,7 +297,8 @@ def step_due_at(
     10am" is 10am for the customer, not 10am UTC seven days later.
     """
     at = parse_local_time(step.send_time_local or automation.send_time_local)
-    day = local_date(enrollment.enrolled_at) + timedelta(days=step.offset_days)
+    clock = enrollment.trigger_at or enrollment.enrolled_at
+    day = local_date(clock) + timedelta(days=step.offset_days)
     return combine_local(day, at)
 
 
@@ -253,8 +320,23 @@ def due_steps(
     if not steps:
         return []
 
+    catch_up_days = int(
+        (automation.config or {}).get("catch_up_days", DEFAULT_CATCH_UP_DAYS)
+    )
     due: list[tuple[AutomationEnrollment, AutomationStep, datetime]] = []
     for enrollment in enrollments:
+        # A back-dated trigger (signup, last order) can leave early steps
+        # already past on the day somebody joins. Skip over the ones that are
+        # too stale to be worth sending rather than replaying the whole
+        # backlog at them, but keep a short grace window so a step that came
+        # due yesterday still lands.
+        cutoff = enrollment.enrolled_at - timedelta(days=catch_up_days)
+        while enrollment.current_step < len(steps):
+            step = steps[enrollment.current_step]
+            if step_due_at(automation, step, enrollment) >= cutoff:
+                break
+            enrollment.current_step += 1
+
         if enrollment.current_step >= len(steps):
             continue
         step = steps[enrollment.current_step]

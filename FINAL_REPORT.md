@@ -237,15 +237,15 @@ curl -X POST http://127.0.0.1:8000/api/v1/orders \
 | Suite | Tests | Result |
 | --- | --- | --- |
 | Backend unit — metrics, lifecycle, RFM, churn, NBA, segmentation, compliance, LLM | 221 | pass |
-| Backend unit — timezones, order patterns, schema reconciliation | 43 | pass |
+| Backend unit — timezones, order patterns, schema reconciliation | 44 | pass |
 | Backend integration — auth and ingestion APIs | 34 | pass |
 | Backend integration — automations API | 23 | pass |
-| Backend behaviour — the three campaign types and their shared pipeline | 100 | pass |
+| Backend behaviour — the three campaign types and their shared pipeline | 121 | pass |
 | Backend end-to-end — 24-step retention loop | 24 | pass |
 | Backend security | 29 | pass |
 | Frontend unit — formatters, chart helpers, rule builder, automation forms | 53 | pass |
 | Browser — Playwright against the live stack | 13 | pass |
-| **Total** | **540** | **all passing** |
+| **Total** | **562** | **all passing** |
 
 Notable properties asserted rather than assumed:
 

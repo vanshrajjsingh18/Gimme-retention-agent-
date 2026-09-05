@@ -77,6 +77,43 @@ def test_reconcile_is_idempotent(legacy_engine):
     assert reconcile_schema(legacy_engine) == {}
 
 
+def test_a_json_column_with_a_callable_default_can_be_added(tmp_path, monkeypatch):
+    """``default=list`` is the normal way to say "empty list" on a JSON column.
+
+    It exists but cannot be written into an ALTER statement, so a guard that
+    only checks "has a default" lets it through and SQLite then rejects the
+    statement. What matters is whether a *literal* can be derived.
+    """
+    from sqlalchemy import JSON
+
+    engine = create_engine(f"sqlite:///{tmp_path/'json.db'}", future=True)
+    old = MetaData()
+    Table("crates", old, Column("id", Integer, primary_key=True))
+    old.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO crates (id) VALUES (1)"))
+
+    current = MetaData()
+    Table(
+        "crates",
+        current,
+        Column("id", Integer, primary_key=True),
+        Column("tags", JSON, nullable=False, default=list),
+        Column("meta", JSON, nullable=False, default=dict),
+    )
+
+    class FakeBase:
+        metadata = current
+
+    monkeypatch.setattr("app.core.database.Base", FakeBase, raising=False)
+
+    assert reconcile_schema(engine) == {"crates": ["tags", "meta"]}
+    with engine.begin() as connection:
+        row = connection.execute(text("SELECT tags, meta FROM crates WHERE id = 1")).one()
+    assert row.tags == "[]"
+    assert row.meta == "{}"
+
+
 def test_a_not_null_column_without_a_default_is_refused(tmp_path, monkeypatch, caplog):
     """Adding it would give existing rows no value, so it needs a real migration."""
     engine = create_engine(f"sqlite:///{tmp_path/'strict.db'}", future=True)

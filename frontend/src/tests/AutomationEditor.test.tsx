@@ -23,6 +23,8 @@ function stubAutomation(overrides: Partial<Automation> = {}): Automation {
     send_time_local: '10:00',
     starts_at: null,
     ends_at: null,
+    trigger_type: 'SEGMENT_ENTRY',
+    message_variants: [],
     message_template: 'Hi {first_name}, it has been a while. Reply STOP to opt out.',
     template_overrides: {},
     config: {},

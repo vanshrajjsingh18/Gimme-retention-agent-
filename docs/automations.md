@@ -158,6 +158,13 @@ Copy defaults to the segment's tone unless overridden:
 Explicit `message_template` wins; then `template_overrides[segment_name]`; then
 the mapping above.
 
+**Variants.** `message_variants` holds up to ten alternative wordings for one
+send. A customer is assigned by `customer_id % len(variants)` rather than at
+random, so the same customer always gets the same variant and **a preview shows
+exactly what the live run will send** — random assignment would make the
+preview a lie. The chosen variant is recorded on the ledger row
+(`variant_index`), so which wording someone received is auditable afterwards.
+
 Recurrence is `ONCE`, `DAILY`, `WEEKLY` (with `recurrence_day` 0=Monday) or
 `MONTHLY` (with `recurrence_day` as day-of-month, clamped safely — a 31st
 schedule lands on the 30th in a 30-day month). All recurrence is computed in
@@ -171,6 +178,28 @@ Steps are timed by **`offset_days` from the customer's own enrollment**, not by
 calendar date. That is what makes a sequence reusable: Day 0 / Day 7 / Day 14
 means seven days after *this* customer joined, so the same sequence runs all
 year and everyone gets the same experience.
+
+**The trigger** decides what each customer's clock counts from. Step offsets
+are measured from this moment, which is not always when they joined:
+
+| Trigger | Clock starts at |
+| --- | --- |
+| `SEGMENT_ENTRY` (default) | The moment they join the audience |
+| `SIGNUP` | Their signup date, however long ago |
+| `LAST_ORDER` | Their most recent completed order |
+| `MANUAL` | Nobody is enrolled automatically; an operator adds them by hand |
+
+A customer for whom the trigger has not happened — no signup date, no completed
+order — is **not enrolled**, and the count is reported. Starting their clock
+"now" instead would quietly turn the campaign into a different one.
+
+**Back-dated triggers** need care. A signup-triggered Day 0 / 7 / 14 sequence
+enrolling somebody who signed up three months ago would otherwise fire all
+three steps in three consecutive runs. Steps whose moment passed more than
+`catch_up_days` (default **3**) before they joined are skipped, and the
+customer resumes at the first step still worth sending. Signed up eight days
+ago, they get Day 7; signed up thirty days ago, they get nothing and the
+enrollment completes.
 
 **Enrollment mode** is a per-campaign toggle:
 
@@ -186,6 +215,12 @@ go stale:
 | Customer opts out | Enrollment stopped, no later step is sent |
 | Customer places an order | Goal met — stopped (`stop_on_order`, default on). A *cancelled* order does not count |
 | Campaign `ends_at` passes | Remaining steps are not sent; the automation completes |
+
+One customer can also be **paused** on their own, without touching the rest of
+the campaign — `POST /automations/{id}/enrollments/{enrollment_id}/pause`, and
+`/resume` to release them. A pause is a person saying "not this one, not now"
+and keeps their progress; `STOPPED` is the system deciding they are finished.
+Conflating the two would lose the difference between resumable and done.
 
 One step per customer per run. If a sequence was paused for a fortnight and
 three steps came due, the customer gets the next one, not a burst of three.
@@ -229,6 +264,16 @@ signal is weighted higher.
 Patterns are recomputed daily by `refresh_order_patterns_job`, which only
 touches patterns past their age. A customer whose history no longer supports a
 pattern is **stopped**, not nudged on a stale one.
+
+### Arriving before the window
+
+`lead_hours` (default **2**) sends the nudge that far ahead of the customer's
+usual slot: the point is to reach them while they are still deciding, and a
+message arriving at the exact hour they normally buy is often too late to
+change anything. `lead_days` shifts whole days for a weekly rhythm.
+
+The lead never pushes a nudge outside business hours — a 10am buyer minus two
+hours would be 08:00, so the window clamp below brings it back to 09:00.
 
 ### Timing into business hours
 

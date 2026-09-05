@@ -32,6 +32,7 @@ import {
   AUTOMATION_KIND_LABEL,
   AUTOMATION_STATUS_BADGE,
   SEND_STATUS_BADGE,
+  SEQUENCE_TRIGGER_LABEL,
   SKIP_REASON_LABEL,
 } from '../utils/theme';
 
@@ -90,7 +91,9 @@ export default function AutomationDetailPage() {
   const { data: automation, loading, error, refetch } = useQuery<Automation>(base);
   const { data: stats, refetch: refetchStats } = useQuery<AutomationStats>(`${base}/stats`);
   const { data: sends, refetch: refetchSends } = useQuery<AutomationSend[]>(`${base}/sends?limit=50`);
-  const { data: enrollments } = useQuery<AutomationEnrollment[]>(`${base}/enrollments?limit=50`);
+  const { data: enrollments, refetch: refetchEnrollments } = useQuery<AutomationEnrollment[]>(
+    `${base}/enrollments?limit=50`,
+  );
 
   const [report, setReport] = useState<AutomationRunReport | null>(null);
   const [confirmRun, setConfirmRun] = useState(false);
@@ -101,12 +104,24 @@ export default function AutomationDetailPage() {
   const lifecycle = useMutation(async (action: string) =>
     api.post<Automation>(`${base}/${action}`),
   );
+  const enrollmentHold = useMutation(async (id: number, action: 'pause' | 'resume') =>
+    api.post<AutomationEnrollment>(`${base}/enrollments/${id}/${action}`),
+  );
 
   if (loading) return <LoadingState label="Loading automation…" />;
   if (error || !automation) return <ErrorState message={error ?? 'Not found.'} onRetry={refetch} />;
 
   const needsApproval = automation.require_approval && !automation.approved_at;
   const isActive = automation.status === 'ACTIVE';
+
+  /** Hold or release one customer without touching the rest of the campaign. */
+  async function holdEnrollment(enrollmentId: number, action: 'pause' | 'resume') {
+    const result = await enrollmentHold.run(enrollmentId, action);
+    if (result) {
+      notify(action === 'pause' ? 'Customer paused.' : 'Customer resumed.');
+      refetchEnrollments();
+    }
+  }
 
   async function act(action: string, message: string) {
     const result = await lifecycle.run(action);
@@ -260,6 +275,13 @@ export default function AutomationDetailPage() {
             />
             {automation.kind === 'SEQUENCE' && (
               <>
+                <Field
+                  label="Clock starts from"
+                  value={
+                    SEQUENCE_TRIGGER_LABEL[automation.trigger_type] ?? automation.trigger_type
+                  }
+                  hint="Step offsets are counted from this moment, not from today."
+                />
                 <Field label="Enrollment" value={humanize(automation.enrollment_mode)} />
                 <Field
                   label="Stops on order"
@@ -411,6 +433,7 @@ export default function AutomationDetailPage() {
                       <th className="table-head">
                         {automation.kind === 'NUDGE' ? 'Next nudge' : 'Step'}
                       </th>
+                      <th className="table-head" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -447,6 +470,26 @@ export default function AutomationDetailPage() {
                               ? formatBusinessTime(enrollment.next_due_at)
                               : '—'
                             : `Step ${enrollment.current_step + 1}`}
+                        </td>
+                        <td className="table-cell text-right">
+                          {enrollment.status === 'ACTIVE' && (
+                            <button
+                              type="button"
+                              className="btn-ghost text-xs"
+                              onClick={() => holdEnrollment(enrollment.id, 'pause')}
+                            >
+                              Pause
+                            </button>
+                          )}
+                          {enrollment.status === 'PAUSED' && (
+                            <button
+                              type="button"
+                              className="btn-ghost text-xs"
+                              onClick={() => holdEnrollment(enrollment.id, 'resume')}
+                            >
+                              Resume
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

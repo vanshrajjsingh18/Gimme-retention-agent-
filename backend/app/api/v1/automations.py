@@ -19,6 +19,7 @@ from app.automations.service import (
     activate,
     apply_update,
     approve,
+    enroll_customers,
     automation_stats,
     create_automation,
     pause,
@@ -26,6 +27,7 @@ from app.automations.service import (
     replace_steps,
     resume,
     run_automation,
+    set_enrollment_paused,
 )
 from app.core.database import get_db
 from app.core.enums import AutomationKind, AutomationStatus
@@ -121,7 +123,9 @@ def create(
             send_time_local=payload.send_time_local,
             starts_at=payload.starts_at,
             ends_at=payload.ends_at,
+            trigger_type=payload.trigger_type.value,
             message_template=payload.message_template,
+            message_variants=payload.message_variants,
             template_overrides=payload.template_overrides,
             config=payload.config,
             stop_on_order=payload.stop_on_order,
@@ -387,6 +391,63 @@ def list_enrollments(
         .scalars()
         .all()
     )
+
+
+@router.post(
+    "/automations/{automation_id}/enrollments/{enrollment_id}/pause",
+    response_model=AutomationEnrollmentOut,
+    tags=["automations"],
+)
+def pause_enrollment(
+    automation_id: int,
+    enrollment_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write),
+) -> AutomationEnrollment:
+    """Hold one customer's place without losing their progress."""
+    return _set_enrollment_paused(db, automation_id, enrollment_id, True, user)
+
+
+@router.post(
+    "/automations/{automation_id}/enrollments/{enrollment_id}/resume",
+    response_model=AutomationEnrollmentOut,
+    tags=["automations"],
+)
+def resume_enrollment(
+    automation_id: int,
+    enrollment_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write),
+) -> AutomationEnrollment:
+    return _set_enrollment_paused(db, automation_id, enrollment_id, False, user)
+
+
+def _set_enrollment_paused(
+    db: Session, automation_id: int, enrollment_id: int, paused: bool, user: User
+) -> AutomationEnrollment:
+    _get(db, automation_id)
+    enrollment = db.get(AutomationEnrollment, enrollment_id)
+    if enrollment is None or enrollment.automation_id != automation_id:
+        raise HTTPException(status_code=404, detail="Enrollment not found.")
+    try:
+        return set_enrollment_paused(db, enrollment, paused=paused, actor=user.email)
+    except AutomationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/automations/{automation_id}/enrollments", tags=["automations"])
+def add_enrollments(
+    automation_id: int,
+    customer_ids: list[int],
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write),
+) -> dict:
+    """Enrol named customers by hand — the MANUAL sequence trigger."""
+    automation = _get(db, automation_id)
+    try:
+        return enroll_customers(db, automation, customer_ids, actor=user.email)
+    except AutomationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/automations/{automation_id}/refresh-patterns", tags=["automations"])

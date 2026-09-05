@@ -94,6 +94,8 @@ class Candidate:
     body: str
     step_id: int | None = None
     enrollment_id: int | None = None
+    #: Which wording this recipient got, when the automation has variants.
+    variant_index: int | None = None
     #: Why this candidate exists — surfaced in dry-run previews so an operator
     #: can see the reasoning, e.g. the order pattern or the offer decision.
     context: dict = field(default_factory=dict)
@@ -533,6 +535,7 @@ def _record(
         provider_message_id=provider_message_id,
         is_dry_run=dry_run,
         priority=priority,
+        variant_index=candidate.variant_index,
         idempotency_key=key,
     )
     try:

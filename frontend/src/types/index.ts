@@ -494,6 +494,7 @@ export interface SystemStatus {
 
 export type AutomationKind = 'SEQUENCE' | 'NUDGE' | 'COHORT_BULK';
 export type AutomationStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED';
+export type SequenceTrigger = 'SEGMENT_ENTRY' | 'SIGNUP' | 'LAST_ORDER' | 'MANUAL';
 
 export interface AutomationStep {
   id: number;
@@ -523,7 +524,9 @@ export interface Automation {
   send_time_local: string;
   starts_at: string | null;
   ends_at: string | null;
+  trigger_type: SequenceTrigger;
   message_template: string;
+  message_variants: string[];
   template_overrides: Record<string, string>;
   config: Record<string, unknown>;
   campaign_id: number | null;
@@ -606,6 +609,7 @@ export interface AutomationSend {
   error_message: string | null;
   is_dry_run: boolean;
   priority: number;
+  variant_index: number | null;
 }
 
 export interface AutomationEnrollment {
@@ -614,6 +618,8 @@ export interface AutomationEnrollment {
   customer_id: number;
   status: string;
   enrolled_at: string;
+  /** Clock start — back-dated for a signup or last-order trigger. */
+  trigger_at: string | null;
   current_step: number;
   last_sent_at: string | null;
   next_due_at: string | null;
