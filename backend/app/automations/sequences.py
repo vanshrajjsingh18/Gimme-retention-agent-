@@ -390,6 +390,7 @@ def build_candidates(
                 body=body,
                 step_id=step.id,
                 enrollment_id=enrollment.id,
+                generate=bool(step.use_llm),
                 context={
                     "source": "sequence",
                     "step_position": step.position,

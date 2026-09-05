@@ -36,6 +36,7 @@ from app.core.enums import (
     Channel,
     EnrollmentMode,
     EnrollmentStatus,
+    MessageStatus,
     OrderStatus,
     RecurrenceKind,
     SendStatus,
@@ -312,7 +313,7 @@ class TestDedup:
         report = execute_candidates(
             db,
             nudge_automation,
-            [Candidate(customer_id=customer.id, scheduled_for=MONDAY_10AM, body="Nudge copy.")],
+            [Candidate(customer_id=customer.id, scheduled_for=MONDAY_10AM, body="Nudge copy. Reply STOP to opt out.")],
             now=MONDAY_10AM,
         )
         assert report.results[0].skip_reason == SkipReason.DEDUPED
@@ -345,8 +346,8 @@ class TestDedup:
             db,
             automation,
             [
-                Candidate(customer_id=customer.id, scheduled_for=MONDAY_10AM, body="First."),
-                Candidate(customer_id=customer.id, scheduled_for=MONDAY_10AM, body="Second."),
+                Candidate(customer_id=customer.id, scheduled_for=MONDAY_10AM, body="First. Reply STOP to opt out."),
+                Candidate(customer_id=customer.id, scheduled_for=MONDAY_10AM, body="Second. Reply STOP to opt out."),
             ],
             now=MONDAY_10AM,
         )
@@ -539,10 +540,10 @@ STEPS = [
 @pytest.fixture()
 def sequence(db, make_automation):
     def _make(customer_ids, **overrides):
+        overrides.setdefault("steps", STEPS)
         return make_automation(
             kind=AutomationKind.SEQUENCE.value,
             manual_customer_ids=list(customer_ids),
-            steps=STEPS,
             **overrides,
         )
 
@@ -745,6 +746,144 @@ class TestSequences:
                 kind=AutomationKind.SEQUENCE.value,
                 manual_customer_ids=[customer.id],
             )
+
+
+class TestGeneratedSteps:
+    """`use_llm` on a step: the copy is drafted per recipient, not templated."""
+
+    @staticmethod
+    def _llm_steps():
+        steps = [dict(step) for step in STEPS]
+        steps[0]["use_llm"] = True
+        return steps
+
+    def test_a_step_marked_use_llm_sends_drafted_copy_not_the_template(
+        self, db, make_customer, sequence
+    ):
+        customer = make_customer()
+        automation = sequence([customer.id], steps=self._llm_steps())
+
+        assert run_automation(db, automation, now=MONDAY_10AM).sent == 1
+
+        send = sends_for(db, automation)[0]
+        assert send.generated is True
+        # The whole point is that it is not the step's own wording.
+        assert send.body != STEPS[0]["message_template"]
+        assert send.body.strip()
+
+    def test_a_step_without_the_flag_is_never_sent_to_the_model(
+        self, db, make_customer, sequence
+    ):
+        customer = make_customer()
+        automation = sequence([customer.id])
+
+        report = run_automation(db, automation, now=MONDAY_10AM)
+
+        send = sends_for(db, automation)[0]
+        assert send.generated is False
+        assert send.body == STEPS[0]["message_template"]
+        assert "llm" not in report.results[0].context
+
+    def test_a_failed_draft_falls_back_to_approved_wording_rather_than_skipping(
+        self, db, make_customer, sequence, monkeypatch
+    ):
+        customer = make_customer()
+        automation = sequence([customer.id], steps=self._llm_steps())
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("provider is down")
+
+        monkeypatch.setattr("app.automations.runtime.generate_message", explode)
+
+        # A model outage is not a reason to drop a scheduled message. The
+        # template is copy somebody already approved, so it goes instead.
+        report = run_automation(db, automation, now=MONDAY_10AM)
+        assert report.sent == 1
+        send = sends_for(db, automation)[0]
+        assert send.body == STEPS[0]["message_template"]
+        # The ledger says this is template wording, not a draft — otherwise an
+        # outage would quietly look like the model wrote every message.
+        assert send.generated is False
+        assert report.results[0].context["llm"] == {
+            "requested": True,
+            "used": "template",
+            "reason": "generation_error",
+        }
+
+    def test_drafted_copy_still_has_to_clear_the_compliance_gate(
+        self, db, make_customer, sequence, monkeypatch
+    ):
+        customer = make_customer()
+        automation = sequence([customer.id], steps=self._llm_steps())
+
+        # A draft that would be illegal to send in New Zealand. Generation is
+        # not a way around the checks that apply to hand-written copy.
+        monkeypatch.setattr(
+            "app.automations.runtime._generated_body",
+            lambda *a, **k: ("Free booze for under 18s, drink as much as you can!", {}),
+        )
+
+        report = run_automation(db, automation, now=MONDAY_10AM)
+        assert report.sent == 0
+        assert sends_for(db, automation)[0].skip_reason == SkipReason.VALIDATION_FAILED.value
+
+    def test_a_non_compliant_draft_costs_the_personalisation_not_the_message(
+        self, db, make_customer, sequence, monkeypatch
+    ):
+        customer = make_customer()
+        automation = sequence([customer.id], steps=self._llm_steps())
+
+        class BadDraft:
+            status = MessageStatus.GENERATED.value
+            # No opt-out instruction: illegal to send as a commercial SMS.
+            body = "Hi there, your usual is ready to reorder."
+            validation_result: dict = {}
+            llm_provider = "mock"
+            llm_model = "test"
+
+        monkeypatch.setattr(
+            "app.automations.runtime.generate_message", lambda *a, **k: BadDraft()
+        )
+
+        report = run_automation(db, automation, now=MONDAY_10AM)
+
+        # The customer still gets the approved template rather than nothing.
+        assert report.sent == 1
+        send = sends_for(db, automation)[0]
+        assert send.body == STEPS[0]["message_template"]
+        assert send.generated is False
+        assert report.results[0].context["llm"]["reason"] == "MISSING_SMS_OPT_OUT"
+
+    def test_a_customer_who_lost_consent_is_never_sent_to_the_model(
+        self, db, make_customer, sequence, monkeypatch
+    ):
+        customer = make_customer(sms_consent=False)
+        automation = sequence([customer.id], steps=self._llm_steps())
+
+        calls: list[int] = []
+        monkeypatch.setattr(
+            "app.automations.runtime.generate_message",
+            lambda db, cust, **kw: calls.append(cust.id),
+        )
+
+        assert run_automation(db, automation, now=MONDAY_10AM).sent == 0
+        # Their history is not handed to a model to write a message that the
+        # consent gate has already ruled out.
+        assert calls == []
+
+    def test_a_preview_shows_the_copy_that_would_actually_be_sent(
+        self, db, make_customer, sequence
+    ):
+        customer = make_customer()
+        automation = sequence([customer.id], steps=self._llm_steps())
+
+        report = run_automation(db, automation, now=MONDAY_10AM, dry_run=True)
+
+        # Approving on the strength of template text, when the send will be
+        # drafted text, would make the approval meaningless.
+        preview = report.results[0]
+        assert preview.context["llm"]["used"] == "generated"
+        assert preview.body != STEPS[0]["message_template"]
 
 
 def make_automation_for_same_day(db, customer) -> Automation:

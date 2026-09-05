@@ -179,6 +179,7 @@ export interface CustomerAutomationSend {
   provider_message_id: string | null;
   error_message: string | null;
   variant_index: number | null;
+  generated: boolean;
 }
 
 export interface CustomerDetail {
@@ -631,6 +632,7 @@ export interface AutomationSend {
   is_dry_run: boolean;
   priority: number;
   variant_index: number | null;
+  generated: boolean;
 }
 
 export interface AutomationEnrollment {

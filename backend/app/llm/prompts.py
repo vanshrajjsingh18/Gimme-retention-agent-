@@ -264,7 +264,9 @@ def _channel_instructions(ctx: GroundingContext, channel: Channel) -> str:
         style = f" Style guidance: {ctx.sms_style}" if ctx.sms_style else ""
         return (
             "Write a single SMS under 320 characters. No subject line. Be direct — one "
-            f"sentence of context and one clear next step. Do not use emoji.{style}"
+            "sentence of context and one clear next step. Do not use emoji. End with "
+            '"Reply STOP to opt out." — a commercial SMS is not allowed to go out '
+            f"without it.{style}"
         )
     if channel == Channel.WHATSAPP:
         closing = (

@@ -15,6 +15,10 @@ import re
 from app.core.enums import Channel, NextBestAction
 from app.llm.base import LLMProvider, LLMResponse
 
+#: What every generated SMS has to end with. Matches the wording the default
+#: templates use, so drafted and templated copy read the same way.
+SMS_OPT_OUT = "Reply STOP to opt out."
+
 MODEL_NAME = "gimme-mock-writer-1"
 
 
@@ -277,8 +281,11 @@ def _compose(ctx: dict, channel: Channel, action: str, rng: random.Random) -> tu
         return subject, body
 
     if channel == Channel.SMS:
-        sms = _short_form(name, opening, products, ctx, limit=300)
-        return "", _apply_variation(sms, ctx.get("variation", ""))
+        # The opt-out is not decoration: a commercial SMS without one is
+        # blocked at the compliance gate, so the mock has to produce copy that
+        # could really be sent. Reserve its room before trimming to the limit.
+        sms = _short_form(name, opening, products, ctx, limit=300 - len(SMS_OPT_OUT) - 1)
+        return "", f"{_apply_variation(sms, ctx.get('variation', ''))} {SMS_OPT_OUT}"
 
     if channel == Channel.WHATSAPP:
         wa = _short_form(name, opening, products, ctx, limit=520)

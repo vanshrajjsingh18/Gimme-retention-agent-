@@ -1066,6 +1066,11 @@ class AutomationSend(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     #: Which wording this recipient got, when the automation has variants.
     variant_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: True when this body was drafted per-recipient by the model rather than
+    #: rendered from the step's template. A step that asked for a draft and
+    #: fell back to its template records False, which is the honest answer to
+    #: "is this the wording we approved?".
+    generated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, index=True

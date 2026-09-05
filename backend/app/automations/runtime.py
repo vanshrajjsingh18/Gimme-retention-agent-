@@ -51,6 +51,7 @@ from app.models.entities import (
 )
 from app.services.brand import build_compliance_config
 from app.services.events import record_communication_event
+from app.services.messaging import generate_message
 from app.integrations.registry import get_adapter
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,10 @@ class Candidate:
     enrollment_id: int | None = None
     #: Which wording this recipient got, when the automation has variants.
     variant_index: int | None = None
+    #: Draft this recipient's copy with the LLM instead of sending `body` as
+    #: written. `body` stays as the fallback, so a failed generation still
+    #: sends approved wording rather than nothing.
+    generate: bool = False
     #: Why this candidate exists — surfaced in dry-run previews so an operator
     #: can see the reasoning, e.g. the order pattern or the offer decision.
     context: dict = field(default_factory=dict)
@@ -379,7 +384,24 @@ def execute_candidates(
             _displace(db, blocker, automation)
             claims.pop(key, None)
 
-        # 3. Content compliance on the rendered body.
+        # 3. Per-recipient copy, for a step that asked for it. Deliberately
+        #    after the eligibility gate: somebody who withdrew consent should
+        #    not have their history fed to a model to write a message that is
+        #    never going to be sent.
+        if candidate.generate:
+            body, note = _generated_body(
+                db,
+                customer=customer,
+                automation=automation,
+                channel=channel,
+                fallback=candidate.body,
+                config=config,
+            )
+            candidate.body = body
+            result.body = body
+            result.context["llm"] = note
+
+        # 4. Content compliance on the body as it will actually go out.
         findings = check_content(candidate.body, config, channel=channel)
         blocking = [f for f in findings if f.blocks_send]
         if blocking:
@@ -531,6 +553,7 @@ def _record(
         local_date=result.local_date,
         sent_at=result.scheduled_for if result.status == SendStatus.SENT else None,
         body=result.body,
+        generated=(result.context.get("llm") or {}).get("used") == "generated",
         provider=provider or "preview",
         provider_message_id=provider_message_id,
         is_dry_run=dry_run,
@@ -573,6 +596,73 @@ def send_idempotency_key(
     return ":".join(parts)
 
 
+def _generated_body(
+    db: Session,
+    *,
+    customer: Customer,
+    automation: Automation,
+    channel: Channel,
+    fallback: str,
+    config: ComplianceConfig,
+) -> tuple[str, dict]:
+    """Draft this recipient's copy with the LLM, falling back to the template.
+
+    Generation is grounded — the model only sees verified facts about this
+    customer — and the result is validated before it is accepted. Anything that
+    fails, for any reason, falls back to the step's own wording rather than
+    skipping the customer: the fallback is copy an operator already approved,
+    so the worst case is a less personal message, not a missed one.
+
+    Whatever comes back still goes through the same compliance gate as
+    hand-written copy. Nothing here is a way around it.
+    """
+    note: dict = {"requested": True}
+    try:
+        message = generate_message(
+            db,
+            customer,
+            channel=channel,
+            objective=automation.objective,
+            campaign_id=automation.campaign_id,
+            campaign_name=automation.name,
+            config=config,
+            persist=False,
+        )
+    except Exception as exc:  # noqa: BLE001 - a bad draft must not stop the run
+        logger.warning(
+            "Generation failed for customer %s on automation %s: %s",
+            customer.id,
+            automation.id,
+            exc,
+        )
+        return fallback, {**note, "used": "template", "reason": "generation_error"}
+
+    if message.status != MessageStatus.GENERATED.value or not (message.body or "").strip():
+        errors = (message.validation_result or {}).get("errors") or []
+        reason = errors[0].get("code") if errors and isinstance(errors[0], dict) else "invalid"
+        return fallback, {**note, "used": "template", "reason": reason}
+
+    # Check the draft here, not only at the gate below, so a bad draft costs
+    # the personalisation rather than the message. The gate still runs on
+    # whichever body wins — this is an extra check, never a substitute.
+    blocking = [f for f in check_content(message.body, config, channel=channel) if f.blocks_send]
+    if blocking:
+        logger.info(
+            "Discarded a draft for customer %s on automation %s: %s",
+            customer.id,
+            automation.id,
+            blocking[0].code,
+        )
+        return fallback, {**note, "used": "template", "reason": blocking[0].code}
+
+    return message.body, {
+        **note,
+        "used": "generated",
+        "provider": message.llm_provider,
+        "model": message.llm_model,
+    }
+
+
 def _dispatch(
     db: Session,
     *,
@@ -598,6 +688,13 @@ def _dispatch(
         original_body=candidate.body,
         status=MessageStatus.APPROVED.value,
     )
+    # A drafted message says who drafted it, so the history does not read as
+    # though somebody wrote this wording by hand.
+    llm = result.context.get("llm") or {}
+    if llm.get("used") == "generated":
+        message.llm_provider = llm.get("provider")
+        message.llm_model = llm.get("model")
+        message.generated_at = now
     db.add(message)
     db.flush()
 

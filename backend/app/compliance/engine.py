@@ -113,6 +113,17 @@ STOCK_CLAIM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# How a message can tell somebody to stop. Deliberately generous about the
+# wording — STOP is the keyword the opt-out handler acts on, and the point of
+# the rule is that the recipient was told it, not that they were told it in one
+# particular sentence.
+OPT_OUT_PATTERN = re.compile(
+    r"\b(?:reply|text|txt|send)\s+(?:with\s+)?[\"']?stop\b"
+    r"|\bstop\s+to\s+(?:opt\s*out|unsubscribe|cancel|end)\b"
+    r"|\bunsubscribe\b",
+    re.IGNORECASE,
+)
+
 # Quiet hours are the complement of the allowed business window: sends are
 # blocked from 19:00 until 09:00 the following morning, in BUSINESS LOCAL
 # TIME. Evaluated via app.core.timezones, never against naive UTC.
@@ -176,6 +187,11 @@ class ComplianceConfig:
     use_business_timezone: bool = True
     require_responsible_drinking_statement: bool = True
     require_age_statement_on_email: bool = True
+    #: Every commercial SMS must tell the recipient how to stop receiving them.
+    #: The Unsolicited Electronic Messages Act 2007 requires a functional
+    #: unsubscribe facility, and GIMME's own STOP handling only works if people
+    #: are told the word.
+    require_sms_opt_out: bool = True
     allowed_coupon_codes: list[str] = field(default_factory=list)
     allowed_promotions: list[str] = field(default_factory=list)
     verified_products: list[str] = field(default_factory=list)
@@ -446,7 +462,25 @@ def check_content(
     if not is_full_message:
         return findings
 
-    # 8. Mandatory statements (email only — SMS has no room and is exempt).
+    # 8. An SMS has to say how to stop receiving them.
+    #
+    #    Until now this was a convention inside the default templates rather
+    #    than a rule, which held only for as long as every message came from
+    #    one of those templates. It is a legal requirement, and the STOP
+    #    handling elsewhere in this system is useless to somebody who was never
+    #    told the word.
+    if channel == Channel.SMS and config.require_sms_opt_out:
+        if not OPT_OUT_PATTERN.search(haystack):
+            add(
+                "MISSING_SMS_OPT_OUT",
+                "SMS does not tell the recipient how to opt out. A commercial "
+                'message must carry an unsubscribe facility, e.g. "Reply STOP '
+                'to opt out."',
+                ComplianceSeverity.CRITICAL,
+                True,
+            )
+
+    # 9. Mandatory statements (email only — SMS has no room and is exempt).
     if channel == Channel.EMAIL:
         if config.require_responsible_drinking_statement and config.responsible_drinking_statement:
             if not _contains_statement(lowered, config.responsible_drinking_statement):

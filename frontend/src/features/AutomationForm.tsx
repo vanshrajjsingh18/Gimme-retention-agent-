@@ -6,11 +6,16 @@ import type { Automation, AutomationKind, Segment } from '../types';
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-type StepDraft = { name: string; offset_days: number; message_template: string };
+type StepDraft = {
+  name: string;
+  offset_days: number;
+  message_template: string;
+  use_llm: boolean;
+};
 
 const STARTER_STEPS: StepDraft[] = [
-  { name: 'Day 0', offset_days: 0, message_template: '' },
-  { name: 'Day 7', offset_days: 7, message_template: '' },
+  { name: 'Day 0', offset_days: 0, message_template: '', use_llm: false },
+  { name: 'Day 7', offset_days: 7, message_template: '', use_llm: false },
 ];
 
 export default function AutomationForm({
@@ -290,6 +295,28 @@ export default function AutomationForm({
                       }
                       placeholder="Hi {first_name}, … Reply STOP to opt out."
                     />
+                    <label className="mt-1 flex items-start gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={step.use_llm}
+                        onChange={(event) =>
+                          setSteps((current) =>
+                            current.map((entry, i) =>
+                              i === index ? { ...entry, use_llm: event.target.checked } : entry,
+                            ),
+                          )
+                        }
+                      />
+                      <span>
+                        Write this one per customer
+                        <span className="block text-slate-500">
+                          The model drafts from verified facts only, and the draft still has to
+                          pass the same compliance checks. If it fails, the message above is sent
+                          instead. Preview before approving to see what it produces.
+                        </span>
+                      </span>
+                    </label>
                   </div>
                   <div className="flex items-end">
                     <button
@@ -315,6 +342,7 @@ export default function AutomationForm({
                     name: `Step ${current.length + 1}`,
                     offset_days: (current[current.length - 1]?.offset_days ?? 0) + 7,
                     message_template: '',
+                    use_llm: false,
                   },
                 ])
               }

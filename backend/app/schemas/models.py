@@ -763,6 +763,7 @@ class AutomationSendOut(BaseModel):
     is_dry_run: bool
     priority: int
     variant_index: int | None = None
+    generated: bool = False
 
 
 class AutomationEnrollmentOut(BaseModel):

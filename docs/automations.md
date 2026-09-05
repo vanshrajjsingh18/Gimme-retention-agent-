@@ -496,3 +496,53 @@ Until a real name is configured, `{sign_off}` renders as nothing and the
 message goes out unsigned. Attributing outbound customer SMS to an invented
 person is worse than sending it unsigned — set these in Brand settings before
 using `{sign_off}`.
+
+---
+
+## Copy written per customer
+
+A sequence step can set `use_llm`, and its copy is then drafted for each
+recipient instead of rendered from the template. The step's own wording stays
+on file as the fallback — a step that asks for a draft still needs message text,
+because the fallback is what goes out when a draft cannot be used.
+
+**Where it happens matters.** The draft is generated *after* the eligibility
+gate, not while candidates are being built. Somebody who withdrew consent, is
+suppressed, or is over their frequency cap has already been ruled out by then,
+and their history is never handed to a model to write a message that was never
+going to be sent.
+
+**What can go wrong, and what happens then.** In every failure the step's
+approved wording is sent instead, and the ledger records `generated = false`:
+
+| Outcome | Result |
+| --- | --- |
+| Provider error or timeout | Template sent, `reason: generation_error` |
+| Draft fails grounding validation | Template sent, `reason` is the validation code |
+| Draft fails a compliance rule | Template sent, `reason` is the rule code |
+| Draft is accepted | Draft sent, `generated = true`, provider and model recorded |
+
+Losing the personalisation is the right price for a bad draft. Dropping the
+message would punish the customer for a problem on our side.
+
+**It is not a way around approval.** A dry run generates exactly as a live run
+does, so the preview an operator approves on is the copy that will actually be
+sent — approving on template text while drafted text goes out would make the
+approval meaningless. Whatever wins still passes the same compliance gate as
+hand-written copy, and `AutomationSend.generated` says which is which, so the
+history never implies a person wrote something a model did.
+
+Every draft costs one model call per recipient, in a dry run as well as a live
+one. On a large audience that is the thing to think about before ticking the
+box.
+
+### The opt-out is enforced, not assumed
+
+Every commercial SMS must tell the recipient how to stop, and until drafting
+existed that was a convention inside the default templates rather than a rule.
+`MISSING_SMS_OPT_OUT` now blocks any SMS without one, whether it was drafted or
+typed by hand. The check is deliberately loose about wording — "Reply STOP",
+"Text STOP to unsubscribe", "Unsubscribe any time" all pass — because the rule
+is that the recipient was told, not that one sentence appears. Set
+`require_sms_opt_out = false` for a genuinely non-commercial SMS such as a
+delivery notification.

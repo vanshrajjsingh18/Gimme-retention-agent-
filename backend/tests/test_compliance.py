@@ -339,6 +339,42 @@ def test_sms_exempt_from_mandatory_statements():
     assert "MISSING_RESPONSIBLE_DRINKING" not in codes(findings)
 
 
+def test_sms_without_an_opt_out_is_blocked():
+    # A commercial SMS must carry an unsubscribe facility, and GIMME's own STOP
+    # handling is unusable by somebody who was never told the word.
+    findings = check_content("Your usual is ready to reorder.", config(), channel=Channel.SMS)
+    blocking = [f for f in findings if f.code == "MISSING_SMS_OPT_OUT"]
+    assert blocking and blocking[0].blocks_send
+
+
+def test_an_email_is_not_asked_for_the_sms_opt_out_wording():
+    findings = check_content(compliant_email_body(), config(), channel=Channel.EMAIL)
+    assert "MISSING_SMS_OPT_OUT" not in codes(findings)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Your usual is ready. Reply STOP to opt out.",
+        "Your usual is ready. Text STOP to unsubscribe.",
+        "Your usual is ready. Reply STOP.",
+        "Your usual is ready. STOP to opt out.",
+        "Your usual is ready. Unsubscribe any time.",
+    ],
+)
+def test_any_clear_way_of_saying_stop_satisfies_the_rule(body):
+    # The rule is that the recipient was told how to stop, not that one exact
+    # sentence appears — otherwise it just blocks copy that is already fine.
+    assert "MISSING_SMS_OPT_OUT" not in codes(check_content(body, config(), channel=Channel.SMS))
+
+
+def test_the_opt_out_requirement_can_be_turned_off_for_a_non_commercial_sms():
+    cfg = config()
+    cfg.require_sms_opt_out = False
+    findings = check_content("Your delivery is on its way.", cfg, channel=Channel.SMS)
+    assert "MISSING_SMS_OPT_OUT" not in codes(findings)
+
+
 def test_missing_age_statement_warns_but_does_not_block():
     body = f"Hi Sam, your usual is ready.\n\n{RESPONSIBLE}"
     findings = check_content(body, config(), channel=Channel.EMAIL)

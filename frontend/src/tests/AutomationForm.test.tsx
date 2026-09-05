@@ -116,6 +116,26 @@ describe('AutomationForm', () => {
     expect(payload.steps.map((step) => step.offset_days)).toEqual([0, 7]);
   });
 
+  it('marks only the step whose copy should be written per customer', async () => {
+    const submit = vi.fn(async (_payload: Record<string, unknown>) =>
+      stubAutomation({ kind: 'SEQUENCE' }),
+    );
+    render(
+      <AutomationForm kind="SEQUENCE" onCreated={vi.fn()} onCancel={vi.fn()} submit={submit} />,
+    );
+
+    await screen.findByRole('option', { name: /At Risk/ });
+    await userEvent.type(screen.getByLabelText('Name'), 'Win-back series');
+    await userEvent.selectOptions(screen.getByLabelText('Audience'), '9');
+    await userEvent.click(screen.getAllByRole('checkbox', { name: /write this one per customer/i })[0]);
+    await userEvent.click(screen.getByRole('button', { name: /create as draft/i }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    const payload = submit.mock.calls[0][0] as unknown as { steps: { use_llm: boolean }[] };
+    // The flag is per step, not per sequence — ticking one must not tick the rest.
+    expect(payload.steps.map((step) => step.use_llm)).toEqual([true, false]);
+  });
+
   it('adds a step seven days after the last one', async () => {
     render(
       <AutomationForm

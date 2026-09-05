@@ -106,17 +106,20 @@ and who would not with the reason in plain English.
 
 | Suite | Count | Command |
 | --- | --- | --- |
-| Backend | 498 | `make test-backend` |
-| Frontend | 53 | `make test-frontend` |
+| Backend | 513 | `make test-backend` |
+| Frontend | 54 | `make test-frontend` |
 | Browser (Playwright) | 13 | `make test-e2e` |
-| **Total** | **562** | `make test` |
+| **Total** | **580** | `make test` |
 
 ## Known bugs
 
-None open. Twenty-four defects were found and fixed across both phases; all are
-recorded in `ERROR_LOG.md` with what found them and what prevents a recurrence.
+None open. Twenty-eight defects were found and fixed across both phases; all
+are recorded in `ERROR_LOG.md` with what found them and what prevents a
+recurrence, along with one entry that turned out not to be a product defect at
+all — a database corrupted by my own hand-written cleanup — kept because the
+misdiagnosis it caused is the useful part.
 
-Five from the automation phase are worth singling out, because none was caught
+Six from the automation phase are worth singling out, because none was caught
 by a test — each was found by running the system and looking at it:
 
 - quiet hours were being compared against UTC, which in New Zealand is wrong by
@@ -128,10 +131,14 @@ by a test — each was found by running the system and looking at it:
 - a nudge could never be previewed before approval, because enrollment only
   happened on a live run, so the preview was always empty;
 - timestamps labelled "NZ" were rendered in the viewer's timezone, showing
-  06:00 for an 18:00 send.
+  06:00 for an 18:00 send;
+- nothing required an SMS to say how to opt out. Every template happened to end
+  with "Reply STOP to opt out.", so the gap was invisible until copy started
+  being drafted per customer and the drafts left it off.
 
-The last two were found by screenshotting the page rather than reading the
-JSON the endpoint returned.
+The third and fourth were found by screenshotting the page rather than reading
+the JSON the endpoint returned; the last by reading a generated message beside
+the template it replaced.
 
 ## External blockers
 
@@ -150,7 +157,7 @@ Each has working code that could not be exercised here:
 Both servers started against the seeded database, all three automation types
 exercised end to end on real data (cohort send 35 sent / 73 skipped with
 reasons; sequence advanced customers through Day 0 → Day 7; nudge enrolled 249
-customers with per-customer order patterns), then 498 backend, 53 frontend and
+customers with per-customer order patterns), then 513 backend, 54 frontend and
 13 Playwright tests run green with zero console errors.
 
 ## Open configuration item

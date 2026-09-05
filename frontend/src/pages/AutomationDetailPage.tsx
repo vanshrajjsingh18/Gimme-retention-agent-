@@ -324,10 +324,21 @@ export default function AutomationDetailPage() {
                       {step.name && step.name !== `Day ${step.offset_days}` && (
                         <span className="text-sm font-medium text-slate-900">{step.name}</span>
                       )}
+                      {step.use_llm && (
+                        <Badge className="bg-violet-50 text-violet-700 ring-violet-200">
+                          Written per customer
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">
                       {step.message_template || <em className="text-slate-400">Uses the segment default copy.</em>}
                     </p>
+                    {step.use_llm && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Drafted for each recipient and compliance-checked before sending. The copy
+                        above is the fallback if a draft fails.
+                      </p>
+                    )}
                   </li>
                 ))}
               </ol>

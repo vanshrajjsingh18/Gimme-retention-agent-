@@ -645,3 +645,67 @@ nor New Zealand. Reverting the parse makes the two existing assertions fail,
 which was verified rather than assumed. The lesson is that the environment a
 test runs in is part of the test: these ones had been passing for the wrong
 reason since they were written.
+
+---
+
+## 2026-09-05 — SMS could go out with no way to opt out
+
+**Found by:** Implementing `use_llm`, then reading the first drafted messages
+side by side with the templates they replaced.
+
+**Failure:** The drafts said nothing about STOP. Every default template ends
+with "Reply STOP to opt out.", so every SMS this system had ever produced
+carried one — but only because the templates happened to say so. Nothing
+enforced it. `check_content()` had no such rule, and the comment beside the
+mandatory-statement block ("SMS has no room and is exempt") was about the
+responsible-drinking statement, not the unsubscribe facility.
+
+That is a legal requirement under the Unsolicited Electronic Messages Act 2007,
+and it is also load-bearing for this product specifically: `optout.py` acts on
+the keyword STOP, which is useless to a recipient who was never told it. The
+convention held for exactly as long as every message came from a template, and
+drafting is what broke that assumption.
+
+**Fix:** `MISSING_SMS_OPT_OUT`, a blocking content rule on the SMS channel. It
+is loose about wording — "Reply STOP", "Text STOP to unsubscribe", "Unsubscribe
+any time" all satisfy it — because the requirement is that the recipient was
+told, not that one particular sentence appears. `require_sms_opt_out` turns it
+off for genuinely non-commercial messages such as a delivery notification.
+
+Adding the rule immediately caught a second instance the same defect had been
+hiding: the **mock LLM provider** generated SMS without an opt-out too, and
+`test_mock_output_passes_validation_for_every_channel` had been asserting that
+output was valid. The fix went into the provider and the SMS prompt, not the
+rule — the test had been passing on a wrong premise.
+
+**Preventive action:** Five tests: the rule blocks, an email is not asked for
+SMS wording, four different phrasings all satisfy it, and the switch works. Two
+test fixtures using placeholder bodies (`"First."`, `"Second."`) had to grow an
+opt-out, which is the rule doing its job on the first day.
+
+---
+
+## 2026-09-05 — A UNIQUE violation from cleaning up a database by hand
+
+**Found by:** Creating a sequence in the browser after clearing test data;
+`UNIQUE constraint failed: automation_steps.automation_id, automation_steps.position`
+came back as a bare 500, and the UI reported it as "could not reach the API".
+
+**Failure:** Nothing to do with the product. Earlier in the session I had
+cleared leftover test automations with a raw `sqlite3.connect()` and a
+`DELETE FROM automations`. The application enables `PRAGMA foreign_keys=ON` on
+every connection it opens, but my throwaway connection did not, so the delete
+left `automation_steps` rows behind pointing at automations that no longer
+existed. SQLite then reused the freed id, and the new automation's steps
+collided with the orphans at positions 0 and 1.
+
+**Fix:** Removed the orphaned rows through the ORM. No product change: the
+cascade works correctly on every path the application actually uses, which is
+the reason the tests never saw this.
+
+**Preventive action:** Clean up through the ORM or the API, not raw SQL. The
+misleading part was the diagnosis rather than the bug — the UI's "could not
+reach the API" is what it says for any failed request, so a 500 from a corrupt
+database reads identically to a backend that is not running. The first two
+things I checked were both wrong because of it, and the traceback in the server
+log named the real cause immediately.

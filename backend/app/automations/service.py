@@ -589,6 +589,7 @@ def customer_history(db: Session, customer_id: int, *, limit: int = 100) -> list
             "provider_message_id": send.provider_message_id,
             "error_message": send.error_message,
             "variant_index": send.variant_index,
+            "generated": send.generated,
         }
         for send, name, kind in rows
     ]

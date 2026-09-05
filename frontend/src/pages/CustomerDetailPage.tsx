@@ -584,7 +584,17 @@ function AutomationsTab({ data }: { data: CustomerDetail }) {
                     {row.skip_detail ? ` — ${row.skip_detail}` : ''}
                   </span>
                 ) : (
-                  <span className="text-slate-600">{row.error_message ?? row.body}</span>
+                  <span className="text-slate-600">
+                    {row.generated && (
+                      <span
+                        className="mr-1.5 rounded bg-violet-50 px-1.5 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-violet-200"
+                        title="Drafted for this customer by the model, then compliance-checked."
+                      >
+                        Drafted
+                      </span>
+                    )}
+                    {row.error_message ?? row.body}
+                  </span>
                 )}
               </td>
             </tr>
