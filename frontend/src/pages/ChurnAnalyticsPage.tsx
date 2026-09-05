@@ -79,11 +79,13 @@ export default function ChurnAnalyticsPage() {
           tone="critical"
           sublabel="lifetime revenue of high + critical customers"
         />
+        {/* Attributed win-backs, not every customer who came back — see the
+            lifecycle counts on the overview for that. */}
         <StatTile
-          label="Reactivations"
+          label="Campaign win-backs"
           value={formatNumber(data.total_reactivations)}
           tone="positive"
-          sublabel={`${formatPercent(data.reactivation_rate)} of lapsed customers`}
+          sublabel={`${formatPercent(data.reactivation_rate)} of lapsed customers, attributed to a campaign`}
         />
         <StatTile
           label="Risk increased"

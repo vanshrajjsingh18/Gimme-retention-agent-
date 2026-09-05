@@ -508,3 +508,31 @@ recorded in the ledger — not counting is not the same as not happening.
 
 **Preventive action:** When a test involves a deliberately non-deterministic
 collaborator, assert the property under test, not the collaborator's output.
+
+---
+
+## 2026-09-05 — The dashboard said nobody had returned, next to a count of 24 who had
+
+**Found by:** Screenshotting the Overview page for a demo and reading the
+Retention health panel.
+
+**Failure:** Two adjacent rows read "Reactivation rate 0.0% — 0 customers
+returned after a lapse" and "Currently reactivated 24 — Returned within the
+last 30 days". They measure genuinely different things: the first counts
+`AttributionRecord.is_reactivation`, which is a return we can *attribute to a
+campaign*, while the second counts customers currently in the REACTIVATED
+lifecycle stage. But the first hint states a plain falsehood — 24 customers did
+return after a lapse; what was zero is the number we could credit to a
+campaign. A dashboard contradicting itself is worse than one omitting the
+metric, because a reader has to decide which half to disbelieve.
+
+**Fix:** Renamed to "Campaign-driven win-backs", with the hint naming the
+denominator it is actually a rate of ("0 of 199 lapsed customers returned via a
+campaign"), and the neighbouring row to "Reactivated customers — came back
+after lapsing, however they found us". Same relabelling on the churn page's
+"Reactivations" tile.
+
+**Preventive action:** Two metrics sharing a word need labels that say which
+one they are, especially when they sit in the same panel. The number was right
+in both places; only the English was wrong, which is exactly the kind of defect
+a test suite will never catch and a screenshot catches immediately.

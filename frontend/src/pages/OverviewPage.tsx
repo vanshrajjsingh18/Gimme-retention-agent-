@@ -186,10 +186,16 @@ export default function OverviewPage() {
                   value={formatPercent(data.retention_rate_90d)}
                   hint="Ordered in the last 90 days and the 90 before"
                 />
+                {/* This counts returns we can *attribute to a campaign*, which
+                    is a different and much smaller number than how many
+                    customers came back. Labelling it "returned after a lapse"
+                    read as a flat contradiction of the row below. */}
                 <MetricRow
-                  label="Reactivation rate"
+                  label="Campaign-driven win-backs"
                   value={formatPercent(data.reactivation_rate)}
-                  hint={`${formatNumber(data.total_reactivations)} customers returned after a lapse`}
+                  hint={`${formatNumber(data.total_reactivations)} of ${formatNumber(
+                    data.dormant_customers + data.churned_customers,
+                  )} lapsed customers returned via a campaign`}
                 />
                 <MetricRow
                   label="New customers (30 days)"
@@ -197,9 +203,9 @@ export default function OverviewPage() {
                   hint="Signed up in the last 30 days"
                 />
                 <MetricRow
-                  label="Currently reactivated"
+                  label="Reactivated customers"
                   value={formatNumber(data.reactivated_customers)}
-                  hint="Returned within the last 30 days"
+                  hint="Came back after lapsing, however they found us"
                 />
                 <MetricRow
                   label="Estimated LTV pool"
