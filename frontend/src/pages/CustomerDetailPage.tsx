@@ -800,7 +800,9 @@ function CampaignsTab({ data }: { data: CustomerDetail }) {
                   {humanize(c.status)}
                 </Badge>
                 {c.exclusion_reason && (
-                  <p className="mt-1 max-w-xs text-xs text-slate-500">{c.exclusion_reason}</p>
+                  <p className="mt-1 max-w-xs whitespace-normal text-xs text-slate-500">
+                    {c.exclusion_reason}
+                  </p>
                 )}
               </td>
               <td className="table-cell text-xs">{formatDateTime(c.sent_at)}</td>

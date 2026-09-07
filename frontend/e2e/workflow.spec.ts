@@ -399,4 +399,26 @@ test.describe('Responsive layout', () => {
     );
     expect(overflow).toBeLessThanOrEqual(1);
   });
+
+  test('a description in a table cell wraps instead of running across its neighbours', async ({
+    page,
+  }) => {
+    guard(page);
+    await login(page);
+    await page.goto('/automations');
+    await expect(page.getByRole('heading', { level: 1, name: 'Automations' })).toBeVisible();
+
+    // `.table-cell` sets whitespace-nowrap. A max-width alone does not make the
+    // text wrap inside it — it renders as one long line straight across the
+    // Type and Status columns, which is what this asserts is not happening.
+    // getBoundingClientRect reports the clamped border box, so it cannot see
+    // this: the box stays at max-width while the unwrapped text spills out of
+    // it. scrollWidth vs clientWidth is what actually catches it.
+    const spill = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('tbody tr td:first-child p'))
+        .map((text) => text.scrollWidth - text.clientWidth)
+        .reduce((worst, value) => Math.max(worst, value), 0),
+    );
+    expect(spill).toBeLessThanOrEqual(1);
+  });
 });

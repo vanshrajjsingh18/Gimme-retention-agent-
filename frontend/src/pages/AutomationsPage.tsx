@@ -137,8 +137,11 @@ export default function AutomationsPage() {
                     >
                       {automation.name}
                     </Link>
+                    {/* `.table-cell` sets whitespace-nowrap, which a max-width
+                        cannot override on its own — without whitespace-normal the
+                        text renders as one line straight across the next columns. */}
                     {automation.description && (
-                      <p className="mt-0.5 max-w-md text-xs text-slate-500">
+                      <p className="mt-0.5 max-w-md whitespace-normal text-xs text-slate-500">
                         {automation.description}
                       </p>
                     )}
