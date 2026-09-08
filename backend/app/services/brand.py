@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.compliance.engine import ComplianceConfig
+from app.core.config import settings
 from app.core.enums import ComplianceSeverity
 from app.llm.prompts import GroundingContext
 from app.models.entities import BrandSettings, ComplianceRule
@@ -143,10 +144,21 @@ DEFAULT_COMPLIANCE_RULES: list[dict] = [
     {
         "code": "QUIET_HOURS",
         "name": "Quiet hours for SMS and WhatsApp",
-        "description": "No SMS or WhatsApp messages between 21:00 and 09:00.",
+        # Derived from SEND_WINDOW rather than written out again. These were
+        # two separate numbers — 21:00 here, 19:00 in the send window — which
+        # meant a campaign could text somebody at 20:30 while an automation
+        # could not, and the UI promised a window neither half agreed on.
+        "description": (
+            f"No SMS or WhatsApp messages between {settings.SEND_WINDOW_END} "
+            f"and {settings.SEND_WINDOW_START}."
+        ),
         "severity": ComplianceSeverity.CRITICAL.value,
         "blocks_send": True,
-        "config": {"start": "21:00", "end": "09:00", "enabled": True},
+        "config": {
+            "start": settings.SEND_WINDOW_END,
+            "end": settings.SEND_WINDOW_START,
+            "enabled": True,
+        },
     },
     {
         "code": "RESPONSIBLE_DRINKING",
@@ -297,8 +309,12 @@ def build_compliance_config(db: Session) -> ComplianceConfig:
         ),
         frequency_cap_30d=int(freq.get("cap_30d", 4)) if enabled("FREQUENCY_CAP") else 10**6,
         frequency_cap_7d=int(freq.get("cap_7d", 2)) if enabled("FREQUENCY_CAP") else 10**6,
-        quiet_hours_start=_parse_time(quiet.get("start", "21:00"), time(21, 0)),
-        quiet_hours_end=_parse_time(quiet.get("end", "09:00"), time(9, 0)),
+        quiet_hours_start=_parse_time(
+            quiet.get("start", settings.SEND_WINDOW_END), settings.send_window[1]
+        ),
+        quiet_hours_end=_parse_time(
+            quiet.get("end", settings.SEND_WINDOW_START), settings.send_window[0]
+        ),
         enforce_quiet_hours=enabled("QUIET_HOURS") and bool(quiet.get("enabled", True)),
         require_responsible_drinking_statement=enabled("RESPONSIBLE_DRINKING"),
         require_age_statement_on_email=enabled("AGE_STATEMENT"),

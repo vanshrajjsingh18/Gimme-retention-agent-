@@ -17,6 +17,7 @@ from typing import Any, Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.phone import normalize_nz_phone
 from app.core.enums import Channel, ConsentType, EventType, IngestionStatus, OrderStatus
 from app.models.base import utcnow
 from app.models.entities import (
@@ -211,6 +212,16 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
                 raise RowError("A customer needs at least an email address or a phone number.")
             if email and not EMAIL_PATTERN.match(email):
                 raise RowError(f"'email' value '{email}' is not a valid email address.")
+            if phone:
+                # Store one canonical shape. A spreadsheet's "021 123 4567" and
+                # an API's "+64211234567" are the same person, and the number
+                # handed to TNZ has to be E.164 either way.
+                normalized = normalize_nz_phone(phone)
+                if normalized is None:
+                    raise RowError(
+                        f"'phone' value '{phone}' is not a mobile number an SMS can reach."
+                    )
+                phone = normalized
 
             existing = db.execute(
                 select(Customer).where(Customer.external_id == external_id)

@@ -35,7 +35,32 @@ const CREDENTIAL_LABELS: Record<string, string> = {
   account_sid: 'Account SID',
   from_number: 'From number',
   api_key: 'API key',
+  webhook_secret: 'Webhook secret',
 };
+
+const CREDENTIAL_HELP: Record<string, string> = {
+  webhook_secret:
+    'Authenticates inbound delivery receipts and replies. Set the same value on the provider’s webhook. Required before going live.',
+};
+
+interface ReadinessCheck {
+  key: string;
+  label: string;
+  passed: boolean;
+  blocking: boolean;
+  detail: string;
+  remedy: string;
+}
+
+interface Readiness {
+  provider: string;
+  channel: string;
+  mode: string;
+  ready: boolean;
+  blocking_count: number;
+  warning_count: number;
+  checks: ReadinessCheck[];
+}
 
 const SETUP_NOTES: Record<string, string> = {
   outlook:
@@ -159,11 +184,21 @@ export default function IntegrationsPage() {
         ))}
       </div>
 
+      {(data ?? [])
+        .filter((integration) => integration.channel === 'SMS')
+        .map((integration) => (
+          <GoLiveChecklist key={integration.id} integration={integration} />
+        ))}
+
       <Card title="Webhooks" className="mt-4">
         <p className="text-sm text-slate-600">
-          Point your provider's delivery and engagement webhooks at these endpoints. Events are
-          matched to a stored message by its provider message ID; anything unrecognised is ignored
-          rather than creating stray records.
+          Point your provider's delivery and engagement webhooks at these endpoints. Delivery
+          events are matched to a stored message by its provider message ID, and anything
+          unrecognised is ignored rather than creating stray records. An inbound <em>reply</em> is
+          matched by phone number instead, so that an opt-out is honoured even when the provider
+          does not echo our message ID back — which is why a live integration also requires a
+          webhook secret, sent as an <code className="rounded bg-slate-100 px-1">X-Webhook-Secret</code>{' '}
+          header or a <code className="rounded bg-slate-100 px-1">?secret=</code> query parameter.
         </p>
         <ul className="mt-3 space-y-2">
           {['outlook', 'tnz', 'whatsapp'].map((provider) => (
@@ -235,10 +270,13 @@ function IntegrationModal({
   );
 
   const activeProfile = profiles?.profiles.find((p) => p.key === profile);
-  const requiredKeys =
+  const sendingKeys =
     integration.channel === 'WHATSAPP' && activeProfile
       ? activeProfile.required_credentials
       : integration.required_credentials;
+  // Not a sending credential — messages go out fine without it — but inbound
+  // webhooks are refused in live mode until it is set, so it needs a field.
+  const requiredKeys = [...sendingKeys, 'webhook_secret'];
 
   return (
     <Modal
@@ -344,6 +382,9 @@ function IntegrationModal({
                       }
                       autoComplete="off"
                     />
+                    {CREDENTIAL_HELP[key] && (
+                      <p className="mt-1 text-xs text-slate-500">{CREDENTIAL_HELP[key]}</p>
+                    )}
                   </div>
                 );
               })}
@@ -415,5 +456,108 @@ function IntegrationModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The go-live checklist for the SMS integration.
+ *
+ * A connection test proves the credentials work. This answers the question an
+ * operator actually has before flipping to live: what happens when this starts
+ * texting real people. Blockers are separated from advisories because a
+ * fraction of unreachable numbers is normal, and an unauthenticated webhook is
+ * not.
+ */
+function GoLiveChecklist({ integration }: { integration: Integration }) {
+  const { data, loading, error, refetch } = useQuery<Readiness>(
+    `/api/v1/integrations/${integration.id}/readiness`,
+  );
+
+  if (loading) return <LoadingState label="Checking go-live readiness…" />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
+  if (!data) return null;
+
+  const blockers = data.checks.filter((c) => c.blocking && !c.passed);
+  const warnings = data.checks.filter((c) => !c.blocking && !c.passed);
+  const passing = data.checks.filter((c) => c.passed);
+
+  return (
+    <Card
+      className="mt-4"
+      title="TNZ go-live readiness"
+      description={
+        data.mode === 'live'
+          ? 'This integration is live. These checks describe the system texting real people right now.'
+          : 'Everything that must be true before switching this integration from mock to live.'
+      }
+      actions={
+        <Badge
+          className={
+            data.ready
+              ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+              : 'bg-red-50 text-red-700 ring-red-200'
+          }
+        >
+          {data.ready ? 'Ready to go live' : `${data.blocking_count} blocker${data.blocking_count === 1 ? '' : 's'}`}
+        </Badge>
+      }
+    >
+      {blockers.length > 0 && (
+        <div className="mb-4">
+          <SectionTitle>Blocking</SectionTitle>
+          <ul className="space-y-2">
+            {blockers.map((check) => (
+              <li
+                key={check.key}
+                className="rounded-lg bg-red-50 p-3 ring-1 ring-red-100"
+              >
+                <p className="text-sm font-medium text-red-800">{check.label}</p>
+                <p className="mt-0.5 text-xs text-red-700">{check.detail}</p>
+                {check.remedy && (
+                  <p className="mt-1 text-xs text-red-600">{check.remedy}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {warnings.length > 0 && (
+        <div className="mb-4">
+          <SectionTitle>Worth knowing</SectionTitle>
+          <ul className="space-y-2">
+            {warnings.map((check) => (
+              <li
+                key={check.key}
+                className="rounded-lg bg-amber-50 p-3 ring-1 ring-amber-100"
+              >
+                <p className="text-sm font-medium text-amber-900">{check.label}</p>
+                <p className="mt-0.5 text-xs text-amber-800">{check.detail}</p>
+                {check.remedy && (
+                  <p className="mt-1 text-xs text-amber-700">{check.remedy}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {passing.length > 0 && (
+        <div>
+          <SectionTitle>Passing</SectionTitle>
+          <ul className="space-y-1.5">
+            {passing.map((check) => (
+              <li key={check.key} className="flex gap-2 text-xs">
+                <span aria-hidden className="mt-0.5 text-emerald-600">✓</span>
+                <span>
+                  <span className="font-medium text-slate-700">{check.label}</span>
+                  <span className="text-slate-500"> — {check.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
   );
 }

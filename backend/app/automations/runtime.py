@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.phone import normalize_nz_phone
 from app.compliance.engine import ComplianceConfig, check_content, check_recipient
 from app.core.config import settings
 from app.core.enums import (
@@ -676,7 +677,13 @@ def _dispatch(
     now: datetime,
 ) -> None:
     """Hand one message to the provider and record what came back."""
-    to = customer.email if channel == Channel.EMAIL else customer.phone
+    # Canonical E.164 for the provider. Eligibility has already refused
+    # anything unsendable, so this only reshapes what is going out.
+    to = (
+        customer.email
+        if channel == Channel.EMAIL
+        else normalize_nz_phone(customer.phone) or customer.phone
+    )
     message = Message(
         customer_id=customer.id,
         campaign_id=automation.campaign_id,

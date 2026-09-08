@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.phone import normalize_nz_phone
 from app.compliance.engine import (
     ComplianceConfig,
     ComplianceReport,
@@ -496,7 +497,13 @@ def run_campaign(
                 continue
             subject, body = message_row.subject, message_row.body
 
-        to = customer.email if channel == Channel.EMAIL else customer.phone
+        # Canonical E.164 for the provider. Eligibility has already refused
+        # anything unsendable, so this only reshapes what is going out.
+        to = (
+            customer.email
+            if channel == Channel.EMAIL
+            else normalize_nz_phone(customer.phone) or customer.phone
+        )
         result = adapter.send_message(
             to=to or "",
             subject=subject,

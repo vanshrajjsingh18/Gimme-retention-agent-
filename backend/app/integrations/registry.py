@@ -1,6 +1,8 @@
 """Integration registry: resolves a channel to a configured adapter."""
 from __future__ import annotations
 
+import secrets
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -136,3 +138,48 @@ def mask_credentials(credentials: dict) -> dict:
         else:
             masked[key] = {"configured": True, "hint": f"****{text[-4:]}"}
     return masked
+
+
+#: Credential holding the shared secret a provider must present on its webhook.
+WEBHOOK_SECRET_KEY = "webhook_secret"
+
+
+def webhook_secret(integration: Integration | None) -> str:
+    """The configured webhook secret for an integration, or empty if unset."""
+    if integration is None:
+        return ""
+    return str((integration.credentials or {}).get(WEBHOOK_SECRET_KEY) or "").strip()
+
+
+def check_webhook_auth(integration: Integration | None, presented: str | None) -> str | None:
+    """Decide whether an inbound webhook may be processed.
+
+    Returns ``None`` to allow, or a reason to reject.
+
+    A webhook is not a read-only ping: an inbound reply of STOP suppresses a
+    customer, and START restores the marketing consent they withdrew. Both are
+    resolved by phone number rather than by a message id we issued, which is
+    what makes an unauthenticated endpoint dangerous rather than merely noisy —
+    anyone who knows a customer's number could withdraw or, far worse, restore
+    their consent.
+
+    So a live integration must carry a secret and the caller must present it.
+    Mock mode stays open, because nothing there reaches a real person and local
+    development would otherwise need credentials to test a webhook.
+    """
+    mode = (integration.mode if integration else "mock") or "mock"
+    if mode.lower() != "live":
+        return None
+
+    expected = webhook_secret(integration)
+    if not expected:
+        # Fail closed. A live integration with no secret configured is a
+        # publicly writable consent endpoint.
+        return (
+            "This integration is live but has no webhook_secret configured, so "
+            "inbound webhooks are refused. Set one here and in the provider's "
+            "webhook settings."
+        )
+    if not presented or not secrets.compare_digest(presented, expected):
+        return "Webhook secret missing or incorrect."
+    return None

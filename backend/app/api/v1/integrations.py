@@ -16,7 +16,9 @@ from app.integrations.mock_adapters import BaseMockAdapter
 from app.integrations.registry import (
     LIVE_ADAPTERS,
     MOCK_ADAPTERS,
+    check_webhook_auth,
     get_adapter,
+    get_integration,
     mask_credentials,
 )
 from app.integrations.whatsapp import PROVIDER_PROFILES
@@ -37,6 +39,7 @@ from app.schemas.models import (
 )
 from app.services.events import make_idempotency_key, record_communication_event
 from app.services.optout import apply_global_opt_out, apply_opt_in
+from app.services.readiness import integration_readiness
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +159,25 @@ def update_integration(
     return _out(integration)
 
 
+@router.get("/integrations/{integration_id}/readiness", tags=["integrations"])
+def integration_go_live_readiness(
+    integration_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """What would happen if this integration were switched to live right now.
+
+    A connection test says the credentials work. This says whether the *system*
+    is ready to text real people: is the webhook authenticated, will the sender
+    ID be accepted, can we actually reach the audience we hold consent for, and
+    is anything already active that would start sending the moment it flips.
+    """
+    integration = db.get(Integration, integration_id)
+    if integration is None:
+        raise HTTPException(status_code=404, detail="Integration not found.")
+    return integration_readiness(db, integration).as_dict()
+
+
 @router.post("/integrations/{integration_id}/test-connection", tags=["integrations"])
 def test_connection(
     integration_id: int,
@@ -255,10 +277,20 @@ async def receive_webhook(
 ) -> dict:
     """Receive a provider webhook and record normalized events.
 
-    Webhooks are unauthenticated by design (providers post from their own
-    infrastructure), so this endpoint only ever *records* events for messages
-    it already knows about — an unknown message ID is ignored rather than
-    creating new records.
+    Carries no user session — providers post from their own infrastructure —
+    so a **live** integration authenticates instead with a shared secret,
+    presented either as an `X-Webhook-Secret` header or a `secret` query
+    parameter (some providers only allow a URL to be configured).
+
+    That secret is not belt-and-braces. Delivery receipts are ignored unless
+    they name a message we issued, but an inbound *reply* is resolved by phone
+    number, deliberately, so that an opt-out is honoured even when the provider
+    does not echo our message id back. Without a secret, that same path lets
+    anyone who knows a customer's number send STOP to suppress them — or START
+    to restore consent they had withdrawn, which would have this system texting
+    someone who opted out.
+
+    Mock mode stays open: nothing there reaches a real person.
     """
     channel = CHANNEL_BY_WEBHOOK.get(provider.lower())
     if channel is None:
@@ -266,6 +298,14 @@ async def receive_webhook(
             status_code=404,
             detail=f"No webhook handler for provider '{provider}'.",
         )
+
+    integration = get_integration(db, channel)
+    presented = request.headers.get("X-Webhook-Secret") or request.query_params.get("secret")
+    rejection = check_webhook_auth(integration, presented)
+    if rejection is not None:
+        # Deliberately not logging the presented value, or the body.
+        logger.warning("Rejected %s webhook: %s", provider, rejection)
+        raise HTTPException(status_code=401, detail=rejection)
 
     try:
         payload = await request.json()

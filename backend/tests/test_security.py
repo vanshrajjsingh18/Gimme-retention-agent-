@@ -17,6 +17,7 @@ from app.campaigns.service import CampaignError, run_campaign
 from app.core.enums import CampaignStatus, Channel, RecipientStatus
 from app.core.security import api_keys_match, hash_api_key, hash_password, verify_password
 from app.models.entities import ApiKey, Campaign, CampaignRecipient, Customer, Message, User
+from app.services.optout import apply_global_opt_out
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 
@@ -509,3 +510,138 @@ def test_no_secrets_are_committed():
     gitignore = (BACKEND.parent / ".gitignore").read_text()
     for pattern in (".env", "*.db", "data/"):
         assert pattern in gitignore, f"{pattern} is not gitignored"
+
+
+
+# ==========================================================================
+# Webhook authentication
+# ==========================================================================
+@pytest.fixture()
+def live_sms(db, seeded, monkeypatch):
+    """Put the SMS integration in live mode with a webhook secret configured."""
+    from app.integrations.tnz import TnzSmsAdapter
+    import app.api.v1.integrations as integrations_api
+    from app.models.entities import Integration
+
+    integration = db.execute(
+        select(Integration).where(Integration.channel == Channel.SMS.value)
+    ).scalar_one()
+    # The engine is session-scoped, so a committed change to this shared row
+    # would otherwise leak into every test that runs after it.
+    before = (integration.mode, dict(integration.credentials or {}))
+    integration.mode = "live"
+    integration.credentials = {
+        "auth_token": "token",
+        "sender": "GIMME",
+        "webhook_secret": "s3cret-from-tnz",
+    }
+    db.commit()
+
+    # The live adapter parses TNZ's payload shape; the mock does not.
+    adapter = TnzSmsAdapter(config={}, credentials=dict(integration.credentials))
+    monkeypatch.setattr(integrations_api, "get_adapter", lambda db, channel: adapter)
+    yield integration
+
+    integration.mode, integration.credentials = before
+    db.commit()
+
+
+def _consenting_customer(db):
+    return db.execute(
+        select(Customer).where(Customer.sms_consent.is_(True), Customer.is_suppressed.is_(False))
+    ).scalars().first()
+
+
+def test_a_forged_reply_cannot_withdraw_a_customers_consent(client, db, live_sms):
+    """The attack this endpoint would otherwise be wide open to.
+
+    An inbound reply is matched by phone number rather than by a message id we
+    issued — deliberately, so an opt-out is never lost when a provider fails to
+    echo our id back. Without authentication that same path lets anyone who
+    knows a customer's number suppress them.
+    """
+    customer = _consenting_customer(db)
+    response = client.post(
+        "/api/v1/webhooks/tnz", json={"Recipient": customer.phone, "Reply": "STOP"}
+    )
+    assert response.status_code == 401
+    db.expire_all()
+    assert db.get(Customer, customer.id).is_suppressed is False
+
+
+def test_a_forged_reply_cannot_restore_consent_somebody_withdrew(client, db, live_sms):
+    """The worse half of the same hole.
+
+    Suppressing somebody is at least fail-safe. Forging START is not: it clears
+    the suppression and turns marketing consent back on, and this system would
+    then be texting a person who explicitly opted out.
+    """
+    customer = _consenting_customer(db)
+    apply_global_opt_out(db, customer, source="test", channel=Channel.SMS)
+    assert db.get(Customer, customer.id).is_suppressed is True
+
+    response = client.post(
+        "/api/v1/webhooks/tnz", json={"Recipient": customer.phone, "Reply": "START"}
+    )
+    assert response.status_code == 401
+    db.expire_all()
+    reloaded = db.get(Customer, customer.id)
+    assert reloaded.is_suppressed is True
+    assert reloaded.sms_consent is False
+
+
+def test_the_secret_is_accepted_from_a_header_or_the_query_string(client, db, live_sms):
+    customer = _consenting_customer(db)
+    header = client.post(
+        "/api/v1/webhooks/tnz",
+        json={"Recipient": customer.phone, "Reply": "STOP"},
+        headers={"X-Webhook-Secret": "s3cret-from-tnz"},
+    )
+    assert header.status_code == 200
+    assert header.json()["consent_changes_applied"] == 1
+
+    # Some providers only let you configure a URL, not headers.
+    other = _consenting_customer(db)
+    query = client.post(
+        "/api/v1/webhooks/tnz?secret=s3cret-from-tnz",
+        json={"Recipient": other.phone, "Reply": "STOP"},
+    )
+    assert query.status_code == 200
+    assert query.json()["consent_changes_applied"] == 1
+
+
+def test_a_wrong_secret_is_refused(client, db, live_sms):
+    customer = _consenting_customer(db)
+    response = client.post(
+        "/api/v1/webhooks/tnz",
+        json={"Recipient": customer.phone, "Reply": "STOP"},
+        headers={"X-Webhook-Secret": "not-the-secret"},
+    )
+    assert response.status_code == 401
+    db.expire_all()
+    assert db.get(Customer, customer.id).is_suppressed is False
+
+
+def test_a_live_integration_with_no_secret_refuses_webhooks_rather_than_trusting_them(
+    client, db, live_sms
+):
+    """Fail closed. A live integration with no secret is a public consent endpoint."""
+    live_sms.credentials = {"auth_token": "token", "sender": "GIMME"}
+    db.commit()
+
+    customer = _consenting_customer(db)
+    response = client.post(
+        "/api/v1/webhooks/tnz", json={"Recipient": customer.phone, "Reply": "STOP"}
+    )
+    assert response.status_code == 401
+    assert "webhook_secret" in response.json()["detail"]
+    db.expire_all()
+    assert db.get(Customer, customer.id).is_suppressed is False
+
+
+def test_mock_mode_still_accepts_webhooks_without_a_secret(client, seeded):
+    """Local development must not need real credentials to exercise a webhook."""
+    response = client.post(
+        "/api/v1/webhooks/tnz", json={"event": "delivered", "message_id": "unknown"}
+    )
+    assert response.status_code == 200

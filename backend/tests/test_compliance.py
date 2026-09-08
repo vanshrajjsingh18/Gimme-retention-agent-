@@ -525,3 +525,24 @@ def test_report_serializes_for_persistence():
     assert data["blocking_count"] >= 2
     assert all({"code", "message", "severity", "blocks_send"} <= set(f) for f in data["findings"])
     assert data["checked_at"]
+
+
+def test_quiet_hours_and_the_send_window_are_the_same_window(db, bootstrapped):
+    """One window, not two.
+
+    These were separate numbers — compliance blocked from 21:00, the automation
+    runtime deferred from 19:00. The tighter one won for automations, so the
+    gap only showed on the campaign path: a campaign could text somebody at
+    20:30 that an automation would have held until morning, while the UI
+    promised a single "09:00–19:00 NZ time" to both.
+    """
+    from app.core.config import settings
+    from app.services.brand import build_compliance_config
+
+    config = build_compliance_config(db)
+    window_start, window_end = settings.send_window
+
+    # Quiet hours are the complement of the send window: they start when it
+    # ends, and end when it begins.
+    assert config.quiet_hours_start == window_end
+    assert config.quiet_hours_end == window_start

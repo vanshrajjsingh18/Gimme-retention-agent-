@@ -709,3 +709,69 @@ reach the API" is what it says for any failed request, so a 500 from a corrupt
 database reads identically to a backend that is not running. The first two
 things I checked were both wrong because of it, and the traceback in the server
 log named the real cause immediately.
+
+---
+
+## 2026-09-08 — The webhook could be used to restore consent somebody withdrew
+
+**Found by:** Working out what actually stands between the current build and a
+live TNZ integration, and reading the webhook endpoint's own justification for
+being unauthenticated.
+
+**Failure:** The endpoint's docstring said it was safe because it "only records
+events for messages it already knows about". That is true of delivery receipts,
+and false of the path that matters. An inbound *reply* is deliberately resolved
+by phone number rather than by a message id we issued — so that an opt-out is
+honoured even when a provider fails to echo our id back. With no authentication,
+that same path was reachable by anyone.
+
+Demonstrated against the live adapter before fixing anything: an unauthenticated
+`POST {"Recipient": "+64…", "Reply": "STOP"}` suppressed a consenting customer,
+and `"Reply": "START"` then cleared the suppression and turned marketing consent
+back on. The second is the serious one. Suppressing somebody is at least
+fail-safe; forging START silently resurrects consent a customer withdrew, and
+this system would go on texting them.
+
+It was invisible in mock mode, because the mock adapter does not parse TNZ's
+payload shape — so it only becomes reachable at exactly the moment the
+integration goes live and the URL is handed to a third party.
+
+**Fix:** A shared `webhook_secret`, presented as an `X-Webhook-Secret` header or
+a `?secret=` query parameter (some providers only let you configure a URL), and
+compared with `secrets.compare_digest`. A **live** integration with no secret
+configured refuses webhooks rather than trusting them — fail closed, because a
+live integration without one is a publicly writable consent endpoint. Mock mode
+stays open so local development needs no credentials.
+
+**Preventive action:** Six tests, two of which are the attack itself rather than
+the fix: the forged STOP and the forged START are asserted to change nothing.
+The route is also still in the `INTENTIONALLY_PUBLIC` list in the route-auth
+test, with its justification rewritten to say what actually makes it safe.
+
+---
+
+## 2026-09-08 — Two different answers to "when may we text somebody?"
+
+**Found by:** The go-live readiness panel printing "09:00–21:00", one screen
+away from an automations page printing "09:00–19:00 NZ time".
+
+**Failure:** The send window was defined twice. `SEND_WINDOW_START/END` (09:00
+to 19:00) is what the automation runtime defers candidates against; the
+`QUIET_HOURS` compliance rule (21:00 to 09:00) is what `check_recipient` blocks
+against. Automations obeyed both, so the tighter one won and nothing looked
+wrong. Campaigns only go through `check_recipient` — so a campaign could text
+somebody at 20:30 that an automation would have held until morning, while the
+UI promised one window to both.
+
+**Fix:** The seeded rule and its fallback now derive from `SEND_WINDOW`, so a
+fresh install has one window. A *stored* rule is left alone — it is an
+operator's configuration, and silently rewriting somebody's compliance settings
+to match a constant would be worse than the inconsistency. Instead readiness
+reports the mismatch, names both numbers, and says which knob to turn.
+
+**Preventive action:** A test asserts quiet hours are the exact complement of
+the send window on a fresh install, and another asserts the readiness check
+notices when a stored rule disagrees. The general lesson is that the same
+quantity defined in two places does not announce the disagreement — it only
+shows up where the two paths differ, which here was the path with no test
+comparing them.

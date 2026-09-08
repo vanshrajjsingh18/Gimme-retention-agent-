@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, time
 
+from app.core.phone import is_sendable, normalize_nz_phone
 from app.core.enums import Channel, ComplianceSeverity, LifecycleStage, RecipientStatus
 
 # --------------------------------------------------------------------------
@@ -284,11 +285,21 @@ def check_recipient(
 
     # 4. Contactability.
     contact_field = CHANNEL_CONTACT_FIELD.get(channel)
-    if contact_field and not getattr(recipient, contact_field, None):
-        return (
-            RecipientStatus.EXCLUDED_MISSING_CONTACT,
-            f"No {'email address' if contact_field == 'email' else 'phone number'} on record.",
-        )
+    if contact_field:
+        contact = getattr(recipient, contact_field, None)
+        if not contact:
+            return (
+                RecipientStatus.EXCLUDED_MISSING_CONTACT,
+                f"No {'email address' if contact_field == 'email' else 'phone number'} on record.",
+            )
+        # Holding a phone number is not the same as being reachable on it. A
+        # landline or a malformed import would otherwise be handed to the SMS
+        # provider, which fails silently — or delivers to somebody else.
+        if contact_field == "phone" and not is_sendable(contact):
+            return (
+                RecipientStatus.EXCLUDED_MISSING_CONTACT,
+                "Phone number on record is not a mobile number an SMS can reach.",
+            )
 
     # 5. Frequency caps.
     if recipient.messages_last_30d >= config.frequency_cap_30d:
