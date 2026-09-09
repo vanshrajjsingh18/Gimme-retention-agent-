@@ -179,7 +179,12 @@ def preview_upload(
     file: UploadFile = File(...),
     _: User = Depends(require_write),
 ) -> dict:
-    """Parse and validate a CSV without writing anything."""
+    """Parse and validate a CSV without writing anything.
+
+    Runs the real ingestor over every row and rolls back, so the preview
+    reports what the import would actually do rather than a re-implementation
+    of its rules.
+    """
     _validate_entity_type(entity_type)
     content = _read_upload(file)
     try:

@@ -422,3 +422,43 @@ test.describe('Responsive layout', () => {
     expect(spill).toBeLessThanOrEqual(1);
   });
 });
+
+test.describe('Data import', () => {
+  const MESSY = [
+    'external_id,email,phone,first_name,signup_date',
+    'E2E-IMP-1,imp1@example.test,021 555 9001,One,2025-03-14',
+    'E2E-IMP-2,imp2@example.test,09 366 1234,Two,2025-03-15',
+    'E2E-IMP-3,,not-a-number,Three,2025-03-16',
+  ].join('\n');
+
+  async function previewCsv(page: Page) {
+    await page.goto('/data');
+    await page.setInputFiles('input[type="file"]', {
+      name: 'e2e-import.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(MESSY),
+    });
+    await expect(page.getByText(/would import/).first()).toBeVisible();
+  }
+
+  test('a preview reports every row without importing any of them', async ({ page }) => {
+    guard(page);
+    await login(page);
+
+    await previewCsv(page);
+
+    // Two importable rows; the third has no email and an unreachable number.
+    await expect(page.getByText('2 of 3 rows would import')).toBeVisible();
+    await expect(page.getByText(/1 row would be rejected/)).toBeVisible();
+    // The landline row still imports — on email only — and says so.
+    await expect(page.getByText(/1 row would import with a change/)).toBeVisible();
+    await expect(page.getByText(/not a mobile number/).first()).toBeVisible();
+
+    // The property the preview rests on. Every ingestor commits when it
+    // finishes, so previewing would silently import the file if the dry run
+    // were not contained — searching for a previewed row is the direct check.
+    await page.goto('/customers?search=imp1%40example.test');
+    await expect(page.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
+    await expect(page.getByText('imp1@example.test')).toHaveCount(0);
+  });
+});

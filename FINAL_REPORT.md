@@ -186,9 +186,9 @@ before running this anywhere shared.
 
 ```bash
 make test           # backend + frontend
-make test-backend   # 567 tests
+make test-backend   # 575 tests
 make test-frontend  # 54 tests
-make test-e2e       # 15 browser tests (needs both servers running)
+make test-e2e       # 16 browser tests (needs both servers running)
 ```
 
 ## How to execute the complete demo workflow

@@ -37,6 +37,17 @@ const ENTITY_TYPES = [
   },
 ] as const;
 
+interface DryRun {
+  total_rows: number;
+  accepted_rows: number;
+  updated_rows: number;
+  rejected_rows: number;
+  duplicate_rows: number;
+  normalized_values: number;
+  errors: { row: number; error: string; data: Record<string, string> }[];
+  warnings: { row: number; warning: string; data: Record<string, string> }[];
+}
+
 interface PreviewResult {
   entity_type: string;
   headers: string[];
@@ -44,6 +55,8 @@ interface PreviewResult {
   missing_required_columns: string[];
   valid: boolean;
   sample_rows: Record<string, string>[];
+  /** Null when the header check already failed, so no rows were run. */
+  dry_run: DryRun | null;
 }
 
 export default function DataPage() {
@@ -204,14 +217,7 @@ export default function DataPage() {
                   </p>
                 </div>
               ) : (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <p className="text-sm font-medium text-emerald-800">
-                    {formatNumber(preview.total_rows)} rows ready to import
-                  </p>
-                  <p className="mt-0.5 text-xs text-emerald-700">
-                    Rows are validated individually — one bad row will not fail the file.
-                  </p>
-                </div>
+                <DryRunSummary preview={preview} />
               )}
 
               {preview.sample_rows.length > 0 && (
@@ -258,7 +264,8 @@ export default function DataPage() {
                 }}
               >
                 {runImport.loading && <Spinner className="h-4 w-4 text-white" />}
-                Import {formatNumber(preview.total_rows)} rows
+                Import{' '}
+                {formatNumber(preview.dry_run?.accepted_rows ?? preview.total_rows)} rows
               </button>
             </div>
           )}
@@ -491,5 +498,142 @@ function ApiKeysCard() {
         </pre>
       </div>
     </Card>
+  );
+}
+
+/**
+ * What the import would actually do, before anybody commits to it.
+ *
+ * The counts come from running the real ingestor over every row inside a
+ * transaction that is thrown away — not from a second implementation of the
+ * rules, which could disagree with the import it is meant to describe.
+ *
+ * Rejections and quiet changes are separated on purpose. A rejected row is
+ * absent and obvious. A row that imported with a value altered or dropped
+ * looks fine until somebody wonders why a customer never gets texted.
+ */
+function DryRunSummary({ preview }: { preview: PreviewResult }) {
+  const dry = preview.dry_run;
+
+  if (!dry) {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+        <p className="text-sm font-medium text-emerald-800">
+          {formatNumber(preview.total_rows)} rows ready to import
+        </p>
+      </div>
+    );
+  }
+
+  const willImport = dry.accepted_rows + dry.updated_rows;
+  const clean = dry.rejected_rows === 0 && dry.warnings.length === 0;
+
+  return (
+    <div className="space-y-3">
+      <div
+        className={
+          clean
+            ? 'rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3'
+            : 'rounded-lg border border-amber-200 bg-amber-50 px-4 py-3'
+        }
+      >
+        <p className={clean ? 'text-sm font-medium text-emerald-800' : 'text-sm font-medium text-amber-900'}>
+          {formatNumber(willImport)} of {formatNumber(dry.total_rows)} rows would import
+        </p>
+        <p className={clean ? 'mt-0.5 text-xs text-emerald-700' : 'mt-0.5 text-xs text-amber-800'}>
+          Nothing has been written yet. These numbers come from running the import
+          over every row and discarding the result, so they are what will happen.
+        </p>
+      </div>
+
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { label: 'New', value: dry.accepted_rows },
+          { label: 'Updated', value: dry.updated_rows },
+          { label: 'Rejected', value: dry.rejected_rows, tone: dry.rejected_rows > 0 },
+          { label: 'Duplicates', value: dry.duplicate_rows },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-lg border border-slate-200 px-3 py-2">
+            <dt className="text-xs text-slate-500">{stat.label}</dt>
+            <dd
+              className={
+                stat.tone
+                  ? 'text-lg font-semibold tabular-nums text-red-700'
+                  : 'text-lg font-semibold tabular-nums text-slate-900'
+              }
+            >
+              {formatNumber(stat.value)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      {dry.normalized_values > 0 && (
+        <p className="text-xs text-slate-500">
+          {formatNumber(dry.normalized_values)} phone number
+          {dry.normalized_values === 1 ? '' : 's'} would be rewritten to +64… form. The
+          same person can be written half a dozen ways in a spreadsheet; one shape is
+          stored so the provider is handed something it can deliver.
+        </p>
+      )}
+
+      {dry.errors.length > 0 && (
+        <RowIssues
+          title={`${formatNumber(dry.rejected_rows)} ${dry.rejected_rows === 1 ? 'row' : 'rows'} would be rejected`}
+          tone="error"
+          rows={dry.errors.map((e) => ({ row: e.row, text: e.error, data: e.data }))}
+        />
+      )}
+
+      {dry.warnings.length > 0 && (
+        <RowIssues
+          title={`${formatNumber(dry.warnings.length)} ${
+            dry.warnings.length === 1 ? 'row' : 'rows'
+          } would import with a change`}
+          tone="warning"
+          rows={dry.warnings.map((w) => ({ row: w.row, text: w.warning, data: w.data }))}
+        />
+      )}
+    </div>
+  );
+}
+
+function RowIssues({
+  title,
+  tone,
+  rows,
+}: {
+  title: string;
+  tone: 'error' | 'warning';
+  rows: { row: number; text: string; data: Record<string, string> }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? rows : rows.slice(0, 5);
+  const palette =
+    tone === 'error'
+      ? { border: 'border-red-200', head: 'text-red-800', body: 'text-red-700' }
+      : { border: 'border-amber-200', head: 'text-amber-900', body: 'text-amber-800' };
+
+  return (
+    <div className={`rounded-lg border ${palette.border} px-4 py-3`}>
+      <p className={`text-sm font-medium ${palette.head}`}>{title}</p>
+      <ul className="mt-2 space-y-1">
+        {shown.map((issue, index) => (
+          <li key={`${issue.row}-${index}`} className={`text-xs ${palette.body}`}>
+            <span className="font-mono">Row {issue.row}</span>
+            {issue.data.external_id ? ` (${issue.data.external_id})` : ''} — {issue.text}
+          </li>
+        ))}
+      </ul>
+      {rows.length > 5 && (
+        <button
+          type="button"
+          className="mt-2 text-xs font-medium text-brand-700 hover:underline"
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? 'Show fewer' : `Show all ${rows.length}`}
+        </button>
+      )}
+    </div>
   );
 }

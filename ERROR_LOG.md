@@ -775,3 +775,64 @@ notices when a stored rule disagrees. The general lesson is that the same
 quantity defined in two places does not announce the disagreement — it only
 shows up where the two paths differ, which here was the path with no test
 comparing them.
+
+---
+
+## 2026-09-09 — Rejecting a whole customer over a landline
+
+**Found by:** Re-reading yesterday's phone-normalisation change with a real
+upload in mind.
+
+**Failure:** Yesterday I made `ingest_customers` reject any row whose phone
+number could not be resolved to an NZ mobile. The import's own rule is that a
+customer needs an email address *or* a phone number — so a customer with a
+perfectly good email and a landline, which is an ordinary thing to find in an
+exported customer list, had their entire record thrown away. The change was
+right about the number and wrong about the person.
+
+**Fix:** An unusable number is dropped and the customer is kept, provided they
+have an email. Only a row with no email *and* no usable number is rejected,
+because that is genuinely nobody we can contact. The dropped number is reported
+as a warning rather than absorbed silently: quietly discarding somebody's data
+is worse than refusing it, and "why does this customer never get texted?" needs
+an answer.
+
+**Preventive action:** Two tests, one per branch — a landline plus an email
+imports with `phone` cleared, and a landline with no email is rejected. The
+general shape of the mistake is a validator written for one field deciding the
+fate of the whole record.
+
+---
+
+## 2026-09-09 — A preview that would have imported the file
+
+**Found by:** The test written for it, before the code was believed.
+
+**Failure:** Making the CSV preview a real dry run meant running the actual
+ingestor and discarding its writes. The first implementation ran it in a
+session and rolled back afterwards. Every ingestor calls `db.commit()` when it
+finishes — they are written to be called for real — so the rollback had nothing
+left to undo. Clicking *Preview* would have imported the file.
+
+The second attempt bound the session to a held-open connection with
+`join_transaction_mode="create_savepoint"`, on the understanding that inner
+commits would release savepoints inside an outer transaction that could still
+be discarded. Measured rather than assumed, and it was wrong: with pysqlite the
+write reached the database anyway. A count before and after said 1000 → 1001.
+
+**Fix:** Remove the commit instead of trying to contain it. The dry run uses a
+`Session` subclass whose `commit` flushes — the ingestor still sees its own
+writes, so duplicate detection inside the file still works — and the caller
+rolls back with `Session.rollback`. There is no code path in it that can
+persist, so an ingestor that grows a new commit later is still contained.
+
+**Preventive action:** A backend test asserts the customer count is unchanged
+and that a previewed `external_id` is absent afterwards, and an end-to-end test
+previews a file and then searches for one of its rows. Both were checked
+against deliberately broken containment — restoring the real `commit` makes
+them fail — so they are not passing by construction.
+
+**Also worth recording:** the same full e2e run quietly imported that file into
+the development database, because a throwaway screenshot spec I had left in
+`e2e/` performed a real import and `playwright test` runs everything in the
+directory. Removed. Temporary specs in a watched directory are not temporary.

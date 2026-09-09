@@ -420,3 +420,172 @@ def test_csv_ingestion_handles_utf8_bom(client, auth_headers, db):
     assert db.execute(
         select(Customer).where(Customer.external_id == "CSV-BOM")
     ).scalar_one_or_none() is not None
+
+
+# ==========================================================================
+# Preview as a real dry run
+# ==========================================================================
+CUSTOMER_CSV = (
+    "external_id,email,phone,first_name,last_name\n"
+    "PREVIEW-1,alice@example.test,021 123 4567,Alice,Reid\n"
+    "PREVIEW-2,bob@example.test,093661234,Bob,Chen\n"
+    "PREVIEW-3,,not-a-number,Carla,Ngata\n"
+    "PREVIEW-1,dup@example.test,0211111111,Dup,Licate\n"
+).encode()
+
+
+def _preview(client, auth_headers, csv_bytes=CUSTOMER_CSV):
+    response = client.post(
+        "/api/v1/uploads/preview",
+        data={"entity_type": "customers"},
+        files={"file": ("customers.csv", csv_bytes, "text/csv")},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_a_preview_writes_nothing(client, auth_headers, db, seeded):
+    """The property the whole feature rests on.
+
+    Every ingestor commits when it finishes, so a preview that simply called
+    one and rolled back afterwards would import the file instead of describing
+    it. This asserts the containment, not the intent.
+    """
+    from sqlalchemy import func, select
+
+    from app.models.entities import Customer
+
+    before = db.execute(select(func.count(Customer.id))).scalar_one()
+    body = _preview(client, auth_headers)
+    assert body["dry_run"]["accepted_rows"] >= 1
+
+    db.expire_all()
+    after = db.execute(select(func.count(Customer.id))).scalar_one()
+    assert after == before
+    assert (
+        db.execute(
+            select(Customer).where(Customer.external_id == "PREVIEW-1")
+        ).scalar_one_or_none()
+        is None
+    )
+
+
+def test_a_preview_reports_what_the_import_would_do_row_by_row(client, auth_headers, seeded):
+    dry = _preview(client, auth_headers)["dry_run"]
+    # Alice and Bob are importable; Carla has no email and an unusable number;
+    # the fourth row repeats an external_id already seen in the file.
+    assert dry["accepted_rows"] == 2
+    assert dry["rejected_rows"] >= 1
+    assert dry["duplicate_rows"] == 1
+    reasons = " ".join(e["error"] for e in dry["errors"])
+    assert "not a mobile number" in reasons
+
+
+def test_a_preview_says_which_values_it_would_change(client, auth_headers, seeded):
+    dry = _preview(client, auth_headers)["dry_run"]
+    # "021 123 4567" is stored as +64211234567.
+    assert dry["normalized_values"] >= 1
+    # Bob's landline is dropped but Bob is kept, because he has an email.
+    warnings = " ".join(w["warning"] for w in dry["warnings"])
+    assert "email only" in warnings
+
+
+def test_the_preview_and_the_import_agree(client, auth_headers, db, seeded):
+    """A preview nobody can trust is worse than no preview."""
+    dry = _preview(client, auth_headers)["dry_run"]
+    response = client.post(
+        "/api/v1/uploads",
+        data={"entity_type": "customers"},
+        files={"file": ("customers.csv", CUSTOMER_CSV, "text/csv")},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    job = response.json()
+    assert job["accepted_rows"] == dry["accepted_rows"]
+    assert job["rejected_rows"] == dry["rejected_rows"]
+    assert job["duplicate_rows"] == dry["duplicate_rows"]
+
+
+def test_a_customer_with_a_good_email_survives_an_unusable_phone(client, auth_headers, db, seeded):
+    """A landline is not a reason to throw away an email customer."""
+    from sqlalchemy import select
+
+    from app.models.entities import Customer
+
+    csv_bytes = (
+        "external_id,email,phone,first_name\n"
+        "LANDLINE-1,dee@example.test,09 366 1234,Dee\n"
+    ).encode()
+    response = client.post(
+        "/api/v1/uploads",
+        data={"entity_type": "customers"},
+        files={"file": ("customers.csv", csv_bytes, "text/csv")},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["accepted_rows"] == 1
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "LANDLINE-1")
+    ).scalar_one()
+    assert customer.email == "dee@example.test"
+    # The number they cannot be texted on is not kept as though it were usable.
+    assert customer.phone is None
+
+
+def test_a_row_with_only_an_unusable_phone_is_rejected(client, auth_headers, seeded):
+    csv_bytes = "external_id,email,phone\nNOCONTACT-1,,09 366 1234\n".encode()
+    response = client.post(
+        "/api/v1/uploads",
+        data={"entity_type": "customers"},
+        files={"file": ("customers.csv", csv_bytes, "text/csv")},
+        headers=auth_headers,
+    )
+    body = response.json()
+    assert body["accepted_rows"] == 0
+    assert body["rejected_rows"] == 1
+
+
+def test_a_change_is_only_reported_when_the_row_actually_lands(client, auth_headers, seeded):
+    """A row rejected for its date must not claim a phone rewrite that never happens.
+
+    The phone is normalised early, before the fields that can still reject the
+    row. Counting there overstated what the import would change — the number on
+    screen has to describe rows that survive.
+    """
+    csv_bytes = (
+        "external_id,email,phone,signup_date\n"
+        "COUNT-OK,ok@example.test,021 555 0001,2025-03-14\n"
+        "COUNT-BADDATE,bad@example.test,021 555 0002,not-a-date\n"
+    ).encode()
+    response = client.post(
+        "/api/v1/uploads/preview",
+        data={"entity_type": "customers"},
+        files={"file": ("customers.csv", csv_bytes, "text/csv")},
+        headers=auth_headers,
+    )
+    dry = response.json()["dry_run"]
+    assert dry["accepted_rows"] == 1
+    assert dry["rejected_rows"] == 1
+    # Two numbers were reshaped in passing; only one row keeps its version.
+    assert dry["normalized_values"] == 1
+
+
+def test_a_dropped_phone_is_not_reported_for_a_row_that_is_rejected_anyway(
+    client, auth_headers, seeded
+):
+    csv_bytes = (
+        "external_id,email,phone,signup_date\n"
+        "WARN-BADDATE,bad@example.test,09 366 1234,not-a-date\n"
+    ).encode()
+    response = client.post(
+        "/api/v1/uploads/preview",
+        data={"entity_type": "customers"},
+        files={"file": ("customers.csv", csv_bytes, "text/csv")},
+        headers=auth_headers,
+    )
+    dry = response.json()["dry_run"]
+    assert dry["rejected_rows"] == 1
+    assert dry["warnings"] == []

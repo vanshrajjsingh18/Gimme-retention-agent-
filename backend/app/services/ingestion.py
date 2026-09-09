@@ -153,6 +153,12 @@ class IngestResult:
         self.rejected = 0
         self.duplicates = 0
         self.errors: list[dict] = []
+        #: Rows that were accepted but not stored exactly as supplied. Silently
+        #: changing somebody's data is worse than rejecting it, so anything the
+        #: import alters or drops is reported rather than absorbed.
+        self.warnings: list[dict] = []
+        #: How many values were reshaped into a canonical form (phone numbers).
+        self.normalized = 0
         self.affected_customer_ids: set[int] = set()
         self.created_order_ids: list[int] = []
 
@@ -167,6 +173,16 @@ class IngestResult:
                 }
             )
 
+    def warn(self, row_number: int, message: str, row: dict | None = None) -> None:
+        if len(self.warnings) < MAX_ERRORS_STORED:
+            self.warnings.append(
+                {
+                    "row": row_number,
+                    "warning": message,
+                    "data": _safe_row_preview(row or {}),
+                }
+            )
+
     def as_dict(self) -> dict:
         return {
             "entity_type": self.entity_type,
@@ -176,6 +192,8 @@ class IngestResult:
             "rejected_rows": self.rejected,
             "duplicate_rows": self.duplicates,
             "errors": self.errors,
+            "warnings": self.warnings,
+            "normalized_values": self.normalized,
             "affected_customers": len(self.affected_customer_ids),
         }
 
@@ -208,6 +226,10 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
 
             email = optional(row, "email")
             phone = optional(row, "phone")
+            # Held until the row is known to be keepable: a row rejected later
+            # for an unrelated field must not report a change that never lands.
+            phone_note: str | None = None
+            phone_rewritten = False
             if not email and not phone:
                 raise RowError("A customer needs at least an email address or a phone number.")
             if email and not EMAIL_PATTERN.match(email):
@@ -217,10 +239,22 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
                 # an API's "+64211234567" are the same person, and the number
                 # handed to TNZ has to be E.164 either way.
                 normalized = normalize_nz_phone(phone)
-                if normalized is None:
+                if normalized is None and not email:
+                    # No usable phone and no email is nobody we can contact.
                     raise RowError(
-                        f"'phone' value '{phone}' is not a mobile number an SMS can reach."
+                        f"'phone' value '{phone}' is not a mobile number an SMS "
+                        "can reach, and there is no email address either."
                     )
+                if normalized is None:
+                    # A landline is not a reason to throw away a good email
+                    # customer. Drop the number they cannot be texted on, and
+                    # say so rather than losing it quietly.
+                    phone_note = (
+                        f"Kept this customer on email only: '{phone}' is not a mobile "
+                        "number an SMS can reach, so it was not stored."
+                    )
+                elif normalized != phone:
+                    phone_rewritten = True
                 phone = normalized
 
             existing = db.execute(
@@ -250,6 +284,11 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
                 "sms_consent": parse_bool(row.get("sms_consent")),
                 "whatsapp_consent": parse_bool(row.get("whatsapp_consent")),
             }
+
+            if phone_note:
+                result.warn(index, phone_note, row)
+            if phone_rewritten:
+                result.normalized += 1
 
             if existing is None:
                 customer = Customer(external_id=external_id, **values)
@@ -600,17 +639,66 @@ def validate_headers(entity_type: str, headers: list[str]) -> list[str]:
 
 
 def preview_csv(entity_type: str, content: bytes, *, rows: int = 5) -> dict:
-    """Parse a file for preview without writing anything."""
+    """Parse a file for preview without writing anything.
+
+    This is a genuine dry run: every row goes through the same ingestor the
+    import uses, inside a transaction that is discarded. So the counts and the
+    error list are not a second implementation of the rules that could drift
+    from them — they are the rules, executed.
+
+    That matters most for the things a header check cannot see: a duplicate
+    external id, a date in an unexpected format, a landline where a mobile was
+    expected. Finding those after committing a customer list means unpicking it.
+    """
     headers, parsed = parse_csv(content)
     missing = validate_headers(entity_type, headers)
-    return {
+    preview = {
         "entity_type": entity_type,
         "headers": headers,
         "total_rows": len(parsed),
         "missing_required_columns": missing,
         "valid": not missing,
         "sample_rows": parsed[:rows],
+        "dry_run": None,
     }
+    if missing or entity_type not in INGESTORS:
+        return preview
+
+    preview["dry_run"] = dry_run_rows(entity_type, parsed)
+    return preview
+
+
+class _DryRunSession(Session):
+    """A session that cannot persist anything.
+
+    Every ingestor commits when it finishes — they are written to be called for
+    real — so a preview cannot just call one and roll back afterwards: the
+    commit has already happened. Nesting the work in a SAVEPOINT does not help
+    either, because pysqlite's transaction handling lets the inner commit
+    through (measured, not assumed).
+
+    So the commit is removed instead. `flush` gives the ingestor everything a
+    commit would — its own writes are visible to its own subsequent queries, so
+    duplicate detection still works — while leaving the transaction open for
+    the caller to discard. An ingestor that grows a new commit tomorrow is
+    still contained, because there is no code path here that can persist.
+    """
+
+    def commit(self) -> None:  # noqa: D102 - deliberately not a commit
+        self.flush()
+
+
+def dry_run_rows(entity_type: str, rows: list[dict]) -> dict:
+    """Run an ingestor for its report, keeping none of its writes."""
+    from app.core.database import engine
+
+    session = _DryRunSession(bind=engine, autoflush=False, future=True)
+    try:
+        return INGESTORS[entity_type](session, rows).as_dict()
+    finally:
+        # Session.rollback, not the overridden commit — this really does undo.
+        Session.rollback(session)
+        session.close()
 
 
 def ingest_csv(
