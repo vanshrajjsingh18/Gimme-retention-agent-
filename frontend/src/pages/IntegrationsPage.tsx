@@ -212,6 +212,7 @@ export default function IntegrationsPage() {
             </li>
           ))}
         </ul>
+        <LocalhostWebhookNote />
       </Card>
 
       {editing && (
@@ -239,6 +240,7 @@ function IntegrationModal({
 }) {
   const [mode, setMode] = useState<'mock' | 'live'>(integration.mode);
   const [credentials, setCredentials] = useState<Record<string, string>>({});
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [profile, setProfile] = useState<string>(
     String(integration.config?.profile ?? 'meta_cloud'),
   );
@@ -356,7 +358,10 @@ function IntegrationModal({
           </div>
         )}
 
-        {mode === 'live' && (
+        {/* Always shown, not gated on live mode. Credentials have to be entered
+            and tested *before* switching over — requiring live first would mean
+            declaring yourself ready in order to find out whether you are. */}
+        <div>
           <div>
             <SectionTitle>Credentials</SectionTitle>
             <div className="space-y-3">
@@ -369,9 +374,15 @@ function IntegrationModal({
                     </label>
                     <input
                       id={`cred-${key}`}
-                      type={key.includes('secret') || key.includes('token') || key.includes('key')
-                        ? 'password'
-                        : 'text'}
+                      type={
+                        revealed[key]
+                          ? 'text'
+                          : key.includes('secret') ||
+                              key.includes('token') ||
+                              key.includes('key')
+                            ? 'password'
+                            : 'text'
+                      }
                       className="input"
                       placeholder={
                         stored?.configured ? `Stored (${stored.hint}) — leave blank to keep` : ''
@@ -382,6 +393,21 @@ function IntegrationModal({
                       }
                       autoComplete="off"
                     />
+                    {key === 'webhook_secret' && (
+                      <SecretGenerator
+                        value={credentials[key] ?? ''}
+                        revealed={Boolean(revealed[key])}
+                        onReveal={() =>
+                          setRevealed({ ...revealed, [key]: !revealed[key] })
+                        }
+                        onGenerate={(secret) => {
+                          setCredentials({ ...credentials, [key]: secret });
+                          // A value that has to be transcribed into TNZ is not
+                          // usefully protected by dots.
+                          setRevealed({ ...revealed, [key]: true });
+                        }}
+                      />
+                    )}
                     {CREDENTIAL_HELP[key] && (
                       <p className="mt-1 text-xs text-slate-500">{CREDENTIAL_HELP[key]}</p>
                     )}
@@ -392,9 +418,10 @@ function IntegrationModal({
             <p className="mt-2 text-xs text-slate-500">
               Stored values are never returned to the browser — only a masked hint. Leaving a field
               blank keeps the existing secret.
+              {mode === 'mock' && ' Saving these while in Mock changes nothing about sending — it just means they are ready when you switch to Live.'}
             </p>
           </div>
-        )}
+        </div>
 
         <div className="border-t border-slate-200 pt-4">
           <SectionTitle>Test</SectionTitle>
@@ -404,7 +431,14 @@ function IntegrationModal({
               className="btn-secondary"
               onClick={async () => {
                 const result = await testConnection.run();
-                if (result) notify(result.message, result.status === 'OK' ? 'success' : 'error');
+                if (result) {
+                  // A mock result is neither a pass nor a failure — it is a
+                  // statement that nothing was actually contacted.
+                  notify(
+                    result.message,
+                    result.status === 'OK' ? 'success' : result.is_mock ? 'info' : 'error',
+                  );
+                }
               }}
               disabled={testConnection.loading}
             >
@@ -559,5 +593,105 @@ function GoLiveChecklist({ integration }: { integration: Integration }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * The webhook endpoints are only useful if a provider can actually reach them.
+ *
+ * The URLs above are built from whatever this dashboard talks to, which during
+ * development is localhost. Presenting that as something to paste into TNZ
+ * would send somebody off to configure a URL that can never be delivered to,
+ * and the failure would look like "TNZ never sends us receipts" rather than
+ * "that address does not exist".
+ */
+function LocalhostWebhookNote() {
+  let host = '';
+  try {
+    host = new URL(api.baseUrl).hostname;
+  } catch {
+    host = '';
+  }
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  if (!isLocal) return null;
+
+  return (
+    <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      These point at <code className="font-mono">{host}</code>, which TNZ cannot reach. Before
+      going live, deploy the backend somewhere with a public HTTPS address and configure that
+      URL at the provider — or tunnel to this machine while you are testing. A webhook
+      configured against localhost never arrives, and the symptom is silence rather than an
+      error.
+    </p>
+  );
+}
+
+/**
+ * Generate a webhook secret, and let it be copied before it is stored.
+ *
+ * Left to invent one, people pick something memorable, and this value is the
+ * only thing standing between a public endpoint and a stranger being able to
+ * restore marketing consent somebody withdrew. Generated in the browser with
+ * the platform CSPRNG — it is posted once on save and masked from then on, so
+ * this is the only moment it can be copied into TNZ.
+ */
+function SecretGenerator({
+  value,
+  revealed,
+  onGenerate,
+  onReveal,
+}: {
+  value: string;
+  revealed: boolean;
+  onGenerate: (secret: string) => void;
+  onReveal: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        className="btn-secondary px-2 py-1 text-xs"
+        onClick={() => {
+          const bytes = new Uint8Array(24);
+          crypto.getRandomValues(bytes);
+          const secret = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+          onGenerate(secret);
+          setCopied(false);
+        }}
+      >
+        Generate
+      </button>
+      {value && (
+        <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={onReveal}>
+          {revealed ? 'Hide' : 'Show'}
+        </button>
+      )}
+      {value && (
+        <button
+          type="button"
+          className="btn-ghost px-2 py-1 text-xs"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(value);
+              setCopied(true);
+            } catch {
+              // Clipboard access can be refused. Reveal the value instead, so
+              // there is always a way to get it into TNZ.
+              setCopied(false);
+              onReveal();
+            }
+          }}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      )}
+      {value && (
+        <span className="text-xs text-slate-500">
+          Copy this into TNZ&rsquo;s webhook settings now — after saving it is masked.
+        </span>
+      )}
+    </div>
   );
 }

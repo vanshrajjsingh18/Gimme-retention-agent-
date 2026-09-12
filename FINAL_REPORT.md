@@ -186,7 +186,7 @@ before running this anywhere shared.
 
 ```bash
 make test           # backend + frontend
-make test-backend   # 575 tests
+make test-backend   # 578 tests
 make test-frontend  # 54 tests
 make test-e2e       # 16 browser tests (needs both servers running)
 ```

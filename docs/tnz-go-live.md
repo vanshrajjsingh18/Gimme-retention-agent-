@@ -24,6 +24,16 @@ Reaches TNZ with the stored credentials. Green here only means the credentials
 work — it says nothing about the rest of this list, which is why the readiness
 panel exists alongside it.
 
+Testing while the integration is still in **Mock** does not count. The mock
+adapter has nothing to fail against and always reports success, so the stored
+status records that a mock was tested rather than a provider, and this check
+stays unmet. The first call that actually reaches TNZ is a test run in Live.
+
+Credentials can be entered and saved at any time, including while in Mock —
+saving them changes nothing about sending. That is deliberate: entering and
+testing credentials is how you find out whether you are ready, so it must not
+require declaring yourself ready first.
+
 ### Webhook secret
 
 **This one is not optional, and not merely hygiene.**
@@ -39,8 +49,11 @@ a customer's number could POST `STOP` to suppress them — or `START`, which
 clears the suppression and switches marketing consent back on for somebody who
 withdrew it. The system would then text a person who opted out.
 
-So: generate a secret, save it against the integration, and configure the same
-value on TNZ's webhook. It is accepted as an `X-Webhook-Secret` header or a
+So: generate a secret (there is a **Generate** button next to the field, which
+uses the browser's CSPRNG rather than leaving you to invent one), save it
+against the integration, and configure the same value on TNZ's webhook. The
+value is shown only while you are entering it — after saving, only a masked
+hint comes back to the browser — so copy it into TNZ before you save. It is accepted as an `X-Webhook-Secret` header or a
 `?secret=` query parameter, for providers that only let you configure a URL.
 
 A live integration with **no** secret configured refuses inbound webhooks
@@ -97,8 +110,13 @@ each one first; the preview is produced by the same code path as a live send.
 
 ## Order of operations
 
-1. Configure credentials and the webhook secret. Leave the integration in mock.
-2. Point TNZ's webhook at `POST /api/v1/webhooks/tnz`, with the secret.
+1. Configure credentials and the webhook secret. Leave the integration in mock —
+   the fields are available there, and saving them sends nothing.
+2. Point TNZ's webhook at `POST /api/v1/webhooks/tnz`, with the secret. This
+   has to be an address TNZ can actually reach — the URLs shown on the
+   Integrations page are built from whatever the dashboard talks to, which in
+   development is localhost. A webhook configured against localhost never
+   arrives, and the symptom is silence rather than an error.
 3. Run a connection test.
 4. Confirm readiness reports no blockers.
 5. Dry-run every active automation and read the copy it produces.

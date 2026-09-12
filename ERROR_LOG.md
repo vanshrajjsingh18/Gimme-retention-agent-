@@ -836,3 +836,50 @@ them fail — so they are not passing by construction.
 the development database, because a throwaway screenshot spec I had left in
 `e2e/` performed a real import and `playwright test` runs everything in the
 directory. Removed. Temporary specs in a watched directory are not temporary.
+
+---
+
+## 2026-09-12 — You had to go live in order to enter the credentials
+
+**Found by:** Opening the TNZ card to enter API keys, and finding no fields.
+
+**Failure:** The credentials section in the integration dialog was wrapped in
+`{mode === 'live' && …}`. So the only way to reach the auth token and sender
+fields was to first switch the integration to Live — declaring yourself ready
+in order to find out whether you are. The readiness panel compounded it by
+saying "Add them under this integration's settings", which pointed at fields
+that were not rendered.
+
+**Fix:** The credentials are always shown. Saving them while in Mock changes
+nothing about sending, which the dialog now says, so an operator can enter
+keys, test, and switch over in that order rather than the reverse.
+
+**Preventive action:** An end-to-end test opens the dialog in Mock and asserts
+the fields are present.
+
+---
+
+## 2026-09-12 — Testing the mock counted as testing TNZ
+
+**Found by:** Clicking *Test connection* while in mock mode and watching the
+go-live checklist move "Connection test" into the Passing list.
+
+**Failure:** The mock adapter's `validate_credentials` returns `status="OK"`,
+which is right for what it is — it has nothing to fail against. The endpoint
+stored that verbatim, and the readiness check asks whether the stored status is
+`OK`. So a test of the mock satisfied the go-live check for a *provider*
+connection, and the panel would say a blocker had cleared having never once
+spoken to TNZ. That is the specific failure this panel exists to prevent: false
+assurance is worse than no assurance.
+
+**Fix:** The stored status now says what was actually tested — `MOCK` when the
+adapter was a mock, the real result otherwise. The readiness check treats MOCK
+as an unmet blocker and says why, rather than silently failing a string
+comparison. A failed live test now also reports what the provider said instead
+of "Last result: ERROR", and the remedy no longer tells you to run the test you
+just ran.
+
+**Preventive action:** A test asserts a mock connection test leaves the
+connection check failing, and an end-to-end test asserts the same through the
+dialog. The general shape: a stand-in that always succeeds will satisfy any
+check that only looks at whether something succeeded.

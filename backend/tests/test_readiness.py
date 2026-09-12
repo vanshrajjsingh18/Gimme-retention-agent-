@@ -180,3 +180,51 @@ def test_matching_windows_report_one_number(db, sms):
     check = by_key(integration_readiness(db, sms))["quiet_hours"]
     assert check.passed is True
     assert "both the campaign and automation paths" in check.detail
+
+
+def test_a_connection_test_against_the_mock_does_not_count_as_a_tested_connection(
+    client, auth_headers, db, sms
+):
+    """The mock adapter always reports OK — it has nothing to fail against.
+
+    Storing that as OK let a test of the mock satisfy the go-live check for a
+    *provider* connection, so the panel could read "ready to go live" having
+    never once spoken to TNZ.
+    """
+    sms.mode = "mock"
+    db.commit()
+
+    response = client.post(
+        f"/api/v1/integrations/{sms.id}/test-connection", headers=auth_headers
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["is_mock"] is True
+    assert body["status"] == "MOCK"
+
+    db.expire_all()
+    check = by_key(integration_readiness(db, db.get(Integration, sms.id)))["connection"]
+    assert check.passed is False
+    assert check.blocking is True
+    assert "mock" in check.detail.lower()
+    assert "Live" in check.remedy
+
+
+def test_a_failed_connection_reports_what_the_provider_said(db, sms):
+    """"Last result: ERROR" is not information. The reason is already stored."""
+    sms.status = "ERROR"
+    sms.status_message = "Could not reach TNZ: 403 Forbidden"
+    db.commit()
+
+    check = by_key(integration_readiness(db, sms))["connection"]
+    assert check.passed is False
+    assert check.detail == "Could not reach TNZ: 403 Forbidden"
+    # And the remedy does not tell you to do the thing you just did.
+    assert "Resolve what the test reports" in check.remedy
+
+
+def test_a_connection_never_tested_says_so(db, sms):
+    sms.status = ""
+    db.commit()
+    check = by_key(integration_readiness(db, sms))["connection"]
+    assert check.detail == "Never run."

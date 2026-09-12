@@ -171,18 +171,46 @@ def _sender_check(integration: Integration) -> Check:
 
 def _connection_check(integration: Integration) -> Check:
     status = (integration.status or "").upper()
+    if status == "MOCK":
+        # Testing the mock proves nothing about TNZ. It always succeeds.
+        return Check(
+            key="connection",
+            label="Connection test",
+            passed=False,
+            blocking=True,
+            detail="The last test ran against the mock adapter, which cannot fail.",
+            remedy=(
+                "Enter the TNZ credentials, switch this integration to Live, and test "
+                "again — that is the first call that actually reaches TNZ."
+            ),
+        )
     passed = status == "OK"
+    if passed:
+        return Check(
+            key="connection",
+            label="Connection test",
+            passed=True,
+            blocking=True,
+            detail=integration.status_message or "Connected.",
+        )
+    if not status:
+        return Check(
+            key="connection",
+            label="Connection test",
+            passed=False,
+            blocking=True,
+            detail="Never run.",
+            remedy="Run a connection test from this integration's settings.",
+        )
+    # The failure is already recorded; repeating "run a test" when one just ran
+    # and said why is not a remedy, it is a shrug.
     return Check(
         key="connection",
         label="Connection test",
-        passed=passed,
+        passed=False,
         blocking=True,
-        detail=(
-            integration.status_message or "Connected."
-            if passed
-            else f"Last result: {status or 'never run'}."
-        ),
-        remedy="" if passed else "Run a connection test and resolve whatever it reports.",
+        detail=integration.status_message or f"Last result: {status}.",
+        remedy="Resolve what the test reports, then run it again.",
     )
 
 

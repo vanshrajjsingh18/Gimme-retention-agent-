@@ -190,18 +190,23 @@ def test_connection(
 
     adapter = get_adapter(db, Channel(integration.channel))
     status = adapter.validate_credentials()
+    is_mock = isinstance(adapter, BaseMockAdapter)
 
-    integration.status = status.status
+    # A mock adapter always reports OK — it has nothing to fail against. Storing
+    # that as OK would let a test of the mock satisfy the go-live check for a
+    # *provider* connection, so the integration would read "ready" having never
+    # spoken to TNZ. The stored status says what was actually tested.
+    integration.status = "MOCK" if is_mock else status.status
     integration.status_message = status.message
     integration.last_checked_at = utcnow()
     db.commit()
 
     return {
         "provider": adapter.provider,
-        "status": status.status,
+        "status": integration.status,
         "message": status.message,
         "mode": status.mode,
-        "is_mock": isinstance(adapter, BaseMockAdapter),
+        "is_mock": is_mock,
         "details": status.details,
     }
 

@@ -462,3 +462,42 @@ test.describe('Data import', () => {
     await expect(page.getByText('imp1@example.test')).toHaveCount(0);
   });
 });
+
+test.describe('Integrations', () => {
+  test('TNZ credentials can be entered before going live, and a mock test says so', async ({
+    page,
+  }) => {
+    guard(page);
+    await login(page);
+    await page.goto('/integrations');
+
+    // Outlook, TNZ, WhatsApp.
+    await page.getByRole('button', { name: 'Configure' }).nth(1).click();
+    await expect(page.getByText('TNZ Group SMS').last()).toBeVisible();
+
+    // The fields have to be reachable while still in Mock: entering and
+    // testing credentials is how you find out whether you are ready, so
+    // requiring Live first would be backwards.
+    await expect(page.getByRole('button', { name: 'Mock' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.getByLabel('Auth token')).toBeVisible();
+    await expect(page.getByLabel('Sender number or name')).toBeVisible();
+
+    // The webhook secret is generated rather than invented, and shown once so
+    // it can be copied into TNZ before it is masked.
+    const secret = page.getByLabel('Webhook secret');
+    await expect(secret).toHaveValue('');
+    await page.getByRole('button', { name: 'Generate' }).click();
+    await expect(secret).not.toHaveValue('');
+    await expect(secret).toHaveAttribute('type', 'text');
+
+    // Testing the mock must not satisfy the go-live connection check.
+    await page.getByRole('button', { name: 'Test connection' }).click();
+    await expect(page.getByText(/MOCK MODE/).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Close', exact: true }).last().click();
+
+    await expect(page.getByText('The last test ran against the mock adapter')).toBeVisible();
+  });
+});
