@@ -31,6 +31,13 @@ INTENTIONALLY_PUBLIC = {
         "integrations",
         "receive_webhook",
     ): "providers post from their own infrastructure; only records events for known messages",
+    (
+        "main",
+        "serve_dashboard",
+    ): (
+        "static bundle only — the login page and its assets have to load before "
+        "anyone can authenticate; every API call the page then makes is gated"
+    ),
 }
 
 
@@ -645,3 +652,28 @@ def test_mock_mode_still_accepts_webhooks_without_a_secret(client, seeded):
         "/api/v1/webhooks/tnz", json={"event": "delivered", "message_id": "unknown"}
     )
     assert response.status_code == 200
+
+
+# ==========================================================================
+# Serving the dashboard alongside the API
+# ==========================================================================
+def test_the_dashboard_catch_all_never_answers_for_an_api_path(client, tmp_path, monkeypatch):
+    """An API path must fail as JSON, not succeed as a web page.
+
+    Serving the built dashboard from the API means a catch-all route on "/".
+    Registered naively it swallows every unmatched path, so a GET on a
+    POST-only endpoint — or a typo — returns index.html with a 200, and the
+    caller is left parsing HTML as JSON with no clue why.
+    """
+    response = client.get("/api/v1/definitely-not-a-route")
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+
+    # A route that exists for POST must not come back as a page either.
+    assert client.get("/api/v1/auth/login").status_code == 404
+    assert "text/html" not in client.get("/api/v1/auth/login").headers["content-type"]
+
+    # /health stays a real API response.
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"

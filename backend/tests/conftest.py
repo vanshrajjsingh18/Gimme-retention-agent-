@@ -13,15 +13,26 @@ from sqlalchemy.orm import Session, sessionmaker
 
 @pytest.fixture(scope="session")
 def _test_db_url() -> Iterator[str]:
-    """A file-backed SQLite database, isolated from the developer's data."""
+    """The database the suite runs against.
+
+    Defaults to a throwaway SQLite file, which is what a developer wants. Set
+    TEST_DATABASE_URL to a Postgres URL to run the same suite against the
+    engine a deployment actually uses — "it passes on SQLite" is not evidence
+    that it passes on Postgres, and the differences that bite (stricter types,
+    real transactional DDL, sequence-backed keys) only show up there.
+    """
+    external = os.environ.get("TEST_DATABASE_URL", "").strip()
+    if external:
+        os.environ["DATABASE_URL"] = external
+        _configure_test_env()
+        yield external
+        return
+
     fd, path = tempfile.mkstemp(suffix=".db", prefix="gimme-test-")
     os.close(fd)
     url = f"sqlite:///{path}"
     os.environ["DATABASE_URL"] = url
-    os.environ["ENABLE_SCHEDULER"] = "false"
-    os.environ["LLM_PROVIDER"] = "mock"
-    os.environ["ADMIN_EMAIL"] = "admin@gimmedelivery.co.nz"
-    os.environ["ADMIN_PASSWORD"] = "GimmeAdmin123!"
+    _configure_test_env()
     yield url
     for suffix in ("", "-wal", "-shm"):
         try:
@@ -30,19 +41,31 @@ def _test_db_url() -> Iterator[str]:
             pass
 
 
+def _configure_test_env() -> None:
+    os.environ["ENABLE_SCHEDULER"] = "false"
+    os.environ["LLM_PROVIDER"] = "mock"
+    os.environ["ADMIN_EMAIL"] = "admin@gimmedelivery.co.nz"
+    os.environ["ADMIN_PASSWORD"] = "GimmeAdmin123!"
+
+
 @pytest.fixture(scope="session")
 def engine(_test_db_url):
     from app.core import database
 
+    sqlite = _test_db_url.startswith("sqlite")
     test_engine = create_engine(
-        _test_db_url, connect_args={"check_same_thread": False}, future=True
+        _test_db_url,
+        connect_args={"check_same_thread": False} if sqlite else {},
+        future=True,
     )
 
-    @event.listens_for(test_engine, "connect")
-    def _pragma(dbapi_connection, _record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    if sqlite:
+        # Postgres enforces foreign keys itself; SQLite has to be asked.
+        @event.listens_for(test_engine, "connect")
+        def _pragma(dbapi_connection, _record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
     TestSession = sessionmaker(bind=test_engine, autocommit=False, autoflush=False, future=True)
 

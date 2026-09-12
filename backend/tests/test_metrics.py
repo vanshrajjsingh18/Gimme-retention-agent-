@@ -139,3 +139,27 @@ def test_ltv_higher_for_on_cadence_customer():
         cadence_history(count=6, interval_days=30, last_order_days_ago=300, amount=100.0), now=NOW
     )
     assert active.estimated_ltv > lapsed.estimated_ltv
+
+
+def test_month_grouping_compiles_for_postgres_not_just_sqlite():
+    """The analytics month bucket has to speak whichever dialect is connected.
+
+    This was a helper whose docstring promised "SQLite strftime, PostgreSQL
+    to_char" and whose body only ever called strftime. Every analytics query
+    through it raised UndefinedFunction on PostgreSQL — so the analytics pages
+    were broken on the engine a deployment actually runs, and the SQLite-only
+    test suite could never see it.
+    """
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    from app.analytics.dashboards import _month_key
+    from app.models.entities import Customer
+
+    expression = _month_key(Customer.signup_date)
+
+    on_sqlite = str(expression.compile(dialect=sqlite.dialect()))
+    on_postgres = str(expression.compile(dialect=postgresql.dialect()))
+
+    assert "strftime" in on_sqlite
+    assert "to_char" in on_postgres
+    assert "strftime" not in on_postgres

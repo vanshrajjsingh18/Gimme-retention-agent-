@@ -72,6 +72,25 @@ class Settings(BaseSettings):
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
     INBOX_DIR: str = str(REPO_ROOT / "data" / "inbox")
 
+    # The address this deployment is reachable at from the public internet.
+    # A provider webhook has to be configured against a real host, so the
+    # dashboard shows this rather than whatever the browser happens to be
+    # talking to. Railway injects RAILWAY_PUBLIC_DOMAIN; PUBLIC_BASE_URL wins
+    # when set explicitly.
+    PUBLIC_BASE_URL: str = ""
+    RAILWAY_PUBLIC_DOMAIN: str = ""
+
+    # Directory holding the built frontend. When present, the API serves the
+    # dashboard from the same origin — one service, and no CORS to configure.
+    FRONTEND_DIST: str = str(REPO_ROOT / "frontend" / "dist")
+
+    # TNZ credentials may come from the environment instead of the database.
+    # On a deployed host that is the safer home for them: they never sit in a
+    # row that a database backup would carry off.
+    TNZ_AUTH_TOKEN: str = ""
+    TNZ_SENDER: str = ""
+    TNZ_WEBHOOK_SECRET: str = ""
+
     @property
     def send_window(self) -> tuple[time, time]:
         """Parsed (start, end) of the allowed local sending window."""
@@ -87,6 +106,44 @@ class Settings(BaseSettings):
     def is_sqlite(self) -> bool:
         return self.DATABASE_URL.startswith("sqlite")
 
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.lower() in {"production", "prod"}
+
+    @property
+    def public_base_url(self) -> str:
+        """Where a provider should send its webhooks."""
+        if self.PUBLIC_BASE_URL:
+            return self.PUBLIC_BASE_URL.rstrip("/")
+        if self.RAILWAY_PUBLIC_DOMAIN:
+            return f"https://{self.RAILWAY_PUBLIC_DOMAIN.rstrip('/')}"
+        return ""
+
+    @property
+    def tnz_env_credentials(self) -> dict[str, str]:
+        """TNZ credentials supplied by the environment, if any."""
+        supplied = {
+            "auth_token": self.TNZ_AUTH_TOKEN.strip(),
+            "sender": self.TNZ_SENDER.strip(),
+            "webhook_secret": self.TNZ_WEBHOOK_SECRET.strip(),
+        }
+        return {key: value for key, value in supplied.items() if value}
+
+    def unsafe_production_settings(self) -> list[str]:
+        """Development defaults that must not survive into production.
+
+        Returned rather than raised so the caller decides — the test suite and
+        a local run are entitled to the defaults; a deployment is not.
+        """
+        problems = []
+        if self.SECRET_KEY == "dev-only-insecure-secret-change-me":
+            problems.append("SECRET_KEY is still the development default")
+        if self.ADMIN_PASSWORD == "GimmeAdmin123!":
+            problems.append("ADMIN_PASSWORD is still the development default")
+        if self.DEBUG:
+            problems.append("DEBUG is on")
+        return problems
+
 
 def _parse_time(value: str, fallback: time) -> time:
     try:
@@ -99,6 +156,17 @@ def _parse_time(value: str, fallback: time) -> time:
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
+    # Railway (and Heroku before it) publish DATABASE_URL as "postgres://",
+    # a scheme SQLAlchemy 2 dropped. Rewriting it here means the deployment
+    # works with the variable the platform actually injects.
+    if settings.DATABASE_URL.startswith("postgres://"):
+        settings.DATABASE_URL = settings.DATABASE_URL.replace(
+            "postgres://", "postgresql+psycopg2://", 1
+        )
+    elif settings.DATABASE_URL.startswith("postgresql://"):
+        settings.DATABASE_URL = settings.DATABASE_URL.replace(
+            "postgresql://", "postgresql+psycopg2://", 1
+        )
     if settings.is_sqlite:
         # Ensure the sqlite directory exists before the engine connects.
         path = settings.DATABASE_URL.replace("sqlite:///", "")

@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import Float, case, cast, func, select
+from sqlalchemy import Float, String, case, cast, func, select
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.expression import FunctionElement
 from sqlalchemy.orm import Session
 
 from app.core.enums import (
@@ -43,9 +45,36 @@ ACTIVE_STAGES = [
 ]
 
 
+class _MonthKey(FunctionElement):
+    """YYYY-MM from a timestamp, in whichever dialect is actually connected.
+
+    This existed as a helper whose docstring promised portability and whose
+    body called `strftime` — a SQLite-only function. On SQLite the analytics
+    worked; on PostgreSQL every query through it raised
+    `UndefinedFunction: strftime`, which is to say the analytics pages were
+    broken on the engine a deployment actually uses.
+    """
+
+    type = String()
+    name = "month_key"
+    inherit_cache = True
+
+
+@compiles(_MonthKey)
+def _month_key_default(element, compiler, **kw):
+    """SQLite, and anything else that speaks strftime."""
+    column = list(element.clauses)[0]
+    return compiler.process(func.strftime("%Y-%m", column), **kw)
+
+
+@compiles(_MonthKey, "postgresql")
+def _month_key_postgresql(element, compiler, **kw):
+    column = list(element.clauses)[0]
+    return compiler.process(func.to_char(column, "YYYY-MM"), **kw)
+
+
 def _month_key(column):
-    """Portable YYYY-MM extraction (SQLite strftime, PostgreSQL to_char)."""
-    return func.strftime("%Y-%m", column)
+    return _MonthKey(column)
 
 
 def _safe_rate(numerator: float, denominator: float, digits: int = 4) -> float:

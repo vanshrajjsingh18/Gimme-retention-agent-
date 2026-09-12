@@ -883,3 +883,64 @@ just ran.
 connection check failing, and an end-to-end test asserts the same through the
 dialog. The general shape: a stand-in that always succeeds will satisfy any
 check that only looks at whether something succeeded.
+
+---
+
+## 2026-09-12 — The analytics pages were broken on PostgreSQL
+
+**Found by:** Making the test suite able to run against PostgreSQL, then
+running it, because a Railway deployment uses Postgres and "it passes on
+SQLite" is not evidence about an engine it never touched.
+
+**Failure:** `UndefinedFunction: function strftime(unknown, timestamp without
+time zone) does not exist`. The analytics month-grouping helper called
+`strftime()`, which only SQLite has. Every query through it — customer growth,
+new-vs-repeat, the whole Customer analytics page — would have raised a 500 on
+a deployed host.
+
+The helper's own docstring read *"Portable YYYY-MM extraction (SQLite
+strftime, PostgreSQL to_char)"*. The portability was described and never
+implemented; the body only ever called `strftime`. A comment asserting a
+property is not the property, and on SQLite nothing ever contradicted it.
+
+**Fix:** A real dialect-aware expression via SQLAlchemy's `@compiles` —
+`strftime` on SQLite, `to_char` on PostgreSQL, chosen by whichever dialect is
+connected.
+
+**Preventive action:** `TEST_DATABASE_URL` now points the whole suite at any
+database, and all 579 tests pass against PostgreSQL 16 as well as SQLite. Plus
+a unit test compiling the expression for both dialects and asserting
+`strftime` does not appear in the PostgreSQL output.
+
+The wider lesson: the test suite ran on an engine the product would never be
+deployed on, so an entire class of defect was structurally invisible. Nothing
+about the code looked wrong — the bug lived in the gap between the two.
+
+---
+
+## 2026-09-12 — Serving the dashboard swallowed the API
+
+**Found by:** Checking the routes immediately after adding static file serving,
+rather than assuming a catch-all route behaves.
+
+**Failure:** Serving the built dashboard from the API needs a catch-all on
+`/{path}` so client-side routes like `/customers/42` resolve to `index.html`.
+Registered naively it also caught `/api/...`: a `GET` on a `POST`-only endpoint
+returned **`200` with an HTML page** instead of an error, as did any mistyped
+API path. A caller then parses HTML as JSON and gets `Unexpected token '<'` —
+an error that says nothing about the real cause. (I hit exactly that error
+earlier in this session from a different cause, which is why it was worth
+checking.)
+
+**Fix:** The catch-all refuses `api/`, `health`, `docs`, `redoc` and
+`openapi.json`, returning a JSON 404 naming the path.
+
+**Preventive action:** A test asserting an unknown API path returns JSON rather
+than HTML, that a POST-only route does not answer a GET with a page, and that
+`/health` still returns its real payload.
+
+**Also caught, by an existing test:** the new static route has no authentication,
+and the route-auth test failed until it was added to the intentionally-public
+list with a justification. It is legitimately public — the login page has to
+load before anyone can authenticate — but the safeguard made that a decision
+rather than an oversight.

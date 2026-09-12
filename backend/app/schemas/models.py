@@ -535,6 +535,9 @@ class IntegrationOut(BaseModel):
     config: dict
     #: Presence flags only — secret values never leave the backend.
     credentials: dict
+    #: Per credential: "environment" or "database". Tells an operator why a
+    #: field they cannot edit is nonetheless set.
+    credential_sources: dict = {}
     required_credentials: list[str]
 
 

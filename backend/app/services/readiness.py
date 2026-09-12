@@ -24,6 +24,7 @@ from app.core.phone import is_sendable
 from app.integrations.registry import (
     LIVE_ADAPTERS,
     get_integration,
+    resolved_credentials,
     webhook_secret,
 )
 from app.models.entities import Automation, Customer, Integration
@@ -93,7 +94,8 @@ class ReadinessReport:
 def _credentials_check(integration: Integration) -> Check:
     adapter_cls = LIVE_ADAPTERS.get(Channel(integration.channel))
     required = list(adapter_cls.required_credentials) if adapter_cls else []
-    creds = integration.credentials or {}
+    # Environment-supplied credentials count: they are what the adapter uses.
+    creds = resolved_credentials(integration, Channel(integration.channel))
     missing = [key for key in required if not str(creds.get(key) or "").strip()]
     return Check(
         key="credentials",
@@ -133,7 +135,8 @@ def _webhook_secret_check(integration: Integration) -> Check:
 
 
 def _sender_check(integration: Integration) -> Check:
-    sender = str((integration.credentials or {}).get("sender") or "").strip()
+    creds = resolved_credentials(integration, Channel(integration.channel))
+    sender = str(creds.get("sender") or "").strip()
     if not sender:
         return Check(
             key="sender",

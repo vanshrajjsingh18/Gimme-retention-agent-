@@ -5,7 +5,17 @@
  * gets an `ApiError` with a message that is safe to show a user.
  */
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000';
+// Empty means same-origin: the deployed build is served by the API itself, so
+// requests go to a relative path and there is no host to bake in. `??` alone
+// would not catch that — an empty string is not nullish — so a deployed bundle
+// would silently call 127.0.0.1 and fail on every request.
+const CONFIGURED = (import.meta.env.VITE_API_URL ?? '').trim();
+const SAME_ORIGIN = CONFIGURED === '' && import.meta.env.PROD;
+const BASE_URL = SAME_ORIGIN ? '' : CONFIGURED || 'http://127.0.0.1:8000';
+
+/** An absolute URL for display — a webhook address has to be pasteable. */
+const DISPLAY_BASE =
+  BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '');
 const TOKEN_KEY = 'gimme.token';
 
 export class ApiError extends Error {
@@ -66,7 +76,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error;
     throw new ApiError(
-      'Could not reach the API. Check that the backend is running on ' + BASE_URL + '.',
+      'Could not reach the API. Check that the backend is running on ' +
+        (DISPLAY_BASE || 'this host') +
+        '.',
       0,
     );
   }
@@ -105,7 +117,9 @@ export const api = {
   upload: <T>(path: string, formData: FormData) => request<T>(path, { method: 'POST', formData }),
   /** Absolute URL for links the browser fetches itself (CSV downloads). */
   url: (path: string) => `${BASE_URL}${path}`,
-  baseUrl: BASE_URL,
+  baseUrl: DISPLAY_BASE,
+  /** Prefix for requests: empty when the API serves this bundle. */
+  requestBase: BASE_URL,
 };
 
 /**

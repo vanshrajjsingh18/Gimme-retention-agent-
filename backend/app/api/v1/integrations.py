@@ -17,9 +17,11 @@ from app.integrations.registry import (
     LIVE_ADAPTERS,
     MOCK_ADAPTERS,
     check_webhook_auth,
+    credential_source,
     get_adapter,
     get_integration,
     mask_credentials,
+    resolved_credentials,
 )
 from app.integrations.whatsapp import PROVIDER_PROFILES
 from app.llm.factory import get_llm_provider
@@ -66,7 +68,10 @@ def _out(integration: Integration) -> IntegrationOut:
         status_message=integration.status_message,
         last_checked_at=integration.last_checked_at,
         config=integration.config or {},
-        credentials=mask_credentials(integration.credentials or {}),
+        credentials=mask_credentials(
+            resolved_credentials(integration, Channel(integration.channel))
+        ),
+        credential_sources=credential_source(integration, Channel(integration.channel)),
         required_credentials=_required_for(integration),
     )
 

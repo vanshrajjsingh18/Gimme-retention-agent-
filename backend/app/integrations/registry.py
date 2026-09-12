@@ -90,6 +90,30 @@ def get_integration(db: Session, channel: Channel) -> Integration | None:
     ).scalar_one_or_none()
 
 
+def resolved_credentials(integration: Integration | None, channel: Channel) -> dict:
+    """Credentials for a channel, with the environment taking precedence.
+
+    On a deployed host, secrets belong in the environment rather than in a
+    database row that a backup would carry off. Where both exist the
+    environment wins, so redeploying with a rotated token takes effect without
+    anyone editing a record.
+    """
+    stored = dict((integration.credentials if integration else None) or {})
+    if channel == Channel.SMS:
+        stored.update(settings.tnz_env_credentials)
+    return stored
+
+
+def credential_source(integration: Integration | None, channel: Channel) -> dict[str, str]:
+    """Where each credential came from, for display. Never the values."""
+    env = settings.tnz_env_credentials if channel == Channel.SMS else {}
+    stored = (integration.credentials if integration else None) or {}
+    sources = {key: "environment" for key in env}
+    for key in stored:
+        sources.setdefault(key, "database")
+    return sources
+
+
 def get_adapter(db: Session, channel: Channel) -> MessagingAdapter:
     """Resolve the adapter for a channel.
 
@@ -113,7 +137,8 @@ def get_adapter(db: Session, channel: Channel) -> MessagingAdapter:
         return MOCK_ADAPTERS.get(channel, MockOutlookAdapter)()
 
     adapter = adapter_cls(
-        credentials=integration.credentials or {}, config=integration.config or {}
+        credentials=resolved_credentials(integration, channel),
+        config=integration.config or {},
     )
     if adapter.missing_credentials():
         return MOCK_ADAPTERS.get(channel, MockOutlookAdapter)(
@@ -145,7 +170,11 @@ WEBHOOK_SECRET_KEY = "webhook_secret"
 
 
 def webhook_secret(integration: Integration | None) -> str:
-    """The configured webhook secret for an integration, or empty if unset."""
+    """The configured webhook secret, from the environment or the database."""
+    if integration is not None and Channel(integration.channel) == Channel.SMS:
+        from_env = settings.tnz_env_credentials.get(WEBHOOK_SECRET_KEY, "")
+        if from_env:
+            return from_env
     if integration is None:
         return ""
     return str((integration.credentials or {}).get(WEBHOOK_SECRET_KEY) or "").strip()
