@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173"
 
+    #: Escape hatch for a deliberately throwaway deployment. Off by default,
+    #: because the data-loss it permits is silent.
+    ALLOW_SQLITE_IN_PRODUCTION: bool = False
+
     # Bootstrap admin (local development only)
     ADMIN_EMAIL: str = "admin@gimmedelivery.co.nz"
     ADMIN_PASSWORD: str = "GimmeAdmin123!"
@@ -142,6 +146,18 @@ class Settings(BaseSettings):
             problems.append("ADMIN_PASSWORD is still the development default")
         if self.DEBUG:
             problems.append("DEBUG is on")
+        if self.is_sqlite and not self.ALLOW_SQLITE_IN_PRODUCTION:
+            # A container filesystem does not survive a redeploy. On SQLite the
+            # app would run perfectly, accept an import of real customers, and
+            # lose all of it the next time anything is deployed — a failure that
+            # only shows up once the data matters. Refusing is the kinder error.
+            problems.append(
+                "DATABASE_URL points at SQLite, whose file is lost on every "
+                "redeploy. Attach a PostgreSQL database (Railway: New → "
+                "Database → PostgreSQL, which sets DATABASE_URL for you), or "
+                "set ALLOW_SQLITE_IN_PRODUCTION=true if the data really is "
+                "disposable"
+            )
         return problems
 
 

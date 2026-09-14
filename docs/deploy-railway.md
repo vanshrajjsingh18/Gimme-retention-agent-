@@ -47,6 +47,14 @@ is still the development default.** That is deliberate: a live host on a
 published secret is not "mostly fine", and a warning in a log nobody reads is
 not a safeguard.
 
+**It also refuses to start in production on SQLite.** If you deploy without
+attaching a database, `DATABASE_URL` is unset and the app would fall back to a
+SQLite file on the container's disk — which does not survive a redeploy. It
+would run perfectly, accept an import of your real customers, and lose all of
+it the next time anything ships. That failure is silent and arrives late, so
+the app stops instead and tells you to attach Postgres. Set
+`ALLOW_SQLITE_IN_PRODUCTION=true` only if the data genuinely is disposable.
+
 ### Why TNZ credentials go in the environment
 
 They can also be typed into the dashboard, which stores them in the database.
@@ -108,7 +116,7 @@ moment the integration flips.
 
 Verified here:
 
-- All **579 tests pass against real PostgreSQL 16**, not only SQLite. This
+- All **583 tests pass against real PostgreSQL 16**, not only SQLite. This
   caught a genuine bug: the analytics month-grouping used `strftime()`, a
   SQLite-only function, so every analytics page raised `UndefinedFunction` on
   Postgres. Now dialect-aware and covered by a test.
@@ -120,9 +128,14 @@ Verified here:
 - TNZ credentials supplied purely as environment variables reach the adapter
   and satisfy the readiness checks.
 
+- The production guards fire on a real boot, not only in a unit test: starting
+  with `ENVIRONMENT=production` on SQLite stops with a message naming the fix.
+- `npm run build` (`tsc -b && vite build`) — the exact command the image runs —
+  completes, and every Python dependency resolves to a prebuilt wheel, so the
+  image needs no compiler.
+
 **Not verified:** the Docker image has never been built — there is no Docker
-daemon in the environment this was developed in. The Dockerfile's individual
-steps are all exercised (the frontend build, the Python install including
-`psycopg2`, the start command), but the first `docker build` will happen on
-Railway. If it fails, it will fail at build time with a clear error rather than
-silently.
+daemon in the environment this was developed in. Every step it performs has
+been run individually, and the lockfile `npm ci` requires is committed, but the
+first `docker build` happens on Railway. If it fails it will fail loudly at
+build time, not silently at runtime.

@@ -677,3 +677,60 @@ def test_the_dashboard_catch_all_never_answers_for_an_api_path(client, tmp_path,
     health = client.get("/health")
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
+
+
+# ==========================================================================
+# Production configuration guards
+# ==========================================================================
+def _prod(**overrides):
+    from app.core.config import Settings
+
+    base = {
+        "ENVIRONMENT": "production",
+        "DEBUG": False,
+        "SECRET_KEY": "a-real-secret-value-for-this-test",
+        "ADMIN_PASSWORD": "NotTheDefault!2026",
+        "DATABASE_URL": "postgresql+psycopg2://u:p@host/db",
+    }
+    base.update(overrides)
+    return Settings(**base)
+
+
+def test_a_production_deployment_refuses_the_development_secrets():
+    assert _prod().unsafe_production_settings() == []
+
+    assert any(
+        "SECRET_KEY" in p
+        for p in _prod(SECRET_KEY="dev-only-insecure-secret-change-me").unsafe_production_settings()
+    )
+    assert any(
+        "ADMIN_PASSWORD" in p
+        for p in _prod(ADMIN_PASSWORD="GimmeAdmin123!").unsafe_production_settings()
+    )
+
+
+def test_sqlite_in_production_is_refused_because_a_redeploy_erases_it():
+    """The failure this prevents is silent, which is what makes it worth a guard.
+
+    On a container host the SQLite file lives on a disk that does not survive a
+    redeploy. The app runs perfectly, accepts an import of real customers, and
+    loses all of it the next time anything ships.
+    """
+    problems = _prod(DATABASE_URL="sqlite:////app/data/gimme.db").unsafe_production_settings()
+    assert any("SQLite" in p for p in problems)
+    # And it names the fix, not just the fault.
+    assert any("PostgreSQL" in p for p in problems)
+
+    # Still possible on purpose, for a deployment whose data really is scrap.
+    allowed = _prod(
+        DATABASE_URL="sqlite:////app/data/gimme.db", ALLOW_SQLITE_IN_PRODUCTION=True
+    )
+    assert allowed.unsafe_production_settings() == []
+
+
+def test_the_guards_do_not_fire_outside_production():
+    from app.core.config import Settings
+
+    local = Settings(ENVIRONMENT="local")
+    # Development is entitled to its defaults; only a deployment is not.
+    assert local.is_production is False

@@ -28,15 +28,16 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# psycopg2 needs libpq at runtime; the build-time headers go away with the
-# layer, so the image stays small.
+# Every dependency resolves to a prebuilt wheel, psycopg2-binary included, so
+# no compiler is needed — installing one and purging it again would only spend
+# build minutes and add an apt step that can fail. libpq5 is still required at
+# runtime: the psycopg2 wheel links against it.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libpq5 gcc libpq-dev \
+ && apt-get install -y --no-install-recommends libpq5 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt \
- && apt-get purge -y gcc libpq-dev && apt-get autoremove -y
+RUN pip install --no-cache-dir --only-binary=:all: -r backend/requirements.txt
 
 COPY backend/ ./backend/
 COPY --from=dashboard /build/dist ./frontend/dist
