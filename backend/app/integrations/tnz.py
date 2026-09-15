@@ -23,6 +23,54 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.tnz.co.nz"
 
+#: Enough of TNZ's reply to diagnose the failure, not so much that an HTML
+#: error page fills the message log or the dashboard toast.
+MAX_PROVIDER_ERROR = 300
+
+#: Keys TNZ has been observed to put its human-readable reason under. The
+#: casing varies between endpoints, so all the plausible spellings are tried.
+_ERROR_KEYS = (
+    "Error", "error", "Message", "message", "Reason", "reason",
+    "ErrorMessage", "errorMessage", "Detail", "detail", "Status", "status",
+)
+
+
+def describe_http_error(response: httpx.Response) -> str:
+    """TNZ's own words for why it refused, prefixed with the status code.
+
+    A bare "TNZ returned HTTP 400" is almost useless: 400 is what TNZ returns
+    for every malformed or incomplete payload, and it names the offending
+    field in the body. Discarding that turned a one-line fix into guesswork,
+    so the body is now carried through to whoever is reading the log.
+    """
+    prefix = f"TNZ returned HTTP {response.status_code}"
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    detail = ""
+    if isinstance(payload, dict):
+        for key in _ERROR_KEYS:
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                detail = value.strip()
+                break
+        else:
+            # No recognised key: the whole object is more use than nothing.
+            detail = str(payload)
+    elif isinstance(payload, str) and payload.strip():
+        detail = payload.strip()
+    elif payload is None:
+        detail = (response.text or "").strip()
+
+    if not detail:
+        return f"{prefix}."
+    detail = " ".join(detail.split())
+    if len(detail) > MAX_PROVIDER_ERROR:
+        detail = detail[:MAX_PROVIDER_ERROR].rstrip() + "…"
+    return f"{prefix}: {detail}"
+
 
 class TnzSmsAdapter(MessagingAdapter):
     provider = "tnz"
@@ -56,7 +104,17 @@ class TnzSmsAdapter(MessagingAdapter):
             )
         if response.status_code in (401, 403):
             return ConnectionStatus(
-                status="ERROR", mode="live", message="TNZ rejected the supplied credentials."
+                status="ERROR",
+                mode="live",
+                message="TNZ rejected the supplied credentials.",
+            )
+        # Anything else in the 4xx/5xx range is not a working connection either.
+        # Reporting OK here told the go-live checklist that TNZ was reachable
+        # and happy when it had in fact refused the request, which is exactly
+        # the false confidence this checklist exists to prevent.
+        if response.status_code >= 400:
+            return ConnectionStatus(
+                status="ERROR", mode="live", message=describe_http_error(response)
             )
         return ConnectionStatus(
             status="OK", mode="live", message=f"Connected to TNZ at {self.base_url}."
@@ -90,9 +148,7 @@ class TnzSmsAdapter(MessagingAdapter):
             return SendResult(success=False, error=f"Could not reach TNZ: {exc}")
 
         if response.status_code >= 400:
-            return SendResult(
-                success=False, error=f"TNZ returned HTTP {response.status_code}."
-            )
+            return SendResult(success=False, error=describe_http_error(response))
         try:
             data = response.json()
         except ValueError:
@@ -116,7 +172,7 @@ class TnzSmsAdapter(MessagingAdapter):
                 return {
                     "provider_message_id": provider_message_id,
                     "status": "error",
-                    "message": f"TNZ returned HTTP {response.status_code}.",
+                    "message": describe_http_error(response),
                 }
             return {"provider_message_id": provider_message_id, **response.json()}
         except (httpx.HTTPError, ValueError) as exc:
