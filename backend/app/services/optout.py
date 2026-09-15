@@ -262,3 +262,53 @@ def handle_inbound_reply(
             db, customer, source=f"{channel.value.lower()}_reply", occurred_at=occurred_at
         )
     return None
+
+
+def suppression_block_reason(
+    db: Session, *, contact: str | None, channel: Channel
+) -> str | None:
+    """Why a message to ``contact`` must not be sent, or None if it may go.
+
+    Exists for the send paths that have no campaign and no audience behind
+    them — chiefly the integration test message, which takes a raw address
+    typed into the dashboard rather than a customer drawn from a segment.
+    Those paths skip the compliance engine entirely, so without this an
+    authenticated operator could put a message in front of somebody who had
+    already texted STOP, simply by calling it a test. A withdrawal of
+    permission is not conditional on which button sent the message.
+
+    Consent is deliberately *not* required here. A test goes to a number the
+    operator controls, which will not be in the customer table at all, and
+    demanding prior marketing consent from your own handset would make the
+    feature untestable before the first import. Opt-out is the asymmetric
+    one: nobody is harmed by a test that is refused, and somebody is harmed
+    by a test that reaches a person who asked to be left alone.
+    """
+    # Deliberately resolved through the same lookup the inbound webhook uses,
+    # so a number that could send us a STOP is a number we can match it back
+    # to. A stricter match here would leave a gap between the two.
+    from app.automations.delivery import find_customer_by_contact
+
+    customer = find_customer_by_contact(db, contact, channel=channel)
+    if customer is None:
+        return None
+
+    if customer.is_suppressed:
+        return (
+            "That address belongs to a customer who has opted out. "
+            "A test message is still a message, so it will not be sent."
+        )
+
+    suppressed_here = db.execute(
+        select(SuppressionList).where(
+            SuppressionList.customer_id == customer.id,
+            SuppressionList.active.is_(True),
+            SuppressionList.channel.in_((channel.value, "ALL")),
+        )
+    ).scalars().first()
+    if suppressed_here is not None:
+        return (
+            f"That address is on the suppression list for {channel.value} "
+            f"({suppressed_here.reason or 'no reason recorded'}). It will not be sent."
+        )
+    return None

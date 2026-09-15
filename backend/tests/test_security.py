@@ -734,3 +734,54 @@ def test_the_guards_do_not_fire_outside_production():
     local = Settings(ENVIRONMENT="local")
     # Development is entitled to its defaults; only a deployment is not.
     assert local.is_production is False
+
+
+def test_test_message_refuses_an_opted_out_recipient(db, client, auth_headers):
+    """"Test" must not be a way around an opt-out.
+
+    The integration test-message endpoint takes a raw address typed into the
+    dashboard. It has no campaign, no segment and no compliance engine behind
+    it, so it is the one send path where a STOP could otherwise be ignored by
+    an authenticated operator — the message reaches a real handset either way.
+    """
+    from app.core.enums import Channel
+    from app.integrations.registry import get_integration
+    from app.models.base import utcnow
+
+    phone = "+642900000111"
+    customer = Customer(
+        external_id=f"OPTOUT-{utcnow().timestamp()}",
+        email="optout-test@example.test",
+        phone=phone,
+        first_name="Opted",
+        last_name="Out",
+        age_verified=True,
+        marketing_consent=True,
+        sms_consent=True,
+        signup_date=utcnow() - timedelta(days=100),
+    )
+    db.add(customer)
+    db.flush()
+
+    # They text STOP.
+    apply_global_opt_out(db, customer, source="sms_reply", channel=Channel.SMS)
+    db.commit()
+
+    integration = get_integration(db, Channel.SMS)
+    response = client.post(
+        f"/api/v1/integrations/{integration.id}/test-message",
+        headers=auth_headers,
+        json={"to": phone, "subject": "Test", "body": "Test message. Reply STOP to opt out."},
+    )
+
+    assert response.status_code == 409, (
+        "An opted-out number accepted a test message: "
+        f"{response.status_code} {response.text}"
+    )
+    assert "opted out" in response.json()["detail"].lower()
+
+    # And nothing was recorded as sent to them.
+    sent = db.execute(
+        select(Message).where(Message.is_test.is_(True), Message.status == "SENT")
+    ).scalars().all()
+    assert not any(phone in (m.body or "") for m in sent)

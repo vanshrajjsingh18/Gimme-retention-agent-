@@ -40,7 +40,11 @@ from app.schemas.models import (
     IntegrationUpdate,
 )
 from app.services.events import make_idempotency_key, record_communication_event
-from app.services.optout import apply_global_opt_out, apply_opt_in
+from app.services.optout import (
+    apply_global_opt_out,
+    apply_opt_in,
+    suppression_block_reason,
+)
 from app.services.readiness import integration_readiness
 
 logger = logging.getLogger(__name__)
@@ -228,6 +232,14 @@ def test_message(
         raise HTTPException(status_code=404, detail="Integration not found.")
 
     channel = Channel(integration.channel)
+
+    # A test message is a real message to a real handset, and this path has no
+    # campaign, no segment and no compliance engine behind it. Without this the
+    # word "test" would be a way around an opt-out.
+    blocked = suppression_block_reason(db, contact=payload.to, channel=channel)
+    if blocked:
+        raise HTTPException(status_code=409, detail=blocked)
+
     adapter = get_adapter(db, channel)
     result = adapter.send_test_message(
         to=payload.to, subject=payload.subject, body=payload.body
