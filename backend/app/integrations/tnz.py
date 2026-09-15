@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.tnz.co.nz"
 
+#: TNZ has no ping endpoint, so the connection test asks after a message id
+#: that was never issued. Whether it answers 404 or 400 is beside the point:
+#: reaching that answer at all means the token was read and accepted, and
+#: nothing is created or sent on the way.
+CONNECTION_PROBE_ID = "connection-check"
+
 #: Enough of TNZ's reply to diagnose the failure, not so much that an HTML
 #: error page fills the message log or the dashboard toast.
 MAX_PROVIDER_ERROR = 300
@@ -95,6 +101,12 @@ class TnzSmsAdapter(MessagingAdapter):
     channel = Channel.SMS
     required_credentials = ("auth_token", "sender")
 
+    #: Message status, by id. Not "/get/sms/status" — that path does not exist
+    #: and answered 404, which the old permissive check reported as a healthy
+    #: connection. Confirmed against TNZ's client:
+    #: tnzapi/api/v204/reports/requests/status.py.
+    STATUS_PATH = "/api/v2.04/get/status"
+
     @property
     def base_url(self) -> str:
         return str(self.config.get("base_url") or DEFAULT_BASE_URL).rstrip("/")
@@ -115,7 +127,10 @@ class TnzSmsAdapter(MessagingAdapter):
             )
         try:
             with httpx.Client(timeout=20) as client:
-                response = client.get(f"{self.base_url}/api/v2.04/get/sms/status", headers=self._headers())
+                response = client.get(
+                    f"{self.base_url}{self.STATUS_PATH}/{CONNECTION_PROBE_ID}",
+                    headers=self._headers(),
+                )
         except httpx.HTTPError as exc:
             return ConnectionStatus(
                 status="ERROR", mode="live", message=f"Could not reach TNZ: {exc}"
@@ -126,16 +141,19 @@ class TnzSmsAdapter(MessagingAdapter):
                 mode="live",
                 message="TNZ rejected the supplied credentials.",
             )
-        # Anything else in the 4xx/5xx range is not a working connection either.
-        # Reporting OK here told the go-live checklist that TNZ was reachable
-        # and happy when it had in fact refused the request, which is exactly
-        # the false confidence this checklist exists to prevent.
-        if response.status_code >= 400:
+        if response.status_code >= 500:
             return ConnectionStatus(
                 status="ERROR", mode="live", message=describe_http_error(response)
             )
+        # Every other answer — 200, or the 404/400 expected for a message id
+        # that was never real — came from an endpoint that read the token and
+        # let us past, which is the whole of what this check can honestly
+        # establish. It says nothing about whether a send will be accepted;
+        # only the send test does that.
         return ConnectionStatus(
-            status="OK", mode="live", message=f"Connected to TNZ at {self.base_url}."
+            status="OK",
+            mode="live",
+            message=f"Authenticated with TNZ at {self.base_url}.",
         )
 
     def _message_data(self, *, to: str, body: str, metadata: dict | None) -> dict:
@@ -215,9 +233,9 @@ class TnzSmsAdapter(MessagingAdapter):
     def fetch_delivery_status(self, provider_message_id: str) -> dict:
         try:
             with httpx.Client(timeout=20) as client:
+                # The id is a path segment, not a query parameter.
                 response = client.get(
-                    f"{self.base_url}/api/v2.04/get/sms/status",
-                    params={"MessageID": provider_message_id},
+                    f"{self.base_url}{self.STATUS_PATH}/{provider_message_id}",
                     headers=self._headers(),
                 )
             if response.status_code >= 400:

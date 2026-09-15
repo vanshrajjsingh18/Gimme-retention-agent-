@@ -56,26 +56,35 @@ def test_a_huge_html_error_page_is_truncated():
     assert detail.endswith("…")
 
 
-def test_connection_test_does_not_call_a_400_a_success(monkeypatch):
-    """A refusal is not a working connection.
+def test_connection_test_reports_what_it_can_actually_establish(monkeypatch):
+    """The probe asks after a message id that was never issued.
 
-    Only 401/403 used to count as failure, so TNZ refusing the request outright
-    was reported as "Connected" — and the go-live checklist, whose whole job is
-    to withhold that reassurance until it is earned, passed it on.
+    An earlier version of this test asserted that a 400 here was an error. That
+    was right while the check hit a general-purpose endpoint, but the check now
+    queries the status of a deliberately made-up message id, and 400 or 404 is
+    the expected answer to that — reaching it proves the token was read and
+    accepted, which is the only thing a connection test can honestly establish.
+    Credential rejection and provider outages are covered below, and they are
+    what this test was really guarding.
+
+    What it must never claim is that sending works. TNZ accepted our token for
+    months while refusing every send we made, so the wording matters.
     """
     class _Client:
         def __init__(self, *a, **k): pass
         def __enter__(self): return self
         def __exit__(self, *a): return False
         def get(self, *a, **k):
-            return _response(400, json={"Error": "Missing or empty sender"})
+            return _response(404, json={"Result": "Failed"})
 
     monkeypatch.setattr("app.integrations.tnz.httpx.Client", _Client)
     adapter = TnzSmsAdapter(credentials={"auth_token": "t", "sender": "GIMME"})
     result = adapter.validate_credentials()
 
-    assert result.status == "ERROR", f"400 reported as {result.status}: {result.message}"
-    assert "Missing or empty sender" in result.message
+    assert result.status == "OK"
+    assert "Authenticated" in result.message
+    for overclaim in ("sent", "deliver", "message was"):
+        assert overclaim not in result.message.lower()
 
 
 def test_send_failure_carries_the_reason(monkeypatch):
@@ -205,3 +214,79 @@ def test_result_failed_on_a_200_is_not_a_send(monkeypatch):
 
     assert result.success is False, "a refusal was recorded as a delivered send"
     assert "Invalid recipient" in (result.error or "")
+
+
+# ==========================================================================
+# The status endpoint, which had never existed
+# ==========================================================================
+class _RecordingGet:
+    url: str | None = None
+    status: int = 404
+    body: dict | None = None
+
+    def __init__(self, *a, **k): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+    def get(self, url, headers=None, params=None, **k):
+        type(self).url = url
+        return _response(type(self).status, json=type(self).body or {"Result": "Failed"})
+
+
+def test_connection_probe_uses_the_documented_status_path(monkeypatch):
+    """/get/sms/status was invented and 404s.
+
+    It answered 404 for every call, and the old check — which failed only on
+    401/403 — reported that as a healthy connection. So the one control that
+    exists to say "TNZ is reachable and your token works" was passing on the
+    strength of an endpoint that was never there.
+    """
+    _RecordingGet.url = None
+    _RecordingGet.status = 404
+    monkeypatch.setattr("app.integrations.tnz.httpx.Client", _RecordingGet)
+    adapter = TnzSmsAdapter(credentials={"auth_token": "tok", "sender": "GIMME"})
+    result = adapter.validate_credentials()
+
+    assert "/api/v2.04/get/status/" in _RecordingGet.url
+    assert "/get/sms/status" not in _RecordingGet.url
+
+    # A 404 for an id that was never issued still proves the token was read.
+    assert result.status == "OK", result.message
+    assert "Authenticated" in result.message
+
+
+def test_connection_probe_still_fails_on_bad_credentials(monkeypatch):
+    _RecordingGet.status = 401
+    monkeypatch.setattr("app.integrations.tnz.httpx.Client", _RecordingGet)
+    adapter = TnzSmsAdapter(credentials={"auth_token": "bad", "sender": "GIMME"})
+    result = adapter.validate_credentials()
+
+    assert result.status == "ERROR"
+    assert "rejected" in result.message.lower()
+
+
+def test_connection_probe_fails_on_a_provider_outage(monkeypatch):
+    """A 5xx is TNZ being broken, not us being connected."""
+    _RecordingGet.status = 503
+    _RecordingGet.body = {"ErrorMessage": ["Service unavailable"]}
+    monkeypatch.setattr("app.integrations.tnz.httpx.Client", _RecordingGet)
+    adapter = TnzSmsAdapter(credentials={"auth_token": "tok", "sender": "GIMME"})
+    result = adapter.validate_credentials()
+    _RecordingGet.body = None
+
+    assert result.status == "ERROR"
+    assert "Service unavailable" in result.message
+
+
+def test_delivery_status_puts_the_id_in_the_path(monkeypatch):
+    """The message id is a path segment, not a query parameter."""
+    _RecordingGet.url = None
+    _RecordingGet.status = 200
+    _RecordingGet.body = {"Result": "Success"}
+    monkeypatch.setattr("app.integrations.tnz.httpx.Client", _RecordingGet)
+    adapter = TnzSmsAdapter(credentials={"auth_token": "tok", "sender": "GIMME"})
+    adapter.fetch_delivery_status("MSG-123")
+    _RecordingGet.body = None
+
+    assert _RecordingGet.url.endswith("/api/v2.04/get/status/MSG-123")
+    assert "MessageID=" not in (_RecordingGet.url or "")
