@@ -15,6 +15,15 @@ simply broken.
 3. Railway reads `railway.json` and builds the root `Dockerfile`. Nothing else
    to configure for the build.
 
+**Check the healthcheck actually took.** The `deploy` half of `railway.json`
+did not reach the service on our deploy: the service still had no
+`healthcheckPath`, so Railway marked the deployment healthy as soon as the
+container stayed up, without ever asking the app for a response. A container
+that boots and then serves nothing but errors would have passed. Set
+**Settings → Deploy → Healthcheck Path** to `/health` by hand and confirm it
+is there; `/health` is unauthenticated and excluded from the dashboard
+catch-all, so it answers without a login.
+
 ## 2. Add the database
 
 **New → Database → PostgreSQL**, in the same project.
@@ -134,8 +143,29 @@ Verified here:
   completes, and every Python dependency resolves to a prebuilt wheel, so the
   image needs no compiler.
 
-**Not verified:** the Docker image has never been built — there is no Docker
-daemon in the environment this was developed in. Every step it performs has
-been run individually, and the lockfile `npm ci` requires is committed, but the
-first `docker build` happens on Railway. If it fails it will fail loudly at
-build time, not silently at runtime.
+Verified on Railway itself, from the build and deploy logs of the live
+deployment:
+
+- The image builds. The build log shows the dashboard stage running
+  `npm run build` under vite, then `COPY --from=dashboard /build/dist
+  ./frontend/dist` into the app stage — so the multi-stage `Dockerfile` is what
+  Railway used, and the dashboard it serves is a real build.
+- The app boots against the attached Postgres, creates the schema, seeds the
+  admin user, and starts the scheduler with its 5 jobs on `0.0.0.0:$PORT`.
+  Because it booted with `ENVIRONMENT=production`, the SQLite guard above is
+  itself the proof that the Postgres connection is live.
+
+**Not verified:** no request has been made to the public URL from outside
+Railway. The network this was developed in cannot reach `*.up.railway.app`, and
+the healthcheck that would have had Railway prove it (see step 1) was not
+applied to the service. Everything above is evidence the app is running
+correctly; none of it is a page actually fetched over the internet. Open the
+URL and confirm.
+
+**A note on Railway's build infrastructure.** Three consecutive `redeploy`
+calls failed within 90 seconds, each logging only `scheduling build on Metal
+builder` and no build output whatsoever, always on the same builder — for a
+commit that had built and deployed successfully hours earlier. That is a
+Railway-side build failure, not a fault in this repository. A redeploy reuses a
+stored build snapshot; pushing a commit triggers a fresh build instead, which
+is the better thing to try when redeploys fail this way.
