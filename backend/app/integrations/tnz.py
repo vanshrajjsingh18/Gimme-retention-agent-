@@ -29,10 +29,28 @@ MAX_PROVIDER_ERROR = 300
 
 #: Keys TNZ has been observed to put its human-readable reason under. The
 #: casing varies between endpoints, so all the plausible spellings are tried.
+#: ErrorMessage first: it is the key TNZ's v2.04 messaging endpoints actually
+#: use, and it holds the sentence worth reading. The rest are fallbacks for the
+#: other endpoints, whose casing is not consistent with it.
 _ERROR_KEYS = (
-    "Error", "error", "Message", "message", "Reason", "reason",
-    "ErrorMessage", "errorMessage", "Detail", "detail", "Status", "status",
+    "ErrorMessage", "errorMessage", "Error", "error", "Message", "message",
+    "Reason", "reason", "Detail", "detail", "Status", "status",
 )
+
+
+def _join_error_message(value: object) -> str:
+    """TNZ's ErrorMessage is a list of sentences, not a string.
+
+    Treating it as a string meant it failed the isinstance check and fell
+    through to dumping the whole JSON object at the operator, so the one
+    readable sentence in the reply arrived wrapped in Python dict syntax.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        parts = [str(v).strip() for v in value if str(v).strip()]
+        return " ".join(parts)
+    return ""
 
 
 def describe_http_error(response: httpx.Response) -> str:
@@ -52,9 +70,9 @@ def describe_http_error(response: httpx.Response) -> str:
     detail = ""
     if isinstance(payload, dict):
         for key in _ERROR_KEYS:
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                detail = value.strip()
+            joined = _join_error_message(payload.get(key))
+            if joined:
+                detail = joined
                 break
         else:
             # No recognised key: the whole object is more use than nothing.
@@ -120,6 +138,34 @@ class TnzSmsAdapter(MessagingAdapter):
             status="OK", mode="live", message=f"Connected to TNZ at {self.base_url}."
         )
 
+    def _message_data(self, *, to: str, body: str, metadata: dict | None) -> dict:
+        """The one object TNZ's v2.04 send endpoint actually wants.
+
+        Authenticated with an auth token, the whole request body is
+        ``{"MessageData": {...}}`` and every field lives inside it — the
+        message, the recipients and the sender alike. An earlier version of
+        this adapter spread those across the top level and passed MessageData
+        as a bare string, which TNZ answered with "Failed to process your API
+        request. Check your syntax." and nothing more specific, because it
+        could not parse far enough to say which field was wrong.
+
+        Shape taken from TNZ's own Python client rather than inferred:
+        tnzapi/api/v204/messaging/{requests/sms_api.py,dtos/*.py}.
+        """
+        data: dict = {
+            "Message": body,
+            "Destinations": [{"Recipient": to}],
+        }
+        # Optional fields are omitted rather than sent empty. An empty string
+        # is a value, and a provider is entitled to reject it as one.
+        sender = str(self.credentials.get("sender") or "").strip()
+        if sender:
+            data["FromNumber"] = sender
+        reference = str((metadata or {}).get("reference") or "").strip()
+        if reference:
+            data["Reference"] = reference
+        return data
+
     def send_message(
         self, *, to: str, subject: str, body: str, metadata: dict | None = None
     ) -> SendResult:
@@ -129,14 +175,7 @@ class TnzSmsAdapter(MessagingAdapter):
                 success=False, error=f"Missing TNZ credentials: {', '.join(missing)}."
             )
 
-        payload = {
-            "MessageType": "SMS",
-            "Reference": (metadata or {}).get("reference", ""),
-            "SendMode": "Immediate",
-            "MessageData": body,
-            "Destinations": [{"Recipient": to}],
-            "FromNumber": self.credentials.get("sender", ""),
-        }
+        payload = {"MessageData": self._message_data(to=to, body=body, metadata=metadata)}
         try:
             with httpx.Client(timeout=30) as client:
                 response = client.post(
@@ -153,6 +192,19 @@ class TnzSmsAdapter(MessagingAdapter):
             data = response.json()
         except ValueError:
             data = {}
+
+        # TNZ carries its own verdict in the body: {"Result": "Success"|"Failed",
+        # "MessageID": ..., "ErrorMessage": [...]}. A 2xx is the HTTP layer
+        # saying it understood the request, not TNZ saying it accepted the
+        # message, so trusting the status code alone would file a refusal as a
+        # delivered send — invisible until somebody asks why a customer never
+        # heard from us.
+        if isinstance(data, dict):
+            result = str(data.get("Result") or "").strip()
+            if result and result.lower() != "success":
+                reason = _join_error_message(data.get("ErrorMessage")) or result
+                return SendResult(success=False, error=f"TNZ refused the message: {reason}")
+
         message_id = str(
             data.get("MessageID") or data.get("JobNum") or data.get("Reference") or ""
         )
