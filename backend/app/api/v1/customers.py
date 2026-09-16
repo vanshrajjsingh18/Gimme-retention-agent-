@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_write
 from app.automations.service import customer_history
+from app.services.intelligence import load_local_order_facts
+from app.analytics.order_predictions import (
+    describe_interval,
+    predict_next_order,
+    reminder_time_for,
+)
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.timezones import to_local
 from app.core.enums import Channel, ConsentType, LifecycleStage
 from app.models.base import utcnow
 from app.models.entities import (
@@ -555,3 +563,47 @@ def update_consent(
     db.commit()
     refresh_customer(db, customer)
     return OperationResult(message="Consent updated.", detail=changes)
+
+
+@router.get("/customers/{customer_id}/order-pattern", tags=["customers"])
+def get_order_pattern(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """The customer's ordering routine and the next order it implies.
+
+    Backs the ORDERING PATTERN panel on Customer 360, and answers in the
+    customer's own local time — the stored timestamps are UTC, and reading a
+    weekday or an hour off those directly would describe a habit nobody has.
+
+    ``has_prediction`` false is a normal answer, not an error: a customer with
+    two orders has no routine to report, and ``reason`` says so in words the
+    panel can show as-is.
+    """
+    customer = db.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    local_now = to_local(utcnow()).replace(tzinfo=None)
+    prediction = predict_next_order(
+        load_local_order_facts(db, customer_id), now=local_now
+    )
+
+    payload = prediction.as_dict()
+    payload["customer_id"] = customer_id
+    payload["timezone"] = settings.BUSINESS_TIMEZONE
+    payload["confidence_band"] = prediction.band()
+    payload["reminder_at"] = (
+        reminder_time_for(prediction).isoformat()
+        if prediction.has_prediction
+        else None
+    )
+    # Said once, here, rather than reconstructed in the browser from an hour
+    # and a minute — the phrasing is part of the answer.
+    payload["interval_label"] = (
+        describe_interval(prediction.intervals.median_days)
+        if prediction.intervals
+        else None
+    )
+    return payload
