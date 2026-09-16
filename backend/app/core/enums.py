@@ -314,3 +314,22 @@ AUTOMATION_PRIORITY: dict[str, int] = {
     AutomationKind.SEQUENCE.value: 20,
     AutomationKind.COHORT_BULK.value: 10,
 }
+
+
+class PredictionStatus(StrEnum):
+    """How a prediction turned out once the customer did or did not order.
+
+    Recorded so the engine can be held to account: a prediction nobody checks
+    is a guess with a percentage next to it. ORDERED_NEAR_PREDICTION is the
+    success case; the two directional misses are kept apart because they mean
+    different things — consistently early says the reminder is arriving too
+    late to matter, consistently late says the interval is too short.
+    """
+
+    #: Predicted, and the window has not closed yet.
+    PENDING = "PENDING"
+    ORDERED_NEAR_PREDICTION = "ORDERED_NEAR_PREDICTION"
+    ORDERED_EARLY = "ORDERED_EARLY"
+    ORDERED_LATE = "ORDERED_LATE"
+    #: The window closed with no order at all.
+    NO_ORDER = "NO_ORDER"

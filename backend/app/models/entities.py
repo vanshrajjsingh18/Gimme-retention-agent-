@@ -35,6 +35,7 @@ from app.core.enums import (
     NextBestAction,
     OrderStatus,
     RecipientStatus,
+    PredictionStatus,
     RecurrenceKind,
     SendStatus,
     SequenceTrigger,
@@ -1075,3 +1076,61 @@ class AutomationSend(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, index=True
     )
+
+
+class OrderPredictionRecord(Base, TimestampMixin):
+    """One prediction, and what the customer actually did afterwards.
+
+    Written when Smart Reorder decides a customer is approaching their usual
+    window, and resolved later against their real orders. Without this the
+    confidence score is unfalsifiable — the engine would report 87% forever
+    with nothing able to contradict it.
+
+    Kept separate from AutomationSend on purpose: a prediction is made whether
+    or not a message follows it, and the ones that were *suppressed* are the
+    most interesting rows here. A customer who ordered anyway, on time, with
+    no reminder sent is evidence the prediction was right and the message was
+    unnecessary, which is exactly the comparison this table has to support.
+    """
+
+    __tablename__ = "order_predictions"
+    __table_args__ = (
+        Index("ix_order_predictions_due", "status", "predicted_order_at"),
+        Index("ix_order_predictions_customer", "customer_id", "predicted_order_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    #: Null when the prediction was made outside any campaign, e.g. by the
+    #: Customer 360 panel refreshing a pattern.
+    automation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
+
+    predicted_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, index=True
+    )
+    #: Naive UTC, like every other timestamp here. The local time the customer
+    #: experiences is derived on the way out.
+    predicted_order_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default=PredictionStatus.PENDING.value, index=True
+    )
+    actual_order_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+    )
+    #: Signed: negative means they ordered before we predicted, positive after.
+    #: The sign is the point — it says which way the engine is wrong.
+    error_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: True when a reminder actually went out, so accuracy can be compared
+    #: between reminded and un-reminded customers.
+    reminder_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
