@@ -138,6 +138,26 @@ class SendDecision:
         }
 
 
+#: Why somebody was left out, in the words the dashboard shows. Keyed by
+#: SkipReason so a new reason cannot silently appear as a bare enum name —
+#: it will read as one, which is the prompt to add it here.
+SKIP_EXPLANATIONS: dict[str, str] = {
+    SkipReason.NO_CONSENT.value: "no marketing consent for this channel",
+    SkipReason.SUPPRESSED.value: "suppressed or opted out",
+    SkipReason.AGE_NOT_VERIFIED.value: "age not verified",
+    SkipReason.MISSING_CONTACT.value: "no usable phone or email",
+    SkipReason.FREQUENCY_CAP.value: "already messaged recently (frequency cap)",
+    SkipReason.QUIET_HOURS.value: "outside the send window",
+    SkipReason.DEDUPED.value: "another automation is messaging them today",
+    SkipReason.ALREADY_ORDERED.value: "they have already ordered",
+    SkipReason.PENDING_ORDER.value: "they have an order already on its way",
+    SkipReason.LEFT_SEGMENT.value: "no longer in the audience",
+    SkipReason.VALIDATION_FAILED.value: "the message failed compliance checks",
+    SkipReason.TRIGGER_IN_PAST.value: "the trigger date has already passed",
+    SkipReason.ENROLLMENT_PAUSED.value: "this customer's enrollment is paused",
+}
+
+
 @dataclass
 class RunReport:
     """The outcome of one automation run."""
@@ -174,12 +194,57 @@ class RunReport:
                 counts[r.skip_reason.value] = counts.get(r.skip_reason.value, 0) + 1
         return counts
 
+    def dry_run_summary(self) -> dict:
+        """The run, counted out in the words an operator would use.
+
+        A dry run exists to be read by somebody deciding whether to let this
+        loose on real customers, and ``skips_by_reason`` — {"NO_CONSENT": 312}
+        — is a shape for a machine. Each exclusion is spelled out, ordered by
+        how many people it accounts for, so the biggest reason the audience
+        shrank is the first thing read rather than something to be found by
+        scanning.
+
+        The lines are deliberately plain about what did *not* happen: the
+        whole purpose is confidence that nothing was sent.
+        """
+        reasons = self.skips_by_reason()
+        would_send = self.previewed if self.dry_run else self.sent
+        lines = [f"{len(self.results):,} customers evaluated"]
+        if would_send:
+            lines.append(f"{would_send:,} eligible")
+        for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
+            lines.append(f"{count:,} excluded — {SKIP_EXPLANATIONS.get(reason, reason)}")
+        lines.append(
+            f"{would_send:,} messages would be sent"
+            if self.dry_run
+            else f"{self.sent:,} messages sent"
+        )
+        if self.dry_run:
+            lines.append("No messages were actually sent.")
+        elif self.is_mock:
+            lines.append("Mock mode — nothing left this system.")
+
+        return {
+            "headline": "DRY RUN RESULTS" if self.dry_run else "RUN RESULTS",
+            "lines": lines,
+            "evaluated": len(self.results),
+            "eligible": would_send,
+            "excluded": self.skipped,
+            "excluded_by_reason": {
+                SKIP_EXPLANATIONS.get(reason, reason): count
+                for reason, count in reasons.items()
+            },
+            "dry_run": self.dry_run,
+            "is_mock": self.is_mock,
+        }
+
     def as_dict(self, *, sample_size: int = 50) -> dict:
         return {
             "automation_id": self.automation_id,
             "automation_name": self.automation_name,
             "kind": self.kind,
             "dry_run": self.dry_run,
+            "summary": self.dry_run_summary(),
             "ran_at": self.ran_at.isoformat(),
             "candidates": len(self.results),
             "sent": self.sent,

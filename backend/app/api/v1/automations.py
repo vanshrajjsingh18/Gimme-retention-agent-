@@ -317,6 +317,43 @@ def run_now(
     return report.as_dict()
 
 
+@router.post("/automations/{automation_id}/dry-run", tags=["automations"])
+def dry_run(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write),
+) -> dict:
+    """Show who would be messaged, without messaging anybody.
+
+    The same pipeline a live run uses, stopped short of the provider call, so
+    the answer is produced by the code that would actually send rather than by
+    a second implementation that could drift from it. Recipients are recorded
+    as PREVIEW rows, and ``summary`` spells out every exclusion in words.
+
+    Mandatory before a first live campaign, and safe to repeat.
+    """
+    automation = _get(db, automation_id)
+    try:
+        report = run_automation(db, automation, dry_run=True)
+    except AutomationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    db.add(
+        AuditLog(
+            actor=user.email,
+            action="AUTOMATION_DRY_RUN",
+            entity_type="automation",
+            entity_id=str(automation.id),
+            detail={
+                "evaluated": len(report.results),
+                "would_send": report.previewed,
+                "excluded": report.skipped,
+            },
+        )
+    )
+    db.commit()
+    return report.as_dict()
+
+
 @router.get("/automations/{automation_id}/audience", tags=["automations"])
 def automation_audience(
     automation_id: int,
