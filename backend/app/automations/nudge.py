@@ -58,7 +58,7 @@ from app.models.entities import (
     Order,
 )
 from app.services.brand import get_brand_settings
-from app.services.intelligence import load_order_facts
+from app.services.intelligence import load_local_order_facts
 
 logger = logging.getLogger(__name__)
 
@@ -154,9 +154,20 @@ def enroll(
 def compute_pattern(
     db: Session, customer_id: int, *, now: datetime, min_orders: int = MIN_ORDERS_FOR_PATTERN
 ) -> OrderPattern:
-    """Derive one customer's ordering rhythm from their order history."""
+    """Derive one customer's ordering rhythm from their order history.
+
+    Both the orders and ``now`` are converted to business local time first.
+    The rest of this module already treats a pattern as local —
+    ``_due_from_pattern`` says so in as many words — but the orders were
+    handed over as the naive UTC the database stores, which for New Zealand
+    is twelve or thirteen hours out. A 7:40 PM Wednesday habit was read as
+    7:40 AM, and anything after midnight landed on the wrong weekday
+    entirely, so nudges were aimed at a time the customer never orders.
+    """
     return compute_order_pattern(
-        load_order_facts(db, customer_id), now=now, min_orders=min_orders
+        load_local_order_facts(db, customer_id),
+        now=to_local(now).replace(tzinfo=None),
+        min_orders=min_orders,
     )
 
 

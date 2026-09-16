@@ -7,6 +7,7 @@ separate whole-population pass.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
@@ -22,6 +23,7 @@ from app.core.enums import (
     NextBestAction,
     OrderStatus,
 )
+from app.core.timezones import to_local
 from app.models.base import utcnow
 from app.models.entities import (
     ChurnScore,
@@ -101,6 +103,29 @@ def load_order_facts(db: Session, customer_id: int) -> list[OrderFact]:
             ],
         )
         for o in orders
+    ]
+
+
+def load_local_order_facts(db: Session, customer_id: int) -> list[OrderFact]:
+    """Order facts with their timestamps in business local time.
+
+    "When does this customer usually order?" is a question about their clock,
+    not the database's. The rows are naive UTC, and New Zealand runs twelve or
+    thirteen hours ahead of it, so reading a weekday or an hour straight off a
+    stored value answers for the wrong moment entirely: an order placed at
+    7:40 PM on Wednesday is stored as 07:40, and read back as a *morning*
+    habit. Orders after midnight are worse — they land on the previous day in
+    UTC, so the weekday is wrong too.
+
+    Everything downstream of the pattern already works in local time —
+    ``_due_from_pattern`` says as much — so this converts the input to match
+    rather than changing the contract. Use it for any analysis of *when* a
+    customer acts; ``load_order_facts`` remains right for totals and counts,
+    where the offset does not change the answer.
+    """
+    return [
+        replace(fact, ordered_at=to_local(fact.ordered_at).replace(tzinfo=None))
+        for fact in load_order_facts(db, customer_id)
     ]
 
 

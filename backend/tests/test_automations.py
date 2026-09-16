@@ -43,7 +43,7 @@ from app.core.enums import (
     SequenceTrigger,
     SkipReason,
 )
-from app.core.timezones import combine_local, to_local
+from app.core.timezones import combine_local, to_local, to_utc_naive
 from app.models.entities import (
     Automation,
     AutomationEnrollment,
@@ -903,8 +903,16 @@ def make_automation_for_same_day(db, customer) -> Automation:
 # Feature 2 — behavioural nudge
 # ==========================================================================
 def friday_orders(customer_id: int, count: int, *, hour: int = 18) -> list[Order]:
-    """`count` weekly Friday-evening orders ending shortly before the fixture date."""
-    last = datetime(2026, 6, 12, hour, 0)  # a Friday
+    """`count` weekly Friday-evening orders ending shortly before the fixture date.
+
+    The local time is converted before it is stored, because the column holds
+    naive UTC and New Zealand is twelve hours ahead of it. Writing the local
+    value straight in would put 6pm Friday into the database as a moment that
+    is *Saturday morning* for the customer — which is what this fixture used
+    to do, so "Friday" only read back correctly while the pattern engine was
+    also working in UTC. Two mistakes cancelling is not a passing test.
+    """
+    last = to_utc_naive(datetime(2026, 6, 12, hour, 0))  # a Friday, in NZ
     return [
         Order(
             external_id=f"ord-{customer_id}-{i}",
