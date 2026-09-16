@@ -113,7 +113,11 @@ export const SEQUENCE_TRIGGER_LABEL: Record<string, string> = {
 export const AUTOMATION_KIND_LABEL: Record<string, string> = {
   COHORT_BULK: 'Cohort bulk send',
   SEQUENCE: 'Recurring sequence',
-  NUDGE: 'Behavioural nudge',
+  // The mechanism is the per-customer behavioural nudge; "Smart Reorder
+  // Reminder" is what it is called to the people using it, and saying
+  // "behavioural nudge" to them described the implementation rather than the
+  // thing it does. One kind, one name, changed in one place.
+  NUDGE: 'Smart Reorder Reminder',
 };
 
 /** Categorical palette for charts with an arbitrary number of series. */

@@ -33,8 +33,9 @@ const KINDS: { key: AutomationKind | 'ALL'; label: string; blurb: string }[] = [
   },
   {
     key: 'NUDGE',
-    label: 'Behavioural nudges',
-    blurb: 'A standing message at the day and time each customer usually orders.',
+    label: 'Smart Reorder',
+    blurb:
+      'Automatically remind customers around the time they typically place an order, learned from their own history.',
   },
 ];
 
@@ -59,7 +60,7 @@ export default function AutomationsPage() {
               className="btn-secondary"
               onClick={() => setCreating('NUDGE')}
             >
-              New nudge
+              New Smart Reorder
             </button>
             <button
               type="button"

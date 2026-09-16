@@ -5,6 +5,7 @@ import { useAuth } from './hooks/useAuth';
 import AppLayout from './layouts/AppLayout';
 import AutomationDetailPage from './pages/AutomationDetailPage';
 import AutomationsPage from './pages/AutomationsPage';
+import SmartReorderPage from './pages/SmartReorderPage';
 import BrandPage from './pages/BrandPage';
 import CampaignAnalyticsPage from './pages/CampaignAnalyticsPage';
 import CampaignDetailPage from './pages/CampaignDetailPage';
@@ -59,6 +60,7 @@ export default function App() {
               <Route path="campaigns" element={<CampaignsPage />} />
               <Route path="campaigns/:id" element={<CampaignDetailPage />} />
               <Route path="automations" element={<AutomationsPage />} />
+              <Route path="smart-reorder" element={<SmartReorderPage />} />
               <Route path="automations/:id" element={<AutomationDetailPage />} />
               <Route path="studio" element={<MessageStudioPage />} />
               <Route path="journeys" element={<JourneysPage />} />

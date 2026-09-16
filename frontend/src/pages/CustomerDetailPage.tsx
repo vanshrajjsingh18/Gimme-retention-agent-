@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
 import GenerateMessagePanel from '../features/GenerateMessagePanel';
+import OrderingPatternCard from '../features/OrderingPatternCard';
 import {
   Badge,
   Card,
@@ -383,6 +384,8 @@ function OverviewTab({ data }: { data: CustomerDetail }) {
       </div>
 
       <div className="space-y-4">
+        <OrderingPatternCard customerId={p.id} />
+
         <Card title="Identity">
           <dl className="space-y-3">
             <Field label="Customer ID" value={<span className="font-mono text-xs">{p.external_id}</span>} />

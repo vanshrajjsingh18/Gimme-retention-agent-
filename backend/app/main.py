@@ -24,6 +24,7 @@ from app.api.v1 import (
     journeys,
     messages,
     segments,
+    smart_reorder,
     system,
 )
 from app.core.config import settings
@@ -120,6 +121,7 @@ for router in (
     analytics.router,
     integrations.router,
     journeys.router,
+    smart_reorder.router,
     system.router,
 ):
     app.include_router(router, prefix=API_PREFIX)
