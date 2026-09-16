@@ -546,3 +546,76 @@ def test_quiet_hours_and_the_send_window_are_the_same_window(db, bootstrapped):
     # ends, and end when it begins.
     assert config.quiet_hours_start == window_end
     assert config.quiet_hours_end == window_start
+
+
+# ==========================================================================
+# Invented prices
+# ==========================================================================
+def test_a_bare_price_is_blocked():
+    """Nothing in this system knows what anything costs.
+
+    There is no catalogue, no price feed, no inventory. A figure of money in
+    generated copy was invented by the writer, and a wrong price is a promise
+    the checkout will break.
+    """
+    findings = check_content(
+        "Your usual lager is $24.99 a six pack.", config(), is_full_message=False
+    )
+    assert "UNVERIFIED_PRICE_CLAIM" in codes(findings)
+    flagged = [f for f in findings if f.code == "UNVERIFIED_PRICE_CLAIM"][0]
+    assert flagged.blocks_send
+    assert flagged.severity == ComplianceSeverity.CRITICAL
+    assert "$24.99" in flagged.excerpt
+
+
+def test_a_written_out_price_is_blocked():
+    findings = check_content("Just 30 dollars tonight.", config(), is_full_message=False)
+    assert "UNVERIFIED_PRICE_CLAIM" in codes(findings)
+
+
+def test_copy_without_a_price_is_not_flagged():
+    findings = check_content(
+        "Hi Sam, your usual Wednesday is coming up.", config(), is_full_message=False
+    )
+    assert "UNVERIFIED_PRICE_CLAIM" not in codes(findings)
+
+
+def test_an_offer_is_left_to_the_promotion_rule():
+    """"$5 off" is a promotion and already has its own rule.
+
+    Both block, so nothing unsafe passes either way — but reporting one phrase
+    under two codes makes a single fix look like two problems.
+    """
+    found = codes(check_content("Take $5 off your next order.", config(), is_full_message=False))
+    assert "UNVERIFIED_PRICE_CLAIM" not in found
+    assert "UNVERIFIED_PROMOTION" in found
+
+
+def test_an_approved_promotion_containing_a_price_is_allowed():
+    """The brand's own verified wording must not trip the new rule.
+
+    "Free delivery on orders over $80" is on the approved list, so the $80 in
+    it is verified copy. Blocking it would make the approved list unusable,
+    which is how a safety rule turns into something people switch off.
+    """
+    findings = check_content(
+        "Free delivery on orders over $80", config(), is_full_message=False
+    )
+    assert "UNVERIFIED_PRICE_CLAIM" not in codes(findings)
+    assert "UNVERIFIED_PROMOTION" not in codes(findings)
+
+
+def test_quoting_an_approved_promotion_does_not_license_other_prices():
+    """The exemption must not become a loophole.
+
+    Otherwise any invented figure could be smuggled through by pasting an
+    approved promotion next to it.
+    """
+    findings = check_content(
+        "Free delivery on orders over $80, or grab one for $12.",
+        config(),
+        is_full_message=False,
+    )
+    assert "UNVERIFIED_PRICE_CLAIM" in codes(findings)
+    flagged = [f for f in findings if f.code == "UNVERIFIED_PRICE_CLAIM"][0]
+    assert "$12" in flagged.excerpt, flagged.excerpt

@@ -97,6 +97,17 @@ DISCOUNT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# A specific amount of money presented as a price. This system holds no
+# pricing data at all — not a catalogue, not a feed, nothing — so every figure
+# of this shape is one the copy invented. Offers are handled by
+# DISCOUNT_PATTERN above; this is the plain "$24.99 a bottle" case, which that
+# pattern does not match because there is no "off" or "discount" after it.
+PRICE_CLAIM_PATTERN = re.compile(
+    r"(?<![\w])(?:NZ)?\$\s*\d+(?:\.\d{1,2})?(?!\s*(?:off|discount))"
+    r"|\b\d+(?:\.\d{1,2})?\s*(?:dollars|bucks)\b",
+    re.IGNORECASE,
+)
+
 # Coupon-code shaped tokens: 4+ chars, uppercase alphanumeric, at least one digit
 # or a known promo word. Avoids matching ordinary capitalised words.
 COUPON_PATTERN = re.compile(r"\b(?=[A-Z0-9]{4,20}\b)(?=.*\d)[A-Z][A-Z0-9]{3,19}\b")
@@ -458,6 +469,39 @@ def check_content(
             True,
             match.group(0).strip(),
         )
+
+    # 6b. Specific prices. Nothing in this system knows what anything costs,
+    # so a figure in the copy is an invention — and a wrong price is a promise
+    # to a customer that the checkout will break.
+    # An approved promotion is allowed to contain a figure — the brand's own
+    # "Free delivery on orders over $80" is verified copy, and blocking it
+    # would make the approved list unusable. Only amounts outside any approved
+    # promotion present in the message are inventions.
+    approved_spans = [
+        p.strip().lower() for p in config.allowed_promotions if p.strip()
+    ]
+    lowered_haystack = haystack.lower()
+    for match in PRICE_CLAIM_PATTERN.finditer(haystack):
+        phrase = match.group(0).strip()
+        inside_approved = any(
+            promo in lowered_haystack
+            and phrase.lower() in promo
+            and lowered_haystack.index(promo)
+            <= match.start()
+            < lowered_haystack.index(promo) + len(promo)
+            for promo in approved_spans
+        )
+        if inside_approved:
+            continue
+        add(
+            "UNVERIFIED_PRICE_CLAIM",
+            f"States the price '{phrase}'. This system holds no pricing data, so the "
+            "figure cannot be verified against anything.",
+            ComplianceSeverity.CRITICAL,
+            True,
+            phrase,
+        )
+        break
 
     # 7. Unresolved template placeholders.
     match = UNRESOLVED_PLACEHOLDER.search(haystack)
