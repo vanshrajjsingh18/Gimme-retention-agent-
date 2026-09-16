@@ -179,11 +179,44 @@ def test_channel_uses_preference_when_consented():
     assert choose_channel(ctx) == Channel.SMS
 
 
-def test_channel_defaults_to_email_when_nothing_consented():
+def test_no_channel_is_recommended_when_nothing_is_consented():
+    """There is nowhere to reach them, and that is the answer.
+
+    This previously asserted a default of EMAIL. That default put an
+    unconsented recommendation on Customer 360 — "contact them by email" for
+    somebody who never agreed to be emailed. Nothing was ever dispatched on
+    it, because the send pipeline re-checks consent for every recipient, but
+    it was advice an operator could act on by hand, and it disagreed with what
+    the system itself would have done.
+    """
     ctx = context(
         [order(5)], email_consent=False, sms_consent=False, whatsapp_consent=False
     )
-    assert choose_channel(ctx) == Channel.EMAIL
+    assert choose_channel(ctx) is None
+
+
+def test_a_recommended_channel_is_always_one_they_consented_to():
+    """The invariant behind the change above."""
+    for email, sms, whatsapp in [
+        (True, False, False),
+        (False, True, False),
+        (False, False, True),
+        (False, True, True),
+    ]:
+        ctx = context(
+            [order(5)],
+            email_consent=email,
+            sms_consent=sms,
+            whatsapp_consent=whatsapp,
+        )
+        chosen = choose_channel(ctx)
+        assert chosen is not None
+        consented = {
+            Channel.EMAIL: email,
+            Channel.SMS: sms,
+            Channel.WHATSAPP: whatsapp,
+        }
+        assert consented[chosen] is True, f"recommended {chosen} without consent"
 
 
 @pytest.mark.parametrize(

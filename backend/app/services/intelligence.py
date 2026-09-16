@@ -340,7 +340,14 @@ def persist_intelligence(
     rec_row.priority = intel.recommendation.priority
     rec_row.reason_codes = intel.recommendation.reason_codes
     rec_row.explanation = intel.recommendation.explanation
-    rec_row.recommended_channel = intel.recommendation.recommended_channel.value
+    # Empty string, not a channel, when there is nowhere to reach them. The
+    # column is non-null, and writing EMAIL here would put an unconsented
+    # recommendation in the database for a reader who never saw this code.
+    rec_row.recommended_channel = (
+        intel.recommendation.recommended_channel.value
+        if intel.recommendation.recommended_channel
+        else ""
+    )
     rec_row.suggested_products = intel.recommendation.suggested_products
     rec_row.calculated_at = now
 

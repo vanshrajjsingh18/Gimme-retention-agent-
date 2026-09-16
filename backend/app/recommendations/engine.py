@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from app.analytics.metrics import MetricResult
 from app.churn.engine import ChurnResult
 from app.core.enums import Channel, ChurnRiskBand, LifecycleStage, NextBestAction
+from app.services.channel_priority import consent_map, resolve_channel
 
 
 @dataclass
@@ -37,23 +38,33 @@ class RecommendationResult:
     priority: int
     reason_codes: list[str] = field(default_factory=list)
     explanation: str = ""
-    recommended_channel: Channel = Channel.EMAIL
+    #: None when the customer has consented to no channel at all. Naming that
+    #: state rather than defaulting to EMAIL is the point: "we would email
+    #: them" and "there is nowhere to reach them" are different answers, and
+    #: only one of them is safe to act on.
+    recommended_channel: Channel | None = None
     suggested_products: list[dict] = field(default_factory=list)
 
 
-def choose_channel(ctx: CustomerContext) -> Channel:
-    """Pick the highest-preference channel the customer has consented to."""
-    consent_map = {
-        Channel.EMAIL: ctx.email_consent,
-        Channel.SMS: ctx.sms_consent,
-        Channel.WHATSAPP: ctx.whatsapp_consent,
-    }
-    if consent_map.get(ctx.preferred_channel):
-        return ctx.preferred_channel
-    for channel in (Channel.EMAIL, Channel.WHATSAPP, Channel.SMS):
-        if consent_map.get(channel):
-            return channel
-    return Channel.EMAIL
+def choose_channel(ctx: CustomerContext) -> Channel | None:
+    """The highest-preference channel this customer has consented to, if any.
+
+    Returns None when they have consented to nothing. This used to fall back
+    to EMAIL unconditionally, which meant Customer 360 recommended emailing
+    people who had never agreed to be emailed. No unconsented message was ever
+    dispatched — the send pipeline re-checks consent for every recipient — but
+    the advice was wrong, and it was the kind of wrong an operator could act on
+    by hand.
+
+    Falls back in the same order as the send path, so the recommendation and
+    what actually happens cannot disagree.
+    """
+    consents = consent_map(
+        email_consent=ctx.email_consent,
+        sms_consent=ctx.sms_consent,
+        whatsapp_consent=ctx.whatsapp_consent,
+    )
+    return resolve_channel(consents=consents, preferred=ctx.preferred_channel).channel
 
 
 def recommend(ctx: CustomerContext) -> RecommendationResult:
