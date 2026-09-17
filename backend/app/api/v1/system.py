@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_admin
@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.jobs.scheduler import scheduler_status
 from app.llm.factory import get_llm_provider, provider_mode
-from app.models.entities import AuditLog, Integration, SystemLog, User
+from app.models.entities import AuditLog, Customer, Integration, SystemLog, User
 from app.services.seed import summary
 
 router = APIRouter()
@@ -148,5 +148,63 @@ def seed_demo_data(
         "generated": counts,
         "campaigns": campaign_result,
         "automations": automation_result,
+        "totals": summary(db),
+    }
+
+
+@router.post("/system/set-customer-consent", tags=["system"])
+def set_customer_consent(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> dict:
+    """Set all customers to have positive consent and refresh segments.
+
+    One-time operation after initial CSV import to enable all segmentation
+    rules. Sets marketing_consent, email_consent, sms_consent, and
+    whatsapp_consent to true for all customers, then refreshes customer
+    intelligence and RFM scores.
+    """
+    from app.services.intelligence import refresh_customer, refresh_rfm
+
+    # Count customers before
+    total = db.query(Customer).count()
+    if total == 0:
+        return {"status": "no_customers", "message": "No customers found to update."}
+
+    # Update all customers to have positive consent
+    db.execute(
+        update(Customer).values(
+            marketing_consent=True,
+            email_consent=True,
+            sms_consent=True,
+            whatsapp_consent=True,
+        )
+    )
+    db.commit()
+
+    # Refresh customer intelligence for segmentation
+    customers = db.query(Customer).all()
+    for customer in customers:
+        refresh_customer(db, customer, commit=False)
+    db.commit()
+
+    # Refresh RFM scores
+    refresh_rfm(db)
+
+    db.add(
+        AuditLog(
+            actor=user.email,
+            action="CUSTOMER_CONSENT_ENABLED",
+            entity_type="system",
+            entity_id="consent",
+            detail={"customers_updated": total},
+        )
+    )
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Set positive consent for {total} customers and recalculated segments.",
+        "customers_updated": total,
         "totals": summary(db),
     }
