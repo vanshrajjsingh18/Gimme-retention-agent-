@@ -257,31 +257,10 @@ def download_error_report(
 
 @router.get("/uploads/templates/{entity_type}.csv", tags=["ingestion"])
 def download_template(entity_type: str, _: User = Depends(get_current_user)) -> PlainTextResponse:
-    """Return an empty CSV with the correct headers for an entity type."""
+    """Return a CSV with the correct headers for an entity type, and an example."""
     _validate_entity_type(entity_type)
-    headers = {
-        "customers": [
-            "external_id", "email", "phone", "first_name", "last_name", "date_of_birth",
-            "age_verified", "city", "region", "postcode", "country", "signup_date",
-            "acquisition_source", "preferred_channel", "marketing_consent", "email_consent",
-            "sms_consent", "whatsapp_consent",
-        ],
-        "orders": [
-            "external_id", "customer_external_id", "ordered_at", "status", "total_amount",
-            "discount_amount", "delivery_fee", "currency", "channel", "coupon_code",
-            "delivery_city",
-        ],
-        "order_items": [
-            "external_id", "order_external_id", "sku", "product_name", "category", "brand",
-            "quantity", "unit_price", "line_total",
-        ],
-        "events": ["customer_external_id", "event_type", "occurred_at", "source", "payload"],
-        "consent_events": [
-            "customer_external_id", "consent_type", "granted", "source", "occurred_at"
-        ],
-    }[entity_type]
     return PlainTextResponse(
-        ",".join(headers) + "\n",
+        ingestion.template_csv(entity_type),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{entity_type}-template.csv"'},
     )

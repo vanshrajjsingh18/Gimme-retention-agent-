@@ -51,6 +51,21 @@ DATE_FORMATS = (
 TRUE_VALUES = {"true", "t", "yes", "y", "1", "granted", "opted_in", "subscribed"}
 FALSE_VALUES = {"false", "f", "no", "n", "0", "denied", "opted_out", "unsubscribed", ""}
 
+#: The consent flags. Absent from a customer file, every row imports as
+#: contactable on nothing — which is a silent way to load a customer list that
+#: no campaign can ever send to, so their absence is reported rather than
+#: defaulted past.
+CONSENT_COLUMNS = ("marketing_consent", "email_consent", "sms_consent", "whatsapp_consent")
+
+#: Customer columns that are true/false rather than text, and so cannot use the
+#: empty string to mean "not supplied".
+FLAG_COLUMNS = ("age_verified", *CONSENT_COLUMNS)
+
+#: external_id of the worked example shipped in the downloadable template.
+#: Skipped on import so a template filled in beneath the example does not turn
+#: the instructions into a customer.
+TEMPLATE_EXAMPLE_ID = "EXAMPLE-ROW-DELETE-ME"
+
 
 class RowError(ValueError):
     """A per-row validation failure."""
@@ -123,6 +138,30 @@ def parse_bool(value: Any, *, default: bool = False) -> bool:
     return default
 
 
+def parse_optional_bool(value: Any) -> bool | None:
+    """A flag, or None when the file did not say.
+
+    The distinction matters on update. ``parse_bool`` cannot express "no
+    answer" — a missing column and an explicit "false" both come back False —
+    and an update that writes that False over a customer's stored consent
+    revokes it without anybody asking for it. Absent and blank mean "leave
+    whatever is on record"; only a value actually present in the file changes
+    one.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text in TRUE_VALUES:
+        return True
+    if text in FALSE_VALUES:
+        return False
+    return None
+
+
 def require(row: dict, field: str) -> str:
     value = row.get(field)
     text = str(value).strip() if value is not None else ""
@@ -157,6 +196,10 @@ class IngestResult:
         #: changing somebody's data is worse than rejecting it, so anything the
         #: import alters or drops is reported rather than absorbed.
         self.warnings: list[dict] = []
+        #: Warnings about the file as a whole rather than any one row. A
+        #: missing consent column is true of all 993 rows at once; reporting it
+        #: per row would bury it in 993 copies of itself.
+        self.file_warnings: list[str] = []
         #: How many values were reshaped into a canonical form (phone numbers).
         self.normalized = 0
         self.affected_customer_ids: set[int] = set()
@@ -193,6 +236,7 @@ class IngestResult:
             "duplicate_rows": self.duplicates,
             "errors": self.errors,
             "warnings": self.warnings,
+            "file_warnings": self.file_warnings,
             "normalized_values": self.normalized,
             "affected_customers": len(self.affected_customer_ids),
         }
@@ -215,9 +259,25 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
     result.total_rows = len(rows)
     seen_in_batch: set[str] = set()
 
+    # Every row from a CSV carries the same keys, so the first one is the file.
+    if rows and not any(column in rows[0] for column in CONSENT_COLUMNS):
+        result.file_warnings.append(
+            "This file has no consent columns, so every customer in it will be "
+            "stored as having consented to nothing and will be skipped by every "
+            "campaign. Add marketing_consent, email_consent, sms_consent and "
+            "whatsapp_consent (true/false) to reach these customers."
+        )
+
     for index, row in enumerate(rows, start=1):
         try:
             external_id = require(row, "external_id")
+            if external_id == TEMPLATE_EXAMPLE_ID:
+                result.total_rows -= 1
+                result.file_warnings.append(
+                    "The template's example row was ignored. Delete it from the "
+                    "file to stop this notice."
+                )
+                continue
             if external_id in seen_in_batch:
                 result.duplicates += 1
                 result.reject(index, f"Duplicate external_id '{external_id}' within this file.", row)
@@ -271,7 +331,7 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
                 "first_name": clean(row, "first_name"),
                 "last_name": clean(row, "last_name"),
                 "date_of_birth": parse_date(row.get("date_of_birth"), "date_of_birth"),
-                "age_verified": parse_bool(row.get("age_verified")),
+                "age_verified": parse_optional_bool(row.get("age_verified")),
                 "city": optional(row, "city"),
                 "region": optional(row, "region"),
                 "postcode": optional(row, "postcode"),
@@ -279,10 +339,10 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
                 "signup_date": parse_datetime(row.get("signup_date"), "signup_date"),
                 "acquisition_source": optional(row, "acquisition_source"),
                 "preferred_channel": _parse_channel(row.get("preferred_channel")),
-                "marketing_consent": parse_bool(row.get("marketing_consent")),
-                "email_consent": parse_bool(row.get("email_consent")),
-                "sms_consent": parse_bool(row.get("sms_consent")),
-                "whatsapp_consent": parse_bool(row.get("whatsapp_consent")),
+                "marketing_consent": parse_optional_bool(row.get("marketing_consent")),
+                "email_consent": parse_optional_bool(row.get("email_consent")),
+                "sms_consent": parse_optional_bool(row.get("sms_consent")),
+                "whatsapp_consent": parse_optional_bool(row.get("whatsapp_consent")),
             }
 
             if phone_note:
@@ -291,7 +351,14 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
                 result.normalized += 1
 
             if existing is None:
-                customer = Customer(external_id=external_id, **values)
+                # A new customer the file said nothing about has consented to
+                # nothing. Unstated only means "leave it alone" when there is
+                # something already there to leave.
+                new_values = {
+                    key: (False if key in FLAG_COLUMNS and value is None else value)
+                    for key, value in values.items()
+                }
+                customer = Customer(external_id=external_id, **new_values)
                 db.add(customer)
                 db.flush()
                 result.accepted += 1
@@ -306,7 +373,10 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
                 )
             else:
                 for key, value in values.items():
-                    # A blank column in an update file must not wipe existing data.
+                    # A blank column in an update file must not wipe existing
+                    # data. For the flags that means None, since False is a
+                    # real answer: a file that says "false" revokes consent,
+                    # and one that never mentions it leaves consent alone.
                     if value not in (None, ""):
                         setattr(existing, key, value)
                 customer = existing
@@ -601,6 +671,70 @@ REQUIRED_COLUMNS: dict[str, list[str]] = {
     "events": ["customer_external_id", "event_type"],
     "consent_events": ["customer_external_id", "consent_type", "granted"],
 }
+
+#: Every column each entity accepts, in the order a downloaded template lists
+#: them. Required columns come first so the ones that cannot be left out are
+#: the ones on screen before anybody scrolls.
+TEMPLATE_HEADERS: dict[str, list[str]] = {
+    "customers": [
+        "external_id", "email", "phone", "first_name", "last_name", "date_of_birth",
+        "age_verified", "city", "region", "postcode", "country", "signup_date",
+        "acquisition_source", "preferred_channel", "marketing_consent", "email_consent",
+        "sms_consent", "whatsapp_consent",
+    ],
+    "orders": [
+        "external_id", "customer_external_id", "ordered_at", "status", "total_amount",
+        "discount_amount", "delivery_fee", "currency", "channel", "coupon_code",
+        "delivery_city",
+    ],
+    "order_items": [
+        "external_id", "order_external_id", "sku", "product_name", "category", "brand",
+        "quantity", "unit_price", "line_total",
+    ],
+    "events": ["customer_external_id", "event_type", "occurred_at", "source", "payload"],
+    "consent_events": [
+        "customer_external_id", "consent_type", "granted", "source", "occurred_at"
+    ],
+}
+
+#: A filled-in customer, so the template shows the shape of every column rather
+#: than only its name. The consent flags are the reason this exists: a column
+#: header alone does not say that leaving it blank means "no consent", and a
+#: list loaded that way is one no campaign can send to.
+TEMPLATE_EXAMPLE: dict[str, dict[str, str]] = {
+    "customers": {
+        "external_id": TEMPLATE_EXAMPLE_ID,
+        "email": "jane@example.co.nz",
+        "phone": "+64211234567",
+        "first_name": "Jane",
+        "last_name": "Example",
+        "date_of_birth": "1990-04-23",
+        "age_verified": "true",
+        "city": "Auckland",
+        "region": "Auckland",
+        "postcode": "1010",
+        "country": "New Zealand",
+        "signup_date": "2026-01-15",
+        "acquisition_source": "website",
+        "preferred_channel": "SMS",
+        "marketing_consent": "true",
+        "email_consent": "true",
+        "sms_consent": "true",
+        "whatsapp_consent": "false",
+    },
+}
+
+
+def template_csv(entity_type: str) -> str:
+    """The header row for an entity, plus a worked example where there is one."""
+    headers = TEMPLATE_HEADERS[entity_type]
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(headers)
+    example = TEMPLATE_EXAMPLE.get(entity_type)
+    if example:
+        writer.writerow([example.get(column, "") for column in headers])
+    return buffer.getvalue()
 
 
 # --------------------------------------------------------------------------

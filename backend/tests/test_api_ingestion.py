@@ -589,3 +589,165 @@ def test_a_dropped_phone_is_not_reported_for_a_row_that_is_rejected_anyway(
     dry = response.json()["dry_run"]
     assert dry["rejected_rows"] == 1
     assert dry["warnings"] == []
+
+
+# ==========================================================================
+# Consent survives the round trip
+# ==========================================================================
+# A customer list loaded without consent is not a smaller list — it is a list
+# that every campaign silently skips, which looks from the dashboard like the
+# product not working. These cover the two ways that happened: a file that
+# never mentions consent, and an update that omits the column over customers
+# who had already granted it.
+def _upload(client, auth_headers, csv_text: str, entity_type: str = "customers"):
+    response = client.post(
+        "/api/v1/uploads",
+        data={"entity_type": entity_type},
+        files={"file": ("customers.csv", csv_text.encode(), "text/csv")},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_the_customers_template_carries_every_column_the_importer_reads(
+    client, auth_headers
+):
+    response = client.get("/api/v1/uploads/templates/customers.csv", headers=auth_headers)
+    headers = response.text.splitlines()[0].split(",")
+    for column in ("marketing_consent", "email_consent", "sms_consent", "whatsapp_consent"):
+        assert column in headers, column
+    assert "external_id" in headers
+
+
+def test_the_template_shows_how_to_fill_every_column(client, auth_headers):
+    """A header row alone never says that blank consent means no consent."""
+    response = client.get("/api/v1/uploads/templates/customers.csv", headers=auth_headers)
+    lines = response.text.strip().splitlines()
+    assert len(lines) == 2, "the customers template should carry a worked example"
+    headers = lines[0].split(",")
+    example = dict(zip(headers, lines[1].split(",")))
+    assert all(example[column] for column in headers), example
+    assert example["marketing_consent"] == "true"
+
+
+def test_the_template_example_is_never_imported_as_a_customer(client, auth_headers, db):
+    """Downloading the template and uploading it back creates nobody.
+
+    The example exists to be read, and a spreadsheet filled in beneath it
+    would otherwise turn the instructions into a customer who can be messaged.
+    """
+    from app.services.ingestion import TEMPLATE_EXAMPLE_ID
+
+    template = client.get(
+        "/api/v1/uploads/templates/customers.csv", headers=auth_headers
+    ).text
+    job = _upload(client, auth_headers, template)
+
+    assert job["status"] == "COMPLETED"
+    assert job["accepted_rows"] == 0
+    db.expire_all()
+    assert (
+        db.execute(
+            select(Customer).where(Customer.external_id == TEMPLATE_EXAMPLE_ID)
+        ).scalar_one_or_none()
+        is None
+    )
+
+
+def test_a_file_with_no_consent_columns_says_so_before_anything_is_written(
+    client, auth_headers
+):
+    response = client.post(
+        "/api/v1/uploads/preview",
+        data={"entity_type": "customers"},
+        files={
+            "file": (
+                "customers.csv",
+                b"external_id,email\nNOCONSENT-1,a@example.test\n",
+                "text/csv",
+            )
+        },
+        headers=auth_headers,
+    )
+    warnings = " ".join(response.json()["dry_run"]["file_warnings"])
+    assert "no consent columns" in warnings
+    assert "skipped by every campaign" in warnings
+
+
+def test_a_file_that_states_consent_is_not_warned_about(client, auth_headers):
+    response = client.post(
+        "/api/v1/uploads/preview",
+        data={"entity_type": "customers"},
+        files={
+            "file": (
+                "customers.csv",
+                b"external_id,email,marketing_consent\nSAIDSO-1,a@example.test,false\n",
+                "text/csv",
+            )
+        },
+        headers=auth_headers,
+    )
+    assert response.json()["dry_run"]["file_warnings"] == []
+
+
+def test_an_update_that_omits_consent_leaves_it_alone(client, auth_headers, db):
+    """The bug this pair exists for.
+
+    A flag has no empty string, so the guard that keeps a blank text column
+    from wiping stored data did not cover consent: an update file that simply
+    did not mention it wrote False over everybody, revoking consent nobody
+    asked to withdraw.
+    """
+    _upload(
+        client,
+        auth_headers,
+        "external_id,email,marketing_consent,email_consent\n"
+        "KEEP-1,keep@example.test,true,true\n",
+    )
+    # Every row needs a contact detail, even one that only changes a city.
+    _upload(
+        client, auth_headers, "external_id,email,city\nKEEP-1,keep@example.test,Wellington\n"
+    )
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "KEEP-1")
+    ).scalar_one()
+    assert customer.city == "Wellington", "the update should still have landed"
+    assert customer.marketing_consent is True
+    assert customer.email_consent is True
+
+
+def test_an_update_that_says_false_does_revoke_consent(client, auth_headers, db):
+    """The other half: silence leaves consent alone, but "false" still withdraws it."""
+    _upload(
+        client,
+        auth_headers,
+        "external_id,email,marketing_consent\nREVOKE-1,revoke@example.test,true\n",
+    )
+    _upload(
+        client,
+        auth_headers,
+        "external_id,email,marketing_consent\nREVOKE-1,revoke@example.test,false\n",
+    )
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "REVOKE-1")
+    ).scalar_one()
+    assert customer.marketing_consent is False
+
+
+def test_a_new_customer_the_file_said_nothing_about_has_consented_to_nothing(
+    client, auth_headers, db
+):
+    """Unstated means "leave it alone" only when there is something to leave."""
+    _upload(client, auth_headers, "external_id,email\nSILENT-1,silent@example.test\n")
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "SILENT-1")
+    ).scalar_one()
+    assert customer.marketing_consent is False
+    assert customer.email_consent is False

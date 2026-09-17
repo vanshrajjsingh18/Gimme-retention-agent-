@@ -157,14 +157,16 @@ def set_customer_consent(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> dict:
-    """Set all customers to have positive consent and refresh segments.
+    """Grant every customer consent on every channel, then re-evaluate.
 
-    One-time operation after initial CSV import to enable all segmentation
-    rules. Sets marketing_consent, email_consent, sms_consent, and
-    whatsapp_consent to true for all customers, then refreshes customer
-    intelligence and RFM scores.
+    A blunt instrument, and deliberately the only one of its kind: it asserts a
+    consent the imported data did not carry, so the record it leaves behind is
+    an operator's decision rather than anything the customer did. The audit
+    entry is the point. The supported route is a customer file with the consent
+    columns filled in, which records what each person actually agreed to.
     """
     from app.services.intelligence import refresh_customer, refresh_rfm
+    from app.services.segments import refresh_all_segments
 
     # Count customers before
     total = db.query(Customer).count()
@@ -188,8 +190,10 @@ def set_customer_consent(
         refresh_customer(db, customer, commit=False)
     db.commit()
 
-    # Refresh RFM scores
     refresh_rfm(db)
+    # Without this the member counts stay where they were and the change looks
+    # like it did not happen — which is the only way anyone sees this ran.
+    refresh_all_segments(db)
 
     db.add(
         AuditLog(

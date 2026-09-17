@@ -46,6 +46,8 @@ interface DryRun {
   normalized_values: number;
   errors: { row: number; error: string; data: Record<string, string> }[];
   warnings: { row: number; warning: string; data: Record<string, string> }[];
+  /** True of the file as a whole rather than of any one row. */
+  file_warnings: string[];
 }
 
 interface PreviewResult {
@@ -526,10 +528,22 @@ function DryRunSummary({ preview }: { preview: PreviewResult }) {
   }
 
   const willImport = dry.accepted_rows + dry.updated_rows;
-  const clean = dry.rejected_rows === 0 && dry.warnings.length === 0;
+  const fileWarnings = dry.file_warnings ?? [];
+  const clean =
+    dry.rejected_rows === 0 && dry.warnings.length === 0 && fileWarnings.length === 0;
 
   return (
     <div className="space-y-3">
+      {/* Above the counts, not below them. A file that imports every row and
+          reaches nobody is the one failure the numbers all call a success. */}
+      {fileWarnings.map((warning) => (
+        <div
+          key={warning}
+          className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3"
+        >
+          <p className="text-sm text-amber-900">{warning}</p>
+        </div>
+      ))}
       <div
         className={
           clean
