@@ -71,7 +71,10 @@ interface PreviewResult {
 }
 
 export default function DataPage() {
-  const [entityType, setEntityType] = useState<string>('customers');
+  // Taken from the list rather than named, so the default cannot drift away
+  // from what is on screen first. Naming it is how the page went on offering
+  // the customers template after the combined one became the way in.
+  const [entityType, setEntityType] = useState<string>(ENTITY_TYPES[0].key);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [dragging, setDragging] = useState(false);
