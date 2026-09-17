@@ -25,7 +25,9 @@ from app.services import ingestion
 
 router = APIRouter()
 
-ENTITY_TYPES = ["customers", "orders", "order_items", "events", "consent_events"]
+ENTITY_TYPES = [
+    "combined", "customers", "orders", "order_items", "events", "consent_events"
+]
 
 
 def _log_request(

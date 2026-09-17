@@ -18,6 +18,13 @@ import type { IngestionJob } from '../types';
 import { formatDateTime, formatNumber, humanize } from '../utils/format';
 
 const ENTITY_TYPES = [
+  {
+    key: 'combined',
+    label: 'Everything in one file',
+    hint:
+      'One row per order line, with the customer and order repeated down the file. ' +
+      'Requires customer_external_id, order_external_id, ordered_at, total_amount.',
+  },
   { key: 'customers', label: 'Customers', hint: 'Requires external_id, plus an email or phone.' },
   {
     key: 'orders',
@@ -48,6 +55,8 @@ interface DryRun {
   warnings: { row: number; warning: string; data: Record<string, string> }[];
   /** True of the file as a whole rather than of any one row. */
   file_warnings: string[];
+  /** Per-entity totals when one file loads several of them. */
+  sections: { entity_type: string; new: number; updated: number; rejected: number }[];
 }
 
 interface PreviewResult {
@@ -581,6 +590,31 @@ function DryRunSummary({ preview }: { preview: PreviewResult }) {
           </div>
         ))}
       </dl>
+
+      {/* One file, three things written. The row counts above are lines of the
+          file, which is the only unit the operator can look up; these say what
+          the lines become. */}
+      {(dry.sections ?? []).length > 0 && (
+        <div className="rounded-lg border border-slate-200 px-4 py-3">
+          <p className="mb-2 text-xs font-medium text-slate-500">This file creates</p>
+          <ul className="space-y-1">
+            {dry.sections.map((section) => (
+              <li key={section.entity_type} className="text-sm text-slate-700">
+                <span className="font-semibold tabular-nums text-slate-900">
+                  {formatNumber(section.new)}
+                </span>{' '}
+                {humanize(section.entity_type).toLowerCase()}
+                {section.updated > 0 && `, ${formatNumber(section.updated)} updated`}
+                {section.rejected > 0 && (
+                  <span className="text-red-600">
+                    , {formatNumber(section.rejected)} rejected
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {dry.normalized_values > 0 && (
         <p className="text-xs text-slate-500">

@@ -180,6 +180,20 @@ def optional(row: dict, field: str) -> str | None:
     return value or None
 
 
+_SLUG = re.compile(r"[^a-z0-9]+")
+
+
+def product_slug(product_name: str) -> str:
+    """A stable id for a product, for files that carry names and no SKU.
+
+    Coarse on purpose: two spellings of one drink stay apart, and that is a
+    smaller problem than the alternative. An id that varies per line makes the
+    same product look like a new one on every order, so nothing is ever bought
+    twice and nothing can be recommended.
+    """
+    return _SLUG.sub("-", product_name.strip().lower()).strip("-")[:64] or "unknown"
+
+
 # --------------------------------------------------------------------------
 # Result container
 # --------------------------------------------------------------------------
@@ -200,6 +214,10 @@ class IngestResult:
         #: missing consent column is true of all 993 rows at once; reporting it
         #: per row would bury it in 993 copies of itself.
         self.file_warnings: list[str] = []
+        #: Per-entity totals when one file loads several of them. A combined
+        #: file has one row count and three sets of results, and collapsing
+        #: them into a single "accepted" hides which part of the row landed.
+        self.sections: list[dict] = []
         #: How many values were reshaped into a canonical form (phone numbers).
         self.normalized = 0
         self.affected_customer_ids: set[int] = set()
@@ -237,6 +255,7 @@ class IngestResult:
             "errors": self.errors,
             "warnings": self.warnings,
             "file_warnings": self.file_warnings,
+            "sections": self.sections,
             "normalized_values": self.normalized,
             "affected_customers": len(self.affected_customer_ids),
         }
@@ -656,7 +675,166 @@ def ingest_consent_events(db: Session, rows: list[dict]) -> IngestResult:
     return result
 
 
+def ingest_combined(db: Session, rows: list[dict], *, update_existing: bool = True) -> IngestResult:
+    """Load customers, orders and order lines from one denormalised file.
+
+    One row is one order line, with the customer repeated on every row and the
+    order repeated on every line of it — which is the shape order data actually
+    arrives in, and the reason three separate uploads in a fixed order was the
+    wrong thing to ask for. Getting them out of order fails confusingly: orders
+    before customers rejects every row for a customer that exists three files
+    away.
+
+    Nothing here validates a field. The rows are split into the three shapes
+    and handed to the existing ingestors, so a combined upload and three
+    separate ones accept exactly the same data and refuse it for exactly the
+    same reasons. A second copy of those rules would drift within a month.
+
+    The one thing this does own is row numbers. The split lists are shorter
+    than the file — 8,578 lines hold 993 customers — so an error reported
+    against the customer list would name a row the operator cannot find. Each
+    split row remembers the line it came from, and the numbers are put back
+    before anybody reads them.
+    """
+    result = IngestResult("combined")
+    result.total_rows = len(rows)
+
+    if rows and not any(column in rows[0] for column in CONSENT_COLUMNS):
+        result.file_warnings.append(
+            "This file has no consent columns, so every customer in it will be "
+            "stored as having consented to nothing and will be skipped by every "
+            "campaign. Add marketing_consent, email_consent, sms_consent and "
+            "whatsapp_consent (true/false) to reach these customers."
+        )
+
+    customers: list[dict] = []
+    orders: list[dict] = []
+    items: list[dict] = []
+    origins: dict[str, list[int]] = {"customers": [], "orders": [], "order_items": []}
+    seen_customers: set[str] = set()
+    seen_orders: set[str] = set()
+    skipped_example = False
+
+    for index, row in enumerate(rows, start=1):
+        customer_id = clean(row, "customer_external_id")
+        if customer_id == TEMPLATE_EXAMPLE_ID:
+            skipped_example = True
+            result.total_rows -= 1
+            continue
+        order_id = clean(row, "order_external_id")
+
+        # The customer and the order repeat down the file; only their first
+        # appearance is an instruction to write anything.
+        if customer_id and customer_id not in seen_customers:
+            seen_customers.add(customer_id)
+            customers.append({**row, "external_id": customer_id})
+            origins["customers"].append(index)
+
+        if order_id and order_id not in seen_orders:
+            seen_orders.add(order_id)
+            orders.append({**row, "external_id": order_id})
+            origins["orders"].append(index)
+
+        # A row may carry no line detail — an order total with nothing itemised
+        # is still an order, and it should not be rejected for the gap.
+        item_id = clean(row, "item_external_id")
+        product = clean(row, "product_name")
+        if item_id or product:
+            items.append({
+                **row,
+                "external_id": item_id or f"{order_id}-{index}",
+                # Order exports carry a product name and no SKU. Requiring one
+                # here would mean inventing an id per line, and an id invented
+                # per line is a different product every time somebody buys the
+                # same thing.
+                "sku": clean(row, "sku") or product_slug(product),
+            })
+            origins["order_items"].append(index)
+
+    if skipped_example:
+        result.file_warnings.append(
+            "The template's example row was ignored. Delete it from the file to "
+            "stop this notice."
+        )
+
+    failed_lines: set[int] = set()
+
+    def absorb(name: str, part: IngestResult) -> set[str]:
+        """Merge a sub-result, and report which external_ids did not land."""
+        batch = {"customers": customers, "orders": orders, "order_items": items}[name]
+        origin = origins[name]
+        rejected_ids = set()
+        for entry in part.errors:
+            position = entry["row"] - 1
+            if 0 <= position < len(batch):
+                rejected_ids.add(batch[position]["external_id"])
+            entry["row"] = _origin_line(entry["row"], origin)
+            failed_lines.add(entry["row"])
+        for entry in part.warnings:
+            entry["row"] = _origin_line(entry["row"], origin)
+        result.errors.extend(part.errors)
+        result.warnings.extend(part.warnings)
+        result.file_warnings.extend(part.file_warnings)
+        result.normalized += part.normalized
+        result.affected_customer_ids |= part.affected_customer_ids
+        result.created_order_ids.extend(part.created_order_ids)
+        result.sections.append({
+            "entity_type": name,
+            "new": part.accepted,
+            "updated": part.updated,
+            "rejected": part.rejected,
+        })
+        return rejected_ids
+
+    # Run in dependency order, and drop what has been orphaned on the way. A
+    # customer rejected for a bad phone number would otherwise take its orders
+    # down with it under "No customer found with external_id C2" — which reads
+    # as though C2 were missing from the file, when it is three columns to the
+    # left of the real error. One root cause should produce one error.
+    dropped_customers = absorb("customers", ingest_customers(
+        db, customers, update_existing=update_existing
+    ))
+    orphaned_orders = {
+        order["external_id"] for order in orders
+        if clean(order, "customer_external_id") in dropped_customers
+    }
+    kept_orders = [o for o in orders if o["external_id"] not in orphaned_orders]
+    origins["orders"] = [
+        line for o, line in zip(orders, origins["orders"])
+        if o["external_id"] not in orphaned_orders
+    ]
+    orders = kept_orders
+
+    dropped_orders = absorb("orders", ingest_orders(
+        db, orders, update_existing=update_existing
+    )) | orphaned_orders
+
+    kept_items = [i for i in items if clean(i, "order_external_id") not in dropped_orders]
+    origins["order_items"] = [
+        line for i, line in zip(items, origins["order_items"])
+        if clean(i, "order_external_id") not in dropped_orders
+    ]
+    items = kept_items
+
+    absorb("order_items", ingest_order_items(db, items, update_existing=update_existing))
+
+    result.errors.sort(key=lambda e: e["row"])
+    result.warnings.sort(key=lambda w: w["row"])
+    # Counted in lines of the file, which is the only unit the operator has.
+    # One bad line can fail in more than one place; it is still one line.
+    result.rejected = len(failed_lines)
+    result.accepted = max(result.total_rows - result.rejected, 0)
+    return result
+
+
+def _origin_line(row_number: int, origin: list[int]) -> int:
+    """Translate a position in a split batch back to its line in the file."""
+    index = row_number - 1
+    return origin[index] if 0 <= index < len(origin) else row_number
+
+
 INGESTORS: dict[str, Callable[..., IngestResult]] = {
+    "combined": ingest_combined,
     "customers": ingest_customers,
     "orders": ingest_orders,
     "order_items": ingest_order_items,
@@ -665,6 +843,7 @@ INGESTORS: dict[str, Callable[..., IngestResult]] = {
 }
 
 REQUIRED_COLUMNS: dict[str, list[str]] = {
+    "combined": ["customer_external_id", "order_external_id", "ordered_at", "total_amount"],
     "customers": ["external_id"],
     "orders": ["external_id", "customer_external_id", "ordered_at", "total_amount"],
     "order_items": ["external_id", "order_external_id", "sku", "product_name"],
@@ -676,6 +855,24 @@ REQUIRED_COLUMNS: dict[str, list[str]] = {
 #: them. Required columns come first so the ones that cannot be left out are
 #: the ones on screen before anybody scrolls.
 TEMPLATE_HEADERS: dict[str, list[str]] = {
+    # One row per order line. The customer columns repeat on every row of
+    # theirs and the order columns on every line of the order; the importer
+    # takes the first appearance of each and ignores the repeats, so there is
+    # nothing to keep in sync by hand.
+    "combined": [
+        # who
+        "customer_external_id", "email", "phone", "first_name", "last_name",
+        "date_of_birth", "age_verified", "city", "region", "postcode", "country",
+        "signup_date", "acquisition_source", "preferred_channel",
+        "marketing_consent", "email_consent", "sms_consent", "whatsapp_consent",
+        # the order
+        "order_external_id", "ordered_at", "status", "total_amount",
+        "discount_amount", "delivery_fee", "currency", "channel", "coupon_code",
+        "delivery_city",
+        # the line
+        "item_external_id", "sku", "product_name", "category", "brand",
+        "quantity", "unit_price", "line_total",
+    ],
     "customers": [
         "external_id", "email", "phone", "first_name", "last_name", "date_of_birth",
         "age_verified", "city", "region", "postcode", "country", "signup_date",
@@ -701,8 +898,89 @@ TEMPLATE_HEADERS: dict[str, list[str]] = {
 #: than only its name. The consent flags are the reason this exists: a column
 #: header alone does not say that leaving it blank means "no consent", and a
 #: list loaded that way is one no campaign can send to.
-TEMPLATE_EXAMPLE: dict[str, dict[str, str]] = {
-    "customers": {
+TEMPLATE_EXAMPLE: dict[str, list[dict[str, str]]] = {
+    # Two lines of one order, on purpose: it is the only way to show that the
+    # customer and order columns repeat rather than being left blank on the
+    # second line, which is the question anybody filling this in asks first.
+    "combined": [
+        {
+            "customer_external_id": TEMPLATE_EXAMPLE_ID,
+            "email": "jane@example.co.nz",
+            "phone": "+64211234567",
+            "first_name": "Jane",
+            "last_name": "Example",
+            "date_of_birth": "1990-04-23",
+            "age_verified": "true",
+            "city": "Auckland",
+            "region": "Auckland",
+            "postcode": "1010",
+            "country": "New Zealand",
+            "signup_date": "2026-01-15",
+            "acquisition_source": "website",
+            "preferred_channel": "SMS",
+            "marketing_consent": "true",
+            "email_consent": "true",
+            "sms_consent": "true",
+            "whatsapp_consent": "false",
+            "order_external_id": "EXAMPLE-ORDER-1",
+            "ordered_at": "2026-08-12 19:40:00",
+            "status": "COMPLETED",
+            "total_amount": "94.98",
+            "discount_amount": "5.00",
+            "delivery_fee": "4.99",
+            "currency": "NZD",
+            "channel": "web",
+            "coupon_code": "GIMME5",
+            "delivery_city": "Auckland",
+            "item_external_id": "EXAMPLE-LINE-1",
+            "sku": "steinlager-classic-12pk",
+            "product_name": "Steinlager Classic 12pk",
+            "category": "Beer",
+            "brand": "Steinlager",
+            "quantity": "1",
+            "unit_price": "28.99",
+            "line_total": "28.99",
+        },
+        {
+            "customer_external_id": TEMPLATE_EXAMPLE_ID,
+            "email": "jane@example.co.nz",
+            "phone": "+64211234567",
+            "first_name": "Jane",
+            "last_name": "Example",
+            "date_of_birth": "1990-04-23",
+            "age_verified": "true",
+            "city": "Auckland",
+            "region": "Auckland",
+            "postcode": "1010",
+            "country": "New Zealand",
+            "signup_date": "2026-01-15",
+            "acquisition_source": "website",
+            "preferred_channel": "SMS",
+            "marketing_consent": "true",
+            "email_consent": "true",
+            "sms_consent": "true",
+            "whatsapp_consent": "false",
+            "order_external_id": "EXAMPLE-ORDER-1",
+            "ordered_at": "2026-08-12 19:40:00",
+            "status": "COMPLETED",
+            "total_amount": "94.98",
+            "discount_amount": "5.00",
+            "delivery_fee": "4.99",
+            "currency": "NZD",
+            "channel": "web",
+            "coupon_code": "GIMME5",
+            "delivery_city": "Auckland",
+            "item_external_id": "EXAMPLE-LINE-2",
+            "sku": "fat-bird-sauv-blanc-750ml",
+            "product_name": "Fat Bird Sauv Blanc 750ml",
+            "category": "Wine",
+            "brand": "Fat Bird",
+            "quantity": "2",
+            "unit_price": "19.99",
+            "line_total": "39.98",
+        },
+    ],
+    "customers": [{
         "external_id": TEMPLATE_EXAMPLE_ID,
         "email": "jane@example.co.nz",
         "phone": "+64211234567",
@@ -721,7 +999,7 @@ TEMPLATE_EXAMPLE: dict[str, dict[str, str]] = {
         "email_consent": "true",
         "sms_consent": "true",
         "whatsapp_consent": "false",
-    },
+    }],
 }
 
 
@@ -731,8 +1009,7 @@ def template_csv(entity_type: str) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(headers)
-    example = TEMPLATE_EXAMPLE.get(entity_type)
-    if example:
+    for example in TEMPLATE_EXAMPLE.get(entity_type, ()):
         writer.writerow([example.get(column, "") for column in headers])
     return buffer.getvalue()
 
@@ -895,6 +1172,22 @@ def _post_ingest(db: Session, entity_type: str, result: IngestResult) -> None:
     """Recompute intelligence for the customers a load touched."""
     from app.services.attribution import process_new_order  # local: avoids a cycle
     from app.services.intelligence import refresh_customer, refresh_rfm
+
+    if entity_type == "combined":
+        # A combined file lands customers and orders at once, so it needs both
+        # halves: attribution for the new orders, and a recompute for everyone
+        # the file touched. Either alone leaves the dashboard half-right.
+        for order_id in result.created_order_ids:
+            order = db.get(Order, order_id)
+            if order is not None:
+                process_new_order(db, order)
+        for customer_id in result.affected_customer_ids:
+            customer = db.get(Customer, customer_id)
+            if customer is not None:
+                refresh_customer(db, customer, commit=False)
+        db.commit()
+        refresh_rfm(db)
+        return
 
     if entity_type == "orders" and result.created_order_ids:
         for order_id in result.created_order_ids:

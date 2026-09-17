@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Turn a GIMME "customers + order data till date" export into importable CSVs.
+"""Turn a GIMME "customers + order data till date" export into one import file.
 
-The export is one row per order line, with the customer repeated on every row.
-The importer wants three files — customers, orders, order items — loaded in
-that order, because orders reference a customer and items reference an order.
+The export is one row per order line, with the customer repeated on every row,
+which is exactly the shape the importer's combined format takes. So this is a
+translation of column names and nothing more structural than that.
 
 The part that earns this script's existence is `category` and `brand`. They are
 not in the export, they cannot be derived by the importer, and without them
@@ -18,7 +18,7 @@ customer about a drink they have never bought. Unmatched items still count
 toward order totals, revenue and reorder timing; they just do not vote on
 preference.
 
-    python -m scripts.split_gimme_export export.csv --out-dir ./split
+    python -m scripts.split_gimme_export export.csv --out gimme.csv
 """
 from __future__ import annotations
 
@@ -261,73 +261,63 @@ def parse_when(value: str) -> str:
     return ""
 
 
-def split(path: Path) -> tuple[dict, dict, list, Counter]:
-    customers: dict[str, dict] = {}
-    orders: dict[str, dict] = {}
-    items: list[dict] = []
+def convert(path: Path) -> tuple[list[dict], Counter]:
+    """Read the export into the importer's combined shape: one row per line."""
+    rows: list[dict] = []
     seen_items: set[str] = set()
     stats: Counter = Counter()
 
     with path.open(encoding="utf-8-sig", newline="") as handle:
-        for row in csv.DictReader(handle):
-            fan_id = (row.get("fan_id") or "").strip()
-            order_id = (row.get("order_id") or "").strip()
+        for source in csv.DictReader(handle):
+            fan_id = (source.get("fan_id") or "").strip()
+            order_id = (source.get("order_id") or "").strip()
             if not fan_id or not order_id:
                 stats["rows_without_ids"] += 1
                 continue
 
-            if fan_id not in customers:
-                email = (row.get("email") or "").strip()
-                phone = (row.get("phone") or "").strip()
-                # The export writes a bare "+" where it holds no number.
-                if phone in {"+", "-"}:
-                    phone = ""
-                parts = (row.get("customer_name") or "").strip().split()
-                customers[fan_id] = {
-                    "external_id": fan_id,
-                    "email": email,
-                    "phone": phone,
-                    "first_name": parts[0] if parts else "",
-                    "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
-                    "country": "New Zealand",
-                }
-
-            if order_id not in orders:
-                orders[order_id] = {
-                    "external_id": order_id,
-                    "customer_external_id": fan_id,
-                    "ordered_at": parse_when(row.get("order_date") or ""),
-                    "status": "COMPLETED",
-                    "total_amount": (row.get("order_amount") or "0").strip(),
-                    "discount_amount": _first_number(row.get("discount_value")),
-                    "currency": "NZD",
-                    "coupon_code": _first_text(row.get("discount_code")),
-                }
-
-            item_id = (row.get("order_item_id") or "").strip()
-            if not item_id or item_id in seen_items:
+            item_id = (source.get("order_item_id") or "").strip()
+            if item_id and item_id in seen_items:
                 continue
-            seen_items.add(item_id)
+            if item_id:
+                seen_items.add(item_id)
 
-            name = (row.get("item_name") or "").strip()
+            phone = (source.get("phone") or "").strip()
+            # The export writes a bare "+" where it holds no number.
+            if phone in {"+", "-"}:
+                phone = ""
+            parts = (source.get("customer_name") or "").strip().split()
+
+            name = (source.get("item_name") or "").strip()
             brand, category = classify(name)
             stats["items"] += 1
             stats["with_brand" if brand else "without_brand"] += 1
             stats["with_category" if category else "without_category"] += 1
 
-            items.append({
-                "external_id": item_id,
+            rows.append({
+                "customer_external_id": fan_id,
+                "email": (source.get("email") or "").strip(),
+                "phone": phone,
+                "first_name": parts[0] if parts else "",
+                "last_name": " ".join(parts[1:]) if len(parts) > 1 else "",
+                "country": "New Zealand",
                 "order_external_id": order_id,
+                "ordered_at": parse_when(source.get("order_date") or ""),
+                "status": "COMPLETED",
+                "total_amount": (source.get("order_amount") or "0").strip(),
+                "discount_amount": _first_number(source.get("discount_value")),
+                "currency": "NZD",
+                "coupon_code": _first_text(source.get("discount_code")),
+                "item_external_id": item_id,
                 "sku": product_sku(name),
                 "product_name": name,
                 "category": category,
                 "brand": brand,
-                "quantity": (row.get("quantity") or "1").strip() or "1",
-                "unit_price": (row.get("item_price") or "0").strip() or "0",
-                "line_total": (row.get("item_price") or "0").strip() or "0",
+                "quantity": (source.get("quantity") or "1").strip() or "1",
+                "unit_price": (source.get("item_price") or "0").strip() or "0",
+                "line_total": (source.get("item_price") or "0").strip() or "0",
             })
 
-    return customers, orders, items, stats
+    return rows, stats
 
 
 def _first_number(value: str | None) -> str:
@@ -342,21 +332,20 @@ def _first_text(value: str | None) -> str:
     return match.group(1) if match else ""
 
 
-def write(path: Path, columns: list[str], rows) -> int:
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
-        writer.writeheader()
-        count = 0
-        for row in rows:
-            writer.writerow(row)
-            count += 1
-    return count
+COLUMNS = [
+    "customer_external_id", "email", "phone", "first_name", "last_name", "country",
+    "marketing_consent", "email_consent", "sms_consent",
+    "order_external_id", "ordered_at", "status", "total_amount", "discount_amount",
+    "currency", "coupon_code",
+    "item_external_id", "sku", "product_name", "category", "brand",
+    "quantity", "unit_price", "line_total",
+]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("export", type=Path, help="the GIMME export CSV")
-    parser.add_argument("--out-dir", type=Path, default=Path("."))
+    parser.add_argument("--out", type=Path, default=Path("gimme_combined.csv"))
     parser.add_argument(
         "--assume-consent",
         action="store_true",
@@ -373,46 +362,39 @@ def main() -> int:
     if not args.export.is_file():
         print(f"No such file: {args.export}", file=sys.stderr)
         return 1
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    customers, orders, items, stats = split(args.export)
-
-    customer_columns = ["external_id", "email", "phone", "first_name", "last_name", "country"]
+    rows, stats = convert(args.export)
+    columns = list(COLUMNS)
     if args.assume_consent:
-        customer_columns += ["marketing_consent", "email_consent", "sms_consent"]
-        for record in customers.values():
+        for row in rows:
             # Consent to be emailed is worth nothing without an address to
             # email, and claiming it hides why somebody is never contacted.
-            record["marketing_consent"] = "true"
-            record["email_consent"] = "true" if record["email"] else "false"
-            record["sms_consent"] = "true" if record["phone"] else "false"
-    write(args.out_dir / "customers.csv", customer_columns, customers.values())
-    write(
-        args.out_dir / "orders.csv",
-        ["external_id", "customer_external_id", "ordered_at", "status",
-         "total_amount", "discount_amount", "currency", "coupon_code"],
-        orders.values(),
-    )
-    write(
-        args.out_dir / "order_items.csv",
-        ["external_id", "order_external_id", "sku", "product_name", "category",
-         "brand", "quantity", "unit_price", "line_total"],
-        items,
-    )
+            row["marketing_consent"] = "true"
+            row["email_consent"] = "true" if row["email"] else "false"
+            row["sms_consent"] = "true" if row["phone"] else "false"
+    else:
+        for name in ("marketing_consent", "email_consent", "sms_consent"):
+            columns.remove(name)
 
-    print(f"customers   {len(customers):>6}")
-    print(f"orders      {len(orders):>6}")
-    print(f"order items {len(items):>6}")
+    with args.out.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+    customers = len({r["customer_external_id"] for r in rows})
+    orders = len({r["order_external_id"] for r in rows})
+    print(f"{args.out}")
+    print(f"  {len(rows)} rows — {customers} customers, {orders} orders")
     matched = stats["with_brand"]
     print(
-        f"\nbrand recognised on {matched} of {stats['items']} items "
-        f"({matched / max(stats['items'], 1):.0%}); "
-        f"category on {stats['with_category']}."
+        f"  brand recognised on {matched} of {stats['items']} lines "
+        f"({matched / max(stats['items'], 1):.0%}); category on {stats['with_category']}."
     )
     print(
-        "Unrecognised items keep a blank brand rather than a guessed one. They "
-        "still count toward totals and reorder timing; they do not vote on "
-        "which brand a customer prefers."
+        "\nUnrecognised lines keep a blank brand rather than a guessed one. They "
+        "still count toward totals and reorder timing; they do not vote on which "
+        "brand a customer prefers."
     )
     if args.assume_consent:
         print(
@@ -422,10 +404,10 @@ def main() -> int:
         )
     else:
         print(
-            "\nThe customer file carries no consent columns, so every customer "
-            "loads contactable on nothing and every campaign skips them. Fill "
-            "marketing_consent, email_consent and sms_consent from wherever "
-            "consent was collected, or re-run with --assume-consent."
+            "\nNo consent columns: every customer will load contactable on "
+            "nothing and every campaign will skip them. Add marketing_consent, "
+            "email_consent and sms_consent from wherever consent was collected, "
+            "or re-run with --assume-consent."
         )
     return 0
 
