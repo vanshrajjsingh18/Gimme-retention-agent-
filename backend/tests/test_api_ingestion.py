@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from app.models.entities import Customer, Order, OrderItem
+from app.models.entities import Customer, CustomerSegment, Order, OrderItem, Segment
 
 NOW = datetime.utcnow()
 
@@ -800,6 +800,48 @@ def test_one_file_loads_customers_orders_and_lines(client, auth_headers, db):
     assert len(orders) == 2
     assert sum(len(o.items) for o in orders) == 3
     assert customer.marketing_consent is True
+
+
+def _segment_members(db, name: str) -> set[int]:
+    segment = db.execute(select(Segment).where(Segment.name == name)).scalar_one()
+    return set(
+        db.execute(
+            select(CustomerSegment.customer_id).where(
+                CustomerSegment.segment_id == segment.id
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def test_a_load_moves_the_segments_a_campaign_picks_its_audience_from(
+    client, auth_headers, db
+):
+    """Membership is stored, not evaluated when the campaign builder reads it.
+
+    A load that recomputes lifecycle stages but not membership leaves every
+    cohort reading the count from before the file arrived: analytics shows the
+    orders, and the audience dropdown still offers zero of everyone.
+    """
+    _combined(
+        client,
+        auth_headers,
+        "CMB-SEG,seg@example.test,0211234567,true,true,"
+        "CMB-SEGO1,2026-09-01 19:00:00,COMPLETED,28.99,"
+        "CMB-SEGI1,Steinlager Classic 12pk,Beer,Steinlager,1,28.99\n",
+    )
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "CMB-SEG")
+    ).scalar_one()
+
+    # One completed order, consent on both channels, one beer line — the
+    # customer belongs in each of these the moment the file lands.
+    assert customer.id in _segment_members(db, "Needs Second Order")
+    assert customer.id in _segment_members(db, "Email Contactable")
+    assert customer.id in _segment_members(db, "Beer Drinkers")
 
 
 def test_a_customer_repeated_down_the_file_is_written_once(client, auth_headers):

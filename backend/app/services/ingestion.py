@@ -1169,7 +1169,25 @@ def ingest_csv(
 
 
 def _post_ingest(db: Session, entity_type: str, result: IngestResult) -> None:
-    """Recompute intelligence for the customers a load touched."""
+    """Recompute intelligence and segment membership for what a load touched."""
+    from app.services.segments import refresh_all_segments  # local: avoids a cycle
+
+    if not _recompute_intelligence(db, entity_type, result):
+        return
+
+    # Segment membership is what a campaign picks its audience from, and it is
+    # stored rather than evaluated on read. Without this a load lands the
+    # orders, moves every lifecycle stage, and leaves the counts frozen on the
+    # previous run — the data is in, analytics shows it, and every cohort the
+    # campaign builder offers still reads zero.
+    refresh_all_segments(db)
+
+
+def _recompute_intelligence(db: Session, entity_type: str, result: IngestResult) -> bool:
+    """Recompute intelligence for the customers a load touched.
+
+    Returns whether anything was recomputed.
+    """
     from app.services.attribution import process_new_order  # local: avoids a cycle
     from app.services.intelligence import refresh_customer, refresh_rfm
 
@@ -1187,7 +1205,7 @@ def _post_ingest(db: Session, entity_type: str, result: IngestResult) -> None:
                 refresh_customer(db, customer, commit=False)
         db.commit()
         refresh_rfm(db)
-        return
+        return True
 
     if entity_type == "orders" and result.created_order_ids:
         for order_id in result.created_order_ids:
@@ -1195,10 +1213,10 @@ def _post_ingest(db: Session, entity_type: str, result: IngestResult) -> None:
             if order is not None:
                 process_new_order(db, order)
         refresh_rfm(db)
-        return
+        return True
 
     if not result.affected_customer_ids:
-        return
+        return False
 
     for customer_id in result.affected_customer_ids:
         customer = db.get(Customer, customer_id)
@@ -1206,6 +1224,7 @@ def _post_ingest(db: Session, entity_type: str, result: IngestResult) -> None:
             refresh_customer(db, customer, commit=False)
     db.commit()
     refresh_rfm(db)
+    return True
 
 
 def error_report_csv(job: IngestionJob) -> str:
