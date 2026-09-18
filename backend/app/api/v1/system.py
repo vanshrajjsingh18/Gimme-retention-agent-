@@ -152,18 +152,25 @@ def seed_demo_data(
     }
 
 
-@router.post("/system/set-customer-consent", tags=["system"])
-def set_customer_consent(
+@router.post("/system/make-customers-contactable", tags=["system"])
+def make_customers_contactable(
+    verify_age: bool = True,
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> dict:
-    """Grant every customer consent on every channel, then re-evaluate.
+    """Grant every customer consent (and optionally verified age), then re-evaluate.
 
-    A blunt instrument, and deliberately the only one of its kind: it asserts a
-    consent the imported data did not carry, so the record it leaves behind is
-    an operator's decision rather than anything the customer did. The audit
-    entry is the point. The supported route is a customer file with the consent
-    columns filled in, which records what each person actually agreed to.
+    A blunt instrument, and deliberately the only one of its kind: it asserts
+    things the imported data did not carry, so what it leaves behind is an
+    operator's decision rather than anything a customer did or anybody checked.
+    The audit entry is the point. The supported route is a customer file with
+    the consent and age_verified columns filled in, which records what each
+    person actually agreed to and what was actually verified.
+
+    ``verify_age`` is separate because it is the heavier claim: consent is a
+    preference, while age verification is a licensing condition for alcohol
+    marketing. Asserting it here means asserting that age was genuinely checked
+    somewhere else for every customer in the database.
     """
     from app.services.intelligence import refresh_customer, refresh_rfm
     from app.services.segments import refresh_all_segments
@@ -173,15 +180,15 @@ def set_customer_consent(
     if total == 0:
         return {"status": "no_customers", "message": "No customers found to update."}
 
-    # Update all customers to have positive consent
-    db.execute(
-        update(Customer).values(
-            marketing_consent=True,
-            email_consent=True,
-            sms_consent=True,
-            whatsapp_consent=True,
-        )
-    )
+    consent_values = {
+        "marketing_consent": True,
+        "email_consent": True,
+        "sms_consent": True,
+        "whatsapp_consent": True,
+    }
+    if verify_age:
+        consent_values["age_verified"] = True
+    db.execute(update(Customer).values(**consent_values))
     db.commit()
 
     # Refresh customer intelligence for segmentation
@@ -201,14 +208,22 @@ def set_customer_consent(
             action="CUSTOMER_CONSENT_ENABLED",
             entity_type="system",
             entity_id="consent",
-            detail={"customers_updated": total},
+            detail={
+                "customers_updated": total,
+                "consent_granted": True,
+                # Recorded separately so the log shows which of the two claims
+                # was made. They carry very different weight.
+                "age_asserted_verified": verify_age,
+            },
         )
     )
     db.commit()
 
+    granted = "consent" if not verify_age else "consent and verified age"
     return {
         "status": "success",
-        "message": f"Set positive consent for {total} customers and recalculated segments.",
+        "message": f"Asserted {granted} for {total} customers and recalculated segments.",
         "customers_updated": total,
+        "age_verified": verify_age,
         "totals": summary(db),
     }

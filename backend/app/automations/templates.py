@@ -19,7 +19,16 @@ from sqlalchemy.orm import Session
 from app.core.enums import CampaignObjective
 from app.models.entities import BrandSettings, Customer
 
-PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+#: Two spellings of the same thing. ``{token}`` is what the seeded templates
+#: use; ``#token#`` is the convention in every other SMS tool, and so the one
+#: somebody writing copy in the composer reaches for first. Both resolve
+#: against the same context, and neither is the second-class spelling.
+PLACEHOLDER = re.compile(r"\{([a-z_]+)\}|#([a-z_]+)#")
+
+
+def _token(match: re.Match) -> str:
+    """The token name, whichever of the two spellings matched."""
+    return match.group(1) or match.group(2)
 
 #: Default copy per campaign objective, reused as the segment-specific split
 #: for cohort sends: a lapsed repeat buyer gets a reorder reminder, a one-time
@@ -111,17 +120,39 @@ def build_context(
     setting — there is no free text, so a rendered message cannot claim
     anything the business has not signed off.
     """
+    first_name = (customer.first_name or "there").strip() or "there"
+    # The favourites live on the metrics row the intelligence pass writes.
+    # Absent for a customer with no order history, which the fallbacks cover.
+    metrics = customer.metrics
+    brands = [b for b in (metrics.preferred_brands or []) if b] if metrics else []
+    categories = [c for c in (metrics.preferred_categories or []) if c] if metrics else []
+    products = (
+        [
+            p.get("product_name")
+            for p in (metrics.top_products or [])
+            if isinstance(p, dict) and p.get("product_name")
+        ]
+        if metrics
+        else []
+    )
+
     context = {
-        "first_name": (customer.first_name or "there").strip() or "there",
+        "name": first_name,
+        "first_name": first_name,
+        "last_name": (customer.last_name or "").strip(),
         "full_name": customer.full_name or "there",
         "city": customer.city or "your area",
         "company": brand.company_name or "GIMME",
         "website": brand.website or "",
+        "link": brand.website or "",
         "delivery_promise": brand.delivery_promise or "",
         "support_phone": brand.customer_service_phone or "",
         "support_email": brand.customer_service_email or "",
         "sign_off": sign_off(brand),
-        "usual_category": "usual",
+        "favourite_brand": brands[0] if brands else "",
+        "favourite_category": categories[0] if categories else "",
+        "favourite_product": products[0] if products else "",
+        "usual_category": categories[0] if categories else "usual",
         "promotion": "",
         "coupon_code": "",
         "usual_day": "",
@@ -132,10 +163,20 @@ def build_context(
 
 
 #: Fallbacks for tokens that would otherwise render as an empty gap mid-sentence.
+#: The favourites are the reason this matters most: a customer with no order
+#: history has none, and "$10 off " is a worse message than "$10 off your
+#: favourites".
 _EMPTY_FALLBACKS = {
     "website": "gimme",
+    "link": "gimme",
     "usual_category": "usual",
     "city": "your area",
+    "name": "there",
+    "first_name": "there",
+    "full_name": "there",
+    "favourite_brand": "your favourites",
+    "favourite_category": "your usual",
+    "favourite_product": "your usual order",
 }
 
 
@@ -146,7 +187,7 @@ def render(template: str, context: dict[str, str]) -> str:
     the compliance placeholder check instead of shipping a broken sentence.
     """
     def substitute(match: re.Match) -> str:
-        key = match.group(1)
+        key = _token(match)
         if key not in context:
             return match.group(0)
         value = context[key]
@@ -167,7 +208,37 @@ def tidy(text: str) -> str:
 
 def unresolved_tokens(text: str) -> list[str]:
     """Placeholders still present after rendering — never safe to send."""
-    return PLACEHOLDER.findall(text)
+    return [_token(m) for m in PLACEHOLDER.finditer(text)]
+
+
+#: The tokens copy may use, for the composer to list. Ordered as a person
+#: writing a message would reach for them.
+MERGE_TAGS: list[dict[str, str]] = [
+    {"token": "name", "label": "First name", "example": "Sarah"},
+    {"token": "full_name", "label": "Full name", "example": "Sarah Patel"},
+    {"token": "city", "label": "City", "example": "Auckland"},
+    {"token": "favourite_brand", "label": "Favourite brand", "example": "Steinlager"},
+    {"token": "favourite_category", "label": "Favourite category", "example": "Beer"},
+    {
+        "token": "favourite_product",
+        "label": "Most ordered product",
+        "example": "Steinlager Classic 12pk",
+    },
+    {"token": "link", "label": "Order link", "example": "gimmedelivery.co.nz"},
+    {"token": "company", "label": "Company name", "example": "GIMME"},
+    {"token": "delivery_promise", "label": "Delivery promise", "example": "in 45 minutes"},
+    {"token": "support_phone", "label": "Support phone", "example": "09 123 4567"},
+    {"token": "sign_off", "label": "Sign-off", "example": "Alex, Customer Care"},
+]
+
+
+def sample_context() -> dict[str, str]:
+    """The examples above as a context, for previewing copy with no customer.
+
+    A test send with nobody attached would otherwise show the raw tokens and
+    read as broken. Showing an obvious stand-in is what a preview is for.
+    """
+    return {tag["token"]: tag["example"] for tag in MERGE_TAGS}
 
 
 def get_brand(db: Session) -> BrandSettings:

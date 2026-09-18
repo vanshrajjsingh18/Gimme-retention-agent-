@@ -1224,6 +1224,74 @@ class TestTemplates:
         )
         assert body == "Hi Wiremu in Wellington."
 
+    def test_the_hash_spelling_of_a_token_resolves_too(
+        self, db, make_customer, bootstrapped
+    ):
+        """#name# is the convention in every other SMS tool, so copy written
+        in the composer reaches for it before it reaches for braces."""
+        from app.services.brand import get_brand_settings
+
+        customer = make_customer(first_name="Wiremu", city="Wellington")
+        body = render("Hi #name# in #city#.", build_context(customer, get_brand_settings(db)))
+        assert body == "Hi Wiremu in Wellington."
+
+    def test_both_spellings_mix_in_one_message(self, db, make_customer, bootstrapped):
+        from app.services.brand import get_brand_settings
+
+        customer = make_customer(first_name="Aroha")
+        body = render("Hi #name#, from {company}.", build_context(customer, get_brand_settings(db)))
+        assert body.startswith("Hi Aroha, from ")
+        assert "#" not in body and "{" not in body
+
+    def test_the_favourite_brand_comes_from_what_they_bought(
+        self, db, make_customer, bootstrapped
+    ):
+        from app.models.entities import CustomerMetrics
+        from app.services.brand import get_brand_settings
+
+        customer = make_customer(first_name="Mere")
+        db.add(
+            CustomerMetrics(
+                customer_id=customer.id,
+                preferred_brands=["Steinlager", "Tui"],
+                preferred_categories=["Beer"],
+                top_products=[{"product_name": "Steinlager Classic 12pk", "quantity": 4}],
+            )
+        )
+        db.commit()
+        db.refresh(customer)
+
+        body = render(
+            "Hi #name#, #favourite_brand# is back in stock — #favourite_product#.",
+            build_context(customer, get_brand_settings(db)),
+        )
+        assert body == (
+            "Hi Mere, Steinlager is back in stock — Steinlager Classic 12pk."
+        )
+
+    def test_a_customer_with_no_history_still_reads_as_a_sentence(
+        self, db, make_customer, bootstrapped
+    ):
+        """No orders means no favourite. "$10 off " is worse than a stand-in."""
+        from app.services.brand import get_brand_settings
+
+        customer = make_customer(first_name="Sam")
+        body = render(
+            "Hi #name#, $10 off #favourite_brand#.",
+            build_context(customer, get_brand_settings(db)),
+        )
+        assert body == "Hi Sam, $10 off your favourites."
+
+    def test_an_unknown_hash_token_is_still_left_visible(
+        self, db, make_customer, bootstrapped
+    ):
+        from app.automations.templates import unresolved_tokens
+        from app.services.brand import get_brand_settings
+
+        customer = make_customer()
+        body = render("Hi #name#, #mystery#.", build_context(customer, get_brand_settings(db)))
+        assert unresolved_tokens(body) == ["mystery"]
+
     def test_a_missing_first_name_reads_naturally(self, db, make_customer, bootstrapped):
         from app.services.brand import get_brand_settings
 

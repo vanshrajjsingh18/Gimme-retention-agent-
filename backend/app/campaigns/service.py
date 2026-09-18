@@ -14,6 +14,13 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.automations.templates import (
+    PLACEHOLDER,
+    build_context,
+    get_brand,
+    render,
+    sample_context,
+)
 from app.core.phone import normalize_nz_phone
 from app.compliance.engine import (
     ComplianceConfig,
@@ -335,6 +342,32 @@ def schedule_campaign(db: Session, campaign: Campaign, when: datetime) -> Campai
 # --------------------------------------------------------------------------
 # Sending
 # --------------------------------------------------------------------------
+def _fill(text: str, context: dict[str, str]) -> str:
+    """Render merge tags, leaving untemplated copy exactly as written.
+
+    Copy with no tokens in it skips the renderer entirely, so nothing
+    reformats a message nobody asked to have templated.
+    """
+    if not text or not PLACEHOLDER.search(text):
+        return text
+    return render(text, context)
+
+
+def personalise(
+    db: Session, campaign: Campaign, customer: Customer | None
+) -> tuple[str, str]:
+    """Fill a campaign's merge tags for one recipient.
+
+    Campaign copy is written once and sent to everybody, so its tokens are the
+    only thing that makes each message that person's. Sending the body as
+    stored delivered a literal "Hi #name#".
+    """
+    context = (
+        build_context(customer, get_brand(db)) if customer is not None else sample_context()
+    )
+    return _fill(campaign.subject or "", context), _fill(campaign.body or "", context)
+
+
 def send_test_message(
     db: Session,
     campaign: Campaign,
@@ -345,20 +378,21 @@ def send_test_message(
     """Send a single test message. Never touches campaign metrics."""
     channel = Channel(campaign.channel)
     adapter = get_adapter(db, channel)
-    subject, body = campaign.subject, campaign.body
+    customer = db.get(Customer, customer_id) if customer_id else None
+    # With nobody attached this fills the stand-in values, so a test send shows
+    # the shape of the real message rather than the raw tokens.
+    subject, body = personalise(db, campaign, customer)
 
-    if customer_id:
-        customer = db.get(Customer, customer_id)
-        if customer is not None:
-            generated = generate_message(
-                db,
-                customer,
-                channel=channel,
-                objective=campaign.objective,
-                campaign_name=campaign.name,
-                persist=False,
-            )
-            subject, body = generated.subject or subject, generated.body or body
+    if customer is not None:
+        generated = generate_message(
+            db,
+            customer,
+            channel=channel,
+            objective=campaign.objective,
+            campaign_name=campaign.name,
+            persist=False,
+        )
+        subject, body = generated.subject or subject, generated.body or body
 
     result = adapter.send_message(
         to=to, subject=subject, body=body, metadata={"is_test": True}
@@ -470,7 +504,7 @@ def run_campaign(
 
         stats["attempted"] += 1
 
-        subject, body = campaign.subject, campaign.body
+        subject, body = personalise(db, campaign, customer)
         message_row: Message | None = None
         if generate_per_customer:
             message_row = generate_message(

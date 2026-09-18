@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_write
+from app.automations.templates import MERGE_TAGS
 from app.campaigns.service import (
     CampaignError,
     approve_campaign,
@@ -77,6 +78,7 @@ def campaign_options(_: User = Depends(get_current_user)) -> dict:
             {"hours": 72, "label": "72 hours"},
             {"hours": 168, "label": "7 days"},
         ],
+        "merge_tags": MERGE_TAGS,
     }
 
 

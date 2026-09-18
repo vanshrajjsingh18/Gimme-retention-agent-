@@ -325,6 +325,17 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
             "whatsapp_consent (true/false) to reach these customers."
         )
 
+    if rows and "age_verified" not in rows[0] and settings.IMPORT_ASSUME_AGE_VERIFIED:
+        result.file_warnings.append(
+            "This file has no age_verified column, so every customer it creates "
+            "was recorded as age-verified. Nothing in the file establishes that. "
+            "Alcohol marketing to an unverified customer is a licensing problem, "
+            "so this is only safe if age was genuinely checked elsewhere for "
+            "everyone in the file. Add an age_verified column (true/false) to "
+            "load what was actually checked, or set "
+            "IMPORT_ASSUME_AGE_VERIFIED=false to stop assuming it."
+        )
+
     for index, row in enumerate(rows, start=1):
         try:
             external_id = require(row, "external_id")
@@ -410,13 +421,15 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
             if existing is None:
                 # Unstated only means "leave it alone" when there is something
                 # already there to leave, so a new customer needs a real value.
-                # Consent takes the deployment's default; age verification
-                # never does, because it is a legal gate rather than a
-                # preference and nothing in a file entitles anyone to assume it.
+                # Consent and age verification each take their own setting:
+                # they are different promises, and a deployment willing to
+                # assume one is not necessarily willing to assume the other.
                 new_values = {}
                 for key, value in values.items():
                     if value is None and key in CONSENT_COLUMNS:
                         value = settings.IMPORT_ASSUME_CONSENT
+                    elif value is None and key == "age_verified":
+                        value = settings.IMPORT_ASSUME_AGE_VERIFIED
                     elif value is None and key in FLAG_COLUMNS:
                         value = False
                     new_values[key] = value

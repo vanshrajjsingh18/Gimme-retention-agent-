@@ -26,6 +26,7 @@ export default function SettingsPage() {
     '/api/v1/system/status',
   );
   const [showSeed, setShowSeed] = useState(false);
+  const [showContactable, setShowContactable] = useState(false);
   const [seedCount, setSeedCount] = useState(1000);
 
   const recalc = useMutation(async () =>
@@ -37,6 +38,12 @@ export default function SettingsPage() {
   const seed = useMutation(async () =>
     api.post<{ totals: Record<string, number> }>(
       `/api/v1/system/seed-demo-data?customers=${seedCount}&reset=true&include_campaigns=true`,
+    ),
+  );
+
+  const contactable = useMutation(async () =>
+    api.post<{ customers_updated: number }>(
+      '/api/v1/system/make-customers-contactable?verify_age=true',
     ),
   );
 
@@ -169,6 +176,25 @@ export default function SettingsPage() {
           </div>
 
           <div>
+            <p className="text-sm font-medium text-slate-800">Make customers contactable</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Grants marketing consent on every channel and records every customer as
+              age-verified, for data that arrived without those columns. This asserts
+              things the import did not carry, so only use it when consent and age were
+              genuinely captured elsewhere. The audit log records who ran it.
+            </p>
+            <button
+              type="button"
+              className="btn-secondary mt-3"
+              disabled={contactable.loading}
+              onClick={() => setShowContactable(true)}
+            >
+              {contactable.loading && <Spinner className="h-4 w-4" />}
+              Make contactable
+            </button>
+          </div>
+
+          <div>
             <p className="text-sm font-medium text-slate-800">Regenerate demo data</p>
             <p className="mt-1 text-xs text-slate-500">
               Deletes all customer and transactional data and regenerates a fresh synthetic
@@ -193,6 +219,30 @@ export default function SettingsPage() {
       </Card>
 
       <AuditLogCard />
+
+      <ConfirmDialog
+        open={showContactable}
+        title="Grant consent and verified age to every customer?"
+        message={
+          'This records every customer as having consented to marketing on all channels ' +
+          'and as age-verified. Nothing in your imported data establishes either — you are ' +
+          'asserting both on their behalf, and alcohol marketing to an unverified customer ' +
+          'is a licensing problem. Only continue if consent and age were genuinely captured ' +
+          'somewhere else. This is written to the audit log against your account.'
+        }
+        confirmLabel="Yes, assert both"
+        onCancel={() => setShowContactable(false)}
+        onConfirm={async () => {
+          setShowContactable(false);
+          const result = await contactable.run();
+          if (result) {
+            notify(
+              `${formatNumber(result.customers_updated)} customers are now contactable.`,
+            );
+            refetch();
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={showSeed}

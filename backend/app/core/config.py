@@ -85,6 +85,16 @@ class Settings(BaseSettings):
     #: state consent honestly; a column that says "false" always wins either way.
     IMPORT_ASSUME_CONSENT: bool = True
 
+    #: Whether an absent age_verified column means the customer's age is
+    #: verified. Separate from consent on purpose: alcohol marketing to an
+    #: unverified customer is a licensing problem, not a preference, and the
+    #: compliance engine excludes every such recipient. Turning this on is an
+    #: operator asserting that age was checked elsewhere — at signup, at
+    #: checkout, or at the door — for everyone in the file. It writes that
+    #: assertion into the audit log, because nothing in the file itself
+    #: supports it. A column that says "false" still wins.
+    IMPORT_ASSUME_AGE_VERIFIED: bool = True
+
     # The address this deployment is reachable at from the public internet.
     # A provider webhook has to be configured against a real host, so the
     # dashboard shows this rather than whatever the browser happens to be

@@ -709,7 +709,8 @@ def test_a_file_that_states_consent_is_not_warned_about(client, auth_headers):
         },
         headers=auth_headers,
     )
-    assert response.json()["dry_run"]["file_warnings"] == []
+    warnings = " ".join(response.json()["dry_run"]["file_warnings"])
+    assert "consent column" not in warnings
 
 
 def test_an_update_that_omits_consent_leaves_it_alone(client, auth_headers, db):
@@ -776,13 +777,63 @@ def test_a_new_customer_the_file_said_nothing_about_takes_the_assumed_consent(
     assert customer.sms_consent is True
 
 
-def test_an_assumed_consent_is_not_an_assumed_age(client, auth_headers, db):
-    """Age verification is a legal gate, and no file omission grants it."""
+def test_age_verification_follows_its_own_setting(client, auth_headers, db):
+    """Consent is a preference; age verification is a licensing condition.
+
+    They are assumed separately so a deployment can take one and refuse the
+    other, and a file that omits age says so loudly either way.
+    """
+    response = client.post(
+        "/api/v1/uploads/preview",
+        data={"entity_type": "customers"},
+        files={
+            "file": (
+                "customers.csv",
+                b"external_id,email\nNOAGE-0,noage0@example.test\n",
+                "text/csv",
+            )
+        },
+        headers=auth_headers,
+    )
+    warnings = " ".join(response.json()["dry_run"]["file_warnings"])
+    assert "no age_verified column" in warnings
+    assert "licensing problem" in warnings
+
     _upload(client, auth_headers, "external_id,email\nNOAGE-1,noage@example.test\n")
+    db.expire_all()
+    assert (
+        db.execute(select(Customer).where(Customer.external_id == "NOAGE-1"))
+        .scalar_one()
+        .age_verified
+        is True
+    )
+
+
+def test_age_is_not_verified_when_that_is_not_assumed(
+    client, auth_headers, db, monkeypatch
+):
+    monkeypatch.setattr(settings, "IMPORT_ASSUME_AGE_VERIFIED", False)
+    _upload(client, auth_headers, "external_id,email\nNOAGE-2,noage2@example.test\n")
 
     db.expire_all()
     customer = db.execute(
-        select(Customer).where(Customer.external_id == "NOAGE-1")
+        select(Customer).where(Customer.external_id == "NOAGE-2")
+    ).scalar_one()
+    assert customer.age_verified is False
+
+
+def test_a_stated_age_is_never_overwritten_by_the_assumption(
+    client, auth_headers, db
+):
+    _upload(
+        client,
+        auth_headers,
+        "external_id,email,age_verified\nNOAGE-3,noage3@example.test,false\n",
+    )
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "NOAGE-3")
     ).scalar_one()
     assert customer.age_verified is False
 
