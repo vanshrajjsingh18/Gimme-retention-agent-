@@ -76,6 +76,15 @@ class Settings(BaseSettings):
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024
     INBOX_DIR: str = str(REPO_ROOT / "data" / "inbox")
 
+    #: What an absent consent column means for a customer the file is creating.
+    #: Order exports generally carry no consent at all, so importing them as
+    #: "consented to nothing" loads a list no campaign can ever send to. On,
+    #: the import takes consent as granted and writes a consent event saying
+    #: the import assumed it — the record has to show this came from a setting
+    #: rather than from the customer. Set it false for a deployment whose files
+    #: state consent honestly; a column that says "false" always wins either way.
+    IMPORT_ASSUME_CONSENT: bool = True
+
     # The address this deployment is reachable at from the public internet.
     # A provider webhook has to be configured against a real host, so the
     # dashboard shows this rather than whatever the browser happens to be

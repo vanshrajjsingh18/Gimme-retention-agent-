@@ -17,6 +17,7 @@ from typing import Any, Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.phone import normalize_nz_phone
 from app.core.enums import Channel, ConsentType, EventType, IngestionStatus, OrderStatus
 from app.models.base import utcnow
@@ -60,6 +61,15 @@ CONSENT_COLUMNS = ("marketing_consent", "email_consent", "sms_consent", "whatsap
 #: Customer columns that are true/false rather than text, and so cannot use the
 #: empty string to mean "not supplied".
 FLAG_COLUMNS = ("age_verified", *CONSENT_COLUMNS)
+
+#: The consent event each flag stands for, for writing down where an assumed
+#: consent came from.
+CONSENT_TYPE_BY_COLUMN = {
+    "marketing_consent": ConsentType.MARKETING.value,
+    "email_consent": ConsentType.EMAIL.value,
+    "sms_consent": ConsentType.SMS.value,
+    "whatsapp_consent": ConsentType.WHATSAPP.value,
+}
 
 #: external_id of the worked example shipped in the downloadable template.
 #: Skipped on import so a template filled in beneath the example does not turn
@@ -273,6 +283,28 @@ def _safe_row_preview(row: dict) -> dict:
 # --------------------------------------------------------------------------
 # Entity ingestion
 # --------------------------------------------------------------------------
+def _record_assumed_consent(db: Session, customer: Customer, values: dict) -> None:
+    """Write down that a consent came from the import, not from the customer.
+
+    The flag on its own cannot tell an opt-in apart from an assumption, and an
+    assumption that leaves no trace is indistinguishable from a claim the
+    customer made. If a consent is ever questioned, this row is the answer —
+    including when the answer is "nobody asked them".
+    """
+    for column, consent_type in CONSENT_TYPE_BY_COLUMN.items():
+        if values.get(column) is not None:
+            continue  # the file stated it; that is its own record
+        db.add(
+            ConsentEvent(
+                customer_id=customer.id,
+                consent_type=consent_type,
+                granted=True,
+                source="import_assumed",
+                occurred_at=utcnow(),
+            )
+        )
+
+
 def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = True) -> IngestResult:
     result = IngestResult("customers")
     result.total_rows = len(rows)
@@ -281,7 +313,13 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
     # Every row from a CSV carries the same keys, so the first one is the file.
     if rows and not any(column in rows[0] for column in CONSENT_COLUMNS):
         result.file_warnings.append(
-            "This file has no consent columns, so every customer in it will be "
+            "This file has no consent columns, so every customer it creates was "
+            "taken as consented on every channel, against a consent event "
+            "recording that the import assumed it rather than the customer "
+            "giving it. Add marketing_consent, email_consent, sms_consent and "
+            "whatsapp_consent (true/false) to load what each one actually agreed to."
+            if settings.IMPORT_ASSUME_CONSENT
+            else "This file has no consent columns, so every customer in it will be "
             "stored as having consented to nothing and will be skipped by every "
             "campaign. Add marketing_consent, email_consent, sms_consent and "
             "whatsapp_consent (true/false) to reach these customers."
@@ -370,16 +408,23 @@ def ingest_customers(db: Session, rows: list[dict], *, update_existing: bool = T
                 result.normalized += 1
 
             if existing is None:
-                # A new customer the file said nothing about has consented to
-                # nothing. Unstated only means "leave it alone" when there is
-                # something already there to leave.
-                new_values = {
-                    key: (False if key in FLAG_COLUMNS and value is None else value)
-                    for key, value in values.items()
-                }
+                # Unstated only means "leave it alone" when there is something
+                # already there to leave, so a new customer needs a real value.
+                # Consent takes the deployment's default; age verification
+                # never does, because it is a legal gate rather than a
+                # preference and nothing in a file entitles anyone to assume it.
+                new_values = {}
+                for key, value in values.items():
+                    if value is None and key in CONSENT_COLUMNS:
+                        value = settings.IMPORT_ASSUME_CONSENT
+                    elif value is None and key in FLAG_COLUMNS:
+                        value = False
+                    new_values[key] = value
                 customer = Customer(external_id=external_id, **new_values)
                 db.add(customer)
                 db.flush()
+                if settings.IMPORT_ASSUME_CONSENT:
+                    _record_assumed_consent(db, customer, values)
                 result.accepted += 1
                 record_customer_event(
                     db,

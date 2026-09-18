@@ -7,7 +7,15 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from app.models.entities import Customer, CustomerSegment, Order, OrderItem, Segment
+from app.core.config import settings
+from app.models.entities import (
+    ConsentEvent,
+    Customer,
+    CustomerSegment,
+    Order,
+    OrderItem,
+    Segment,
+)
 
 NOW = datetime.utcnow()
 
@@ -655,9 +663,7 @@ def test_the_template_example_is_never_imported_as_a_customer(client, auth_heade
     )
 
 
-def test_a_file_with_no_consent_columns_says_so_before_anything_is_written(
-    client, auth_headers
-):
+def _consent_warning(client, auth_headers) -> str:
     response = client.post(
         "/api/v1/uploads/preview",
         data={"entity_type": "customers"},
@@ -670,7 +676,22 @@ def test_a_file_with_no_consent_columns_says_so_before_anything_is_written(
         },
         headers=auth_headers,
     )
-    warnings = " ".join(response.json()["dry_run"]["file_warnings"])
+    return " ".join(response.json()["dry_run"]["file_warnings"])
+
+
+def test_a_file_with_no_consent_columns_says_what_was_assumed(client, auth_headers):
+    """A file that states nothing still has to say what the import decided."""
+    warnings = _consent_warning(client, auth_headers)
+    assert "no consent columns" in warnings
+    assert "consented on every channel" in warnings
+    assert "the import assumed it" in warnings
+
+
+def test_a_file_with_no_consent_columns_says_so_when_nothing_is_assumed(
+    client, auth_headers, monkeypatch
+):
+    monkeypatch.setattr(settings, "IMPORT_ASSUME_CONSENT", False)
+    warnings = _consent_warning(client, auth_headers)
     assert "no consent columns" in warnings
     assert "skipped by every campaign" in warnings
 
@@ -739,15 +760,90 @@ def test_an_update_that_says_false_does_revoke_consent(client, auth_headers, db)
     assert customer.marketing_consent is False
 
 
-def test_a_new_customer_the_file_said_nothing_about_has_consented_to_nothing(
+def test_a_new_customer_the_file_said_nothing_about_takes_the_assumed_consent(
     client, auth_headers, db
 ):
-    """Unstated means "leave it alone" only when there is something to leave."""
+    """An order export carries no consent, and a list nobody can send to is
+    not a useful thing to have imported. The deployment's default decides."""
     _upload(client, auth_headers, "external_id,email\nSILENT-1,silent@example.test\n")
 
     db.expire_all()
     customer = db.execute(
         select(Customer).where(Customer.external_id == "SILENT-1")
+    ).scalar_one()
+    assert customer.marketing_consent is True
+    assert customer.email_consent is True
+    assert customer.sms_consent is True
+
+
+def test_an_assumed_consent_is_not_an_assumed_age(client, auth_headers, db):
+    """Age verification is a legal gate, and no file omission grants it."""
+    _upload(client, auth_headers, "external_id,email\nNOAGE-1,noage@example.test\n")
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "NOAGE-1")
+    ).scalar_one()
+    assert customer.age_verified is False
+
+
+def test_an_assumed_consent_records_that_it_was_assumed(client, auth_headers, db):
+    """The flag cannot tell an opt-in from an assumption; the event can."""
+    _upload(client, auth_headers, "external_id,email\nPROV-1,prov@example.test\n")
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "PROV-1")
+    ).scalar_one()
+    events = (
+        db.execute(
+            select(ConsentEvent).where(ConsentEvent.customer_id == customer.id)
+        )
+        .scalars()
+        .all()
+    )
+    assert {e.consent_type for e in events} == {"MARKETING", "EMAIL", "SMS", "WHATSAPP"}
+    assert all(e.source == "import_assumed" and e.granted for e in events)
+
+
+def test_a_stated_consent_is_never_overwritten_by_the_assumption(
+    client, auth_headers, db
+):
+    """The assumption fills silence. It does not argue with the file."""
+    _upload(
+        client,
+        auth_headers,
+        "external_id,email,sms_consent\nSTATED-1,stated@example.test,false\n",
+    )
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "STATED-1")
+    ).scalar_one()
+    assert customer.sms_consent is False
+    assert customer.marketing_consent is True, "the columns it did omit still fill"
+    sms_events = (
+        db.execute(
+            select(ConsentEvent).where(
+                ConsentEvent.customer_id == customer.id,
+                ConsentEvent.consent_type == "SMS",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert sms_events == [], "the file stated SMS, so there is nothing to assume"
+
+
+def test_a_new_customer_consents_to_nothing_when_nothing_is_assumed(
+    client, auth_headers, db, monkeypatch
+):
+    monkeypatch.setattr(settings, "IMPORT_ASSUME_CONSENT", False)
+    _upload(client, auth_headers, "external_id,email\nSILENT-2,silent2@example.test\n")
+
+    db.expire_all()
+    customer = db.execute(
+        select(Customer).where(Customer.external_id == "SILENT-2")
     ).scalar_one()
     assert customer.marketing_consent is False
     assert customer.email_consent is False

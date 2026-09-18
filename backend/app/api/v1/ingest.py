@@ -99,7 +99,11 @@ def ingest_customers(
     db: Session = Depends(get_db),
     api_key: ApiKey = Depends(get_api_key),
 ) -> IngestResponse:
-    rows = [p.model_dump(mode="json") for p in payload]
+    # exclude_unset so a consent field the caller never sent arrives absent
+    # rather than as the schema's False. Otherwise the same customer means
+    # something different over the API than in a CSV: the file leaves consent
+    # to the import's default, and the POST silently states a refusal.
+    rows = [p.model_dump(mode="json", exclude_unset=True) for p in payload]
     return _run_api_ingest(db, api_key, request, "customers", rows)
 
 
