@@ -1,8 +1,9 @@
 # PROJECT STATUS — GIMME Retention Engine
 
-**Last updated:** 2026-08-22
-**State:** MVP complete and verified from a clean install, plus campaign
-automations (recurring sequences, behavioural nudges, cohort bulk sends).
+**Last updated:** 2026-09-20
+**State:** MVP and campaign automations complete and verified from a clean
+install, plus deployment, the live TNZ path, Smart Reorder, GIMME data import,
+and campaign copy that is personalised and chosen rather than assumed.
 
 ## Product goal
 
@@ -14,13 +15,36 @@ campaigns with full event tracking and revenue attribution.
 
 ## Current phase
 
-Complete. All seven MVP milestones verified, including the closed retention
-loop and a fresh-install run following the README from an empty tree.
+Getting GIMME's own data and copy through the system, with the live TNZ path
+ready for credentials.
 
-The campaign-automation phase is also complete: three recurring campaign types
-built on the existing TNZ integration, sharing one send pipeline so consent,
-quiet hours, deduplication, delivery tracking and dry-run behave identically
-across all three.
+Earlier phases are complete: all seven MVP milestones verified including the
+closed retention loop and a fresh-install run from an empty tree, and three
+recurring campaign types sharing one send pipeline so consent, quiet hours,
+deduplication, delivery tracking and dry-run behave identically across all
+three.
+
+Since then, and in commit order:
+
+- **Deployment** — one Railway service on Postgres serving the built dashboard
+  from the API, with the traps closed (no silent SQLite in production, no
+  compiler needed at build). `docs/deploy-railway.md` records what the deploy
+  proved and what it did not.
+- **The live TNZ path** — credentials enterable before going live, a mock
+  connection test that cannot pass for a provider, TNZ's documented request
+  shape, its refusal reasons carried into the error shown, and a go-live
+  readiness panel computed at runtime (`docs/tnz-go-live.md`).
+- **Ordering habits and Smart Reorder** — each customer's order time learned to
+  the minute on a circular clock and read on their own clock, exposed on the
+  customer API and given a page of its own, with a ledger recording what the
+  prediction engine promised and whether it happened.
+- **Importing GIMME's export** — one file for customers, orders and lines; brand
+  and category read out of it so preferences compute; segment membership
+  recomputed when a file lands; and an import that will not silently load a
+  list nobody can contact.
+- **Copy** — merge tags in campaign sends, age verification assumable by
+  configuration where a file omits the column, and `copy_mode` on the campaign
+  deciding whether the approved body is the message or a per-recipient draft.
 
 ## Completed features
 
@@ -97,6 +121,14 @@ resolved by phone number when the provider does not echo our message id back.
 columns, so `app/core/schema.py` adds declared columns additively and backfills
 their defaults. An existing local database survives a model change.
 
+**Campaign copy** — a campaign says who writes it. `copy_mode` is `WRITTEN`,
+where the approved body is the message and merge tags fill in each recipient's
+own details, or `DRAFTED`, where every recipient's message is written at send
+time and the body is the fallback. It is stored on the campaign, not passed at
+send time, because it decides what the approver is approving; changing it
+withdraws approval as editing the body does. Either way, the copy preview shows
+three real recipients' messages, produced by the same calls the send makes.
+
 **Frontend** — 18 pages, shared UI primitives with loading/empty/error states,
 consistent colour semantics, responsive down to 390px. The automation detail
 page's centrepiece is the dry run: who would receive what, in NZ local time,
@@ -106,15 +138,14 @@ and who would not with the reason in plain English.
 
 | Suite | Count | Command |
 | --- | --- | --- |
-| Backend | 583 | `make test-backend` |
-| Frontend | 54 | `make test-frontend` |
-| Browser (Playwright) | 16 | `make test-e2e` |
-| **Total** | **653** | `make test` |
+| Backend | 747 | `make test-backend` |
+| Frontend | 63 | `make test-frontend` |
+| Browser (Playwright) | 17 | `make test-e2e` |
+| **Total** | **827** | `make test` |
 
 ## Known bugs
 
-None open. Twenty-eight defects were found and fixed across both phases; all
-are recorded in `ERROR_LOG.md` with what found them and what prevents a
+None open. Every defect found so far is recorded in `ERROR_LOG.md` with what found them and what prevents a
 recurrence, along with one entry that turned out not to be a product defect at
 all — a database corrupted by my own hand-written cleanup — kept because the
 misdiagnosis it caused is the useful part.
@@ -154,11 +185,19 @@ Each has working code that could not be exercised here:
 
 ## Last successful verification
 
-Both servers started against the seeded database, all three automation types
-exercised end to end on real data (cohort send 35 sent / 73 skipped with
-reasons; sequence advanced customers through Day 0 → Day 7; nudge enrolled 249
-customers with per-customer order patterns), then 583 backend, 54 frontend and
-16 Playwright tests run green with zero console errors.
+2026-09-20, from an empty tree: `make setup`, `make seed-small`, both servers
+started, then a written campaign created, approved and sent in mock mode — the
+five recipients received the approved copy with their own name and usual
+product in it, which is the behaviour the `copy_mode` work exists to produce.
+An existing database was upgraded in place: the new column was added and the
+ten campaigns already in it marked `DRAFTED`, which is how they had been
+sending. 747 backend, 63 frontend and 17 Playwright tests green, with zero
+console errors.
+
+Earlier, on the automation phase: all three automation types exercised end to
+end on real data (cohort send 35 sent / 73 skipped with reasons; sequence
+advanced customers through Day 0 → Day 7; nudge enrolled 249 customers with
+per-customer order patterns).
 
 ## Open configuration item
 
@@ -169,6 +208,9 @@ worse. Set these in Brand settings before using `{sign_off}` in any template.
 
 ## Next task
 
-None outstanding. Recommended next steps are in `FINAL_REPORT.md` —
-principally exercising the live adapters once credentials exist, and building
-the images once a Docker daemon is available.
+Nothing is half-built. The largest remaining gap is not code: the TNZ go-live
+blockers are all credential-shaped (auth token, sender, webhook secret, and a
+connection test that actually reaches TNZ), and the readiness panel lists them
+in the order they have to be done. Beyond that, `FINAL_REPORT.md` holds the
+standing recommendations — exercising the live adapters once credentials exist,
+and building the Docker images once a daemon is available.

@@ -141,6 +141,20 @@ independently refuses one whose stored compliance report has blocking
 findings. Editing a campaign's copy or audience clears its approval and
 returns it to `DRAFT`.
 
+### What was approved has to be what is sent
+
+A campaign's `copy_mode` is part of its content for this purpose, so changing
+it clears the approval too. It has to be: with drafting decided at send time
+instead, an approved campaign's body could be replaced by generated copy on
+its way out, and the approval would have covered words nobody had read.
+
+Where copy is drafted per recipient there is no such text to approve, and the
+report says so rather than implying otherwise — `COPY_DRAFTED_PER_RECIPIENT`
+is recorded as an INFO finding stating that the checked body is the fallback
+and that every draft is checked again as it is written. The copy preview
+(`GET /campaigns/{id}/copy-preview`) exists so that approval can rest on real
+drafts for real recipients rather than on a description of them.
+
 Message-level approval is separate: a message failing validation cannot be
 approved, and editing an approved message revokes that approval.
 

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 from app.core.enums import (
     AutomationStatus,
+    CampaignCopyMode,
     CampaignObjective,
     CampaignStatus,
     Channel,
@@ -521,6 +522,13 @@ class Campaign(Base, TimestampMixin):
 
     subject: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    #: Whether the body above is the message or a fallback the model replaces
+    #: per recipient. Stored on the campaign rather than passed at send time,
+    #: because it decides what the approver is approving.
+    copy_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=CampaignCopyMode.WRITTEN.value
+    )
 
     audience_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     compliance_result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)

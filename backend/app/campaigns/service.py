@@ -30,6 +30,7 @@ from app.compliance.engine import (
     check_recipient,
 )
 from app.core.enums import (
+    CampaignCopyMode,
     CampaignStatus,
     Channel,
     EventType,
@@ -268,6 +269,7 @@ def run_compliance_check(
         config=config,
         approved_by_human=campaign.status
         in (CampaignStatus.APPROVED.value, CampaignStatus.SCHEDULED.value),
+        drafted=drafts_per_recipient(campaign),
     )
     campaign.compliance_result = report.as_dict()
     if campaign.status in (
@@ -314,6 +316,7 @@ def approve_campaign(db: Session, campaign: Campaign, *, user_id: int) -> Campai
         segment_rule=segment.rule_definition if segment else None,
         config=config,
         approved_by_human=True,
+        drafted=drafts_per_recipient(campaign),
     )
     campaign.compliance_result = report.as_dict()
     if not report.passed:
@@ -368,6 +371,74 @@ def personalise(
     return _fill(campaign.subject or "", context), _fill(campaign.body or "", context)
 
 
+def drafts_per_recipient(campaign: Campaign) -> bool:
+    """Whether this campaign's copy is written by the model at send time.
+
+    The single place the question is answered. It used to be a parameter on
+    the send call, defaulting to True, which meant the dashboard's send button
+    and the scheduler both drafted whatever the campaign said — including
+    campaigns whose whole body was hand-written copy somebody had approved.
+    """
+    return campaign.copy_mode == CampaignCopyMode.DRAFTED.value
+
+
+def preview_copy(db: Session, campaign: Campaign, *, count: int = 3) -> dict:
+    """What the first few eligible recipients would actually receive.
+
+    Approval is a person vouching for a message. For written copy the body on
+    the campaign is that message, and this shows it with one real customer's
+    details filled in. For drafted copy there is no such text to read — every
+    recipient gets different words, written at send time — so approving
+    without this is approving a decision to send something unseen. Both go
+    through the same calls the send does, so a preview cannot drift from it.
+
+    Nothing is persisted: drafts are generated with ``persist=False`` and no
+    message row, event or metric is written.
+    """
+    count = max(1, min(count, 5))
+    audience = preview_audience(db, campaign, sample_size=count)
+    drafted = drafts_per_recipient(campaign)
+    samples: list[dict] = []
+
+    for entry in audience["sample_recipients"]:
+        customer = db.get(Customer, entry["id"])
+        if customer is None:
+            continue
+        subject, body = personalise(db, campaign, customer)
+        failed = False
+        if drafted:
+            message = generate_message(
+                db,
+                customer,
+                channel=Channel(campaign.channel),
+                objective=campaign.objective,
+                campaign_name=campaign.name,
+                persist=False,
+            )
+            failed = message.status == MessageStatus.VALIDATION_FAILED.value
+            if not failed:
+                subject, body = message.subject or subject, message.body or body
+        samples.append(
+            {
+                "customer_id": customer.id,
+                "full_name": customer.full_name,
+                "subject": subject,
+                "body": body,
+                # A draft that fails grounding is never sent, and the send
+                # records the recipient as failed rather than falling back —
+                # so the preview says so here rather than showing the body
+                # that would have been used had it passed.
+                "validation_failed": failed,
+            }
+        )
+
+    return {
+        "copy_mode": campaign.copy_mode,
+        "eligible_count": audience["eligible_count"],
+        "samples": samples,
+    }
+
+
 def send_test_message(
     db: Session,
     campaign: Campaign,
@@ -383,7 +454,10 @@ def send_test_message(
     # the shape of the real message rather than the raw tokens.
     subject, body = personalise(db, campaign, customer)
 
-    if customer is not None:
+    # A test send exists to show what the real send will do. Drafting here for
+    # a campaign that sends its own copy showed the operator a message the
+    # campaign would never send — and hid the one it would.
+    if customer is not None and drafts_per_recipient(campaign):
         generated = generate_message(
             db,
             customer,
@@ -425,6 +499,9 @@ def send_test_message(
         "error": result.error,
         "subject": subject,
         "body": body,
+        # Which of the two the operator is reading. A drafted test is one
+        # sample of many different messages; a written one is the message.
+        "copy_mode": campaign.copy_mode,
     }
 
 
@@ -432,16 +509,21 @@ def run_campaign(
     db: Session,
     campaign: Campaign,
     *,
-    generate_per_customer: bool = True,
     simulate_engagement: bool = True,
     limit: int | None = None,
     now: datetime | None = None,
 ) -> dict:
     """Execute an approved campaign.
 
+    Whether copy is drafted per recipient comes from the campaign, not from
+    the caller. As a send-time argument it defaulted to drafting, so every
+    route into here — the dashboard, the scheduler — replaced approved copy
+    with a generated message and nothing said so.
+
     In MOCK MODE nothing leaves the machine: messages and events are recorded
     locally and tagged as simulated.
     """
+    generate_per_customer = drafts_per_recipient(campaign)
     now = now or utcnow()
     if campaign.status not in SENDABLE_STATUSES:
         raise CampaignError(
@@ -622,6 +704,7 @@ def run_campaign(
     stats["campaign_status"] = campaign.status
     stats["is_mock"] = isinstance(adapter, BaseMockAdapter)
     stats["provider"] = adapter.provider
+    stats["copy_mode"] = campaign.copy_mode
     return stats
 
 

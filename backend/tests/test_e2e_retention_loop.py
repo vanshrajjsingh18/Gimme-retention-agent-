@@ -419,6 +419,10 @@ class TestRetentionLoop:
                 "channel": "EMAIL",
                 "segment_id": scenario["state"]["segment_id"],
                 "attribution_window_hours": 72,
+                # Drafted per recipient, so this run exercises generation. The
+                # campaign carries that choice: it decides what an approved
+                # campaign sends, so it cannot be a flag on the send call.
+                "copy_mode": "DRAFTED",
                 "subject": "It has been a while",
                 "body": (
                     "Hi there,\n\nIt has been a while since your last order. We are still "
@@ -432,6 +436,7 @@ class TestRetentionLoop:
         campaign = response.json()
         scenario["state"]["campaign_id"] = campaign["id"]
         assert campaign["status"] == "DRAFT"
+        assert campaign["copy_mode"] == "DRAFTED"
 
     def test_12_audience_preview_enforces_consent_age_and_suppression(self, scenario):
         client, headers = scenario["client"], scenario["headers"]
@@ -540,12 +545,13 @@ class TestRetentionLoop:
 
         stats = client.post(
             f"/api/v1/campaigns/{campaign_id}/run",
-            json={"generate_per_customer": True, "simulate_engagement": True},
+            json={"simulate_engagement": True},
             headers=headers,
         )
         assert stats.status_code == 200, stats.text
         result = stats.json()
         assert result["is_mock"] is True
+        assert result["copy_mode"] == "DRAFTED"
         assert result["sent"] >= 1
         assert result["campaign_status"] == "COMPLETED"
 

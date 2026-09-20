@@ -19,7 +19,14 @@ import {
   notify,
 } from '../components/ui';
 import { useMutation, useQuery } from '../hooks/useApi';
-import type { AudiencePreview, Campaign, ComplianceReport } from '../types';
+import type {
+  AudiencePreview,
+  Campaign,
+  ComplianceReport,
+  CopyMode,
+  CopyModeOption,
+  CopyPreview,
+} from '../types';
 import { formatCurrency, formatDateTime, formatNumber, formatPercent, humanize } from '../utils/format';
 import { CAMPAIGN_STATUS_BADGE, LIFECYCLE_BADGE } from '../utils/theme';
 
@@ -49,12 +56,13 @@ export default function CampaignDetailPage() {
     id ? `/api/v1/campaigns/${id}` : null,
   );
 
-  const { data: options } = useQuery<{ merge_tags?: MergeTag[] }>(
+  const { data: options } = useQuery<{ merge_tags?: MergeTag[]; copy_modes?: CopyModeOption[] }>(
     '/api/v1/campaigns/options',
   );
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [copyMode, setCopyMode] = useState<CopyMode>('WRITTEN');
   const [dirty, setDirty] = useState(false);
   const [showTest, setShowTest] = useState(false);
   const [showRun, setShowRun] = useState(false);
@@ -64,12 +72,13 @@ export default function CampaignDetailPage() {
     if (campaign) {
       setSubject(campaign.subject);
       setBody(campaign.body);
+      setCopyMode(campaign.copy_mode);
       setDirty(false);
     }
   }, [campaign?.id, campaign?.updated_at]);
 
   const save = useMutation(async () =>
-    api.patch<Campaign>(`/api/v1/campaigns/${id}`, { subject, body }),
+    api.patch<Campaign>(`/api/v1/campaigns/${id}`, { subject, body, copy_mode: copyMode }),
   );
   const loadAudience = useMutation(async () => {
     const result = await api.get<AudiencePreview>(`/api/v1/campaigns/${id}/audience`);
@@ -84,9 +93,10 @@ export default function CampaignDetailPage() {
   const snapshot = useMutation(async () =>
     api.post<AudiencePreview>(`/api/v1/campaigns/${id}/audience/snapshot`),
   );
+  // Whether copy is drafted per recipient is the campaign's, not this
+  // button's: it decides what an approved campaign sends.
   const run = useMutation(async () =>
     api.post<Record<string, number | string | boolean>>(`/api/v1/campaigns/${id}/run`, {
-      generate_per_customer: true,
       simulate_engagement: true,
     }),
   );
@@ -137,7 +147,7 @@ export default function CampaignDetailPage() {
         title={campaign.name}
         description={`${humanize(campaign.objective)} · ${campaign.channel} · ${
           campaign.segment_name ?? 'All customers'
-        }`}
+        } · ${campaign.copy_mode === 'DRAFTED' ? 'AI-drafted per recipient' : 'Written copy'}`}
         actions={
           <>
             {campaign.status !== 'COMPLETED' && campaign.status !== 'CANCELLED' && (
@@ -239,9 +249,11 @@ export default function CampaignDetailPage() {
           <Card
             title="Message"
             description={
-              editable
-                ? 'This is the campaign-level copy. Per-customer personalisation is generated at send time.'
-                : 'Locked: the campaign has been approved or sent.'
+              !editable
+                ? 'Locked: the campaign has been approved or sent.'
+                : copyMode === 'DRAFTED'
+                  ? 'Each recipient gets their own message, written at send time. This copy is the fallback if a draft fails.'
+                  : 'Everyone gets this message, with merge tags filled in from their own details.'
             }
             actions={
               editable ? (
@@ -263,6 +275,41 @@ export default function CampaignDetailPage() {
               ) : undefined
             }
           >
+            <fieldset className="mb-4">
+              <legend className="label mb-1.5">Who writes the copy</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(options?.copy_modes ?? []).map((mode) => (
+                  <label
+                    key={mode.value}
+                    className={`flex cursor-pointer gap-2.5 rounded-lg border px-3 py-2.5 ${
+                      copyMode === mode.value
+                        ? 'border-brand-400 bg-brand-50/60 ring-1 ring-brand-300'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    } ${editable ? '' : 'cursor-not-allowed opacity-60'}`}
+                  >
+                    <input
+                      type="radio"
+                      name="copy-mode"
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-brand-600"
+                      value={mode.value}
+                      checked={copyMode === mode.value}
+                      disabled={!editable}
+                      onChange={() => {
+                        setCopyMode(mode.value);
+                        setDirty(true);
+                      }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-slate-800">{mode.label}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        {mode.description}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
             {campaign.channel === 'EMAIL' && (
               <div className="mb-3">
                 <label className="label" htmlFor="campaign-subject">
@@ -281,7 +328,7 @@ export default function CampaignDetailPage() {
               </div>
             )}
             <label className="label" htmlFor="campaign-body">
-              Body
+              {copyMode === 'DRAFTED' ? 'Fallback body' : 'Body'}
             </label>
             <textarea
               id="campaign-body"
@@ -293,7 +340,10 @@ export default function CampaignDetailPage() {
               }}
               disabled={!editable}
             />
-            {editable && (options?.merge_tags?.length ?? 0) > 0 && (
+            {/* Merge tags fill in a written message. In drafted mode the whole
+                body is replaced per recipient, so offering them here would be
+                promising personalisation this campaign does differently. */}
+            {editable && copyMode === 'WRITTEN' && (options?.merge_tags?.length ?? 0) > 0 && (
               <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                 <p className="text-xs font-medium text-slate-700">
                   Personalise it
@@ -331,6 +381,13 @@ export default function CampaignDetailPage() {
               </p>
             )}
           </Card>
+
+          {/* A preview answers "what will they get". Once a campaign has sent,
+              the recipients table below answers "what did they get", which is
+              the better record — and the audience has moved on anyway. */}
+          {!isSent && (
+            <CopyPreviewCard campaignId={campaign.id} copyMode={campaign.copy_mode} />
+          )}
 
           <Card
             title="Compliance"
@@ -620,9 +677,15 @@ export default function CampaignDetailPage() {
       <ConfirmDialog
         open={showRun}
         title="Run this campaign?"
-        message={`This will generate and send a personalised message to each of the ${formatNumber(
-          audience?.eligible_count ?? 0,
-        )} eligible recipients. Eligibility is re-checked for every customer at send time.`}
+        message={
+          campaign.copy_mode === 'DRAFTED'
+            ? `This will write and send a different message to each of the ${formatNumber(
+                audience?.eligible_count ?? 0,
+              )} eligible recipients. Eligibility is re-checked for every customer at send time.`
+            : `This will send the approved copy to each of the ${formatNumber(
+                audience?.eligible_count ?? 0,
+              )} eligible recipients, with merge tags filled in from their own details. Eligibility is re-checked for every customer at send time.`
+        }
         confirmLabel="Run campaign"
         busy={run.loading}
         onCancel={() => setShowRun(false)}
@@ -640,6 +703,96 @@ export default function CampaignDetailPage() {
         }}
       />
     </>
+  );
+}
+
+/** What real recipients would receive, read before anybody approves it.
+ *
+ * For written copy this is the message with one customer's details filled in.
+ * For drafted copy there is no such text to read on the page — every
+ * recipient gets different words — so without this an approver is vouching
+ * for something they have never seen.
+ */
+function CopyPreviewCard({ campaignId, copyMode }: { campaignId: number; copyMode: CopyMode }) {
+  const [open, setOpen] = useState(false);
+  const { data, loading, error, refetch } = useQuery<CopyPreview>(
+    open ? `/api/v1/campaigns/${campaignId}/copy-preview?count=3` : null,
+    [campaignId, copyMode],
+  );
+
+  return (
+    <Card
+      title="What recipients will get"
+      description={
+        copyMode === 'DRAFTED'
+          ? 'Three real customers, drafted the same way the send does. Nothing is sent or saved.'
+          : 'The copy above, with three real customers’ own details filled in.'
+      }
+      actions={
+        <button
+          type="button"
+          className="btn-secondary px-2.5 py-1 text-xs"
+          onClick={() => (open ? refetch() : setOpen(true))}
+          disabled={loading}
+        >
+          {loading && <Spinner className="h-4 w-4" />}
+          {open ? 'Refresh' : 'Preview'}
+        </button>
+      }
+    >
+      {!open ? (
+        <EmptyState
+          title="Not previewed yet"
+          description={
+            copyMode === 'DRAFTED'
+              ? 'Each message is written at send time, so the copy above is not what goes out. Preview before approving.'
+              : 'See the message as a recipient reads it, with merge tags filled in.'
+          }
+        />
+      ) : error ? (
+        <ErrorState message={error} onRetry={refetch} />
+      ) : loading || !data ? (
+        <LoadingState label="Preparing…" />
+      ) : data.samples.length === 0 ? (
+        <EmptyState
+          title="Nobody is eligible"
+          description="There is no recipient to preview for. Check the audience."
+        />
+      ) : (
+        <ul className="space-y-3">
+          {data.samples.map((sample) => (
+            <li
+              key={sample.customer_id}
+              className="rounded-lg border border-slate-200 px-3 py-2.5"
+            >
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <Link
+                  to={`/customers/${sample.customer_id}`}
+                  className="truncate text-xs font-medium text-brand-700 hover:text-brand-800"
+                >
+                  {sample.full_name}
+                </Link>
+                {sample.validation_failed && (
+                  <Badge className="bg-red-50 text-red-700 ring-red-200">Would not send</Badge>
+                )}
+              </div>
+              {sample.subject && (
+                <p className="mb-1 text-xs font-medium text-slate-700">{sample.subject}</p>
+              )}
+              <p className="whitespace-pre-wrap text-xs leading-relaxed text-slate-600">
+                {sample.body}
+              </p>
+              {sample.validation_failed && (
+                <p className="mt-1.5 text-xs text-red-700">
+                  This draft failed the grounding check. At send time this recipient is skipped
+                  rather than sent the fallback.
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

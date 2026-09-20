@@ -81,6 +81,21 @@ class CampaignObjective(StrEnum):
     FEEDBACK = "FEEDBACK"
 
 
+class CampaignCopyMode(StrEnum):
+    """Where a campaign's copy comes from.
+
+    WRITTEN — the body on the campaign is the message. Merge tags fill in each
+    recipient's own details, and what a person approved is what is sent.
+
+    DRAFTED — the body is a fallback, and each recipient's message is written
+    at send time by the model from that customer's verified facts. Approval
+    covers the decision to draft, not the words, so the campaign has to say so.
+    """
+
+    WRITTEN = "WRITTEN"
+    DRAFTED = "DRAFTED"
+
+
 class RecipientStatus(StrEnum):
     ELIGIBLE = "ELIGIBLE"
     EXCLUDED_NO_CONSENT = "EXCLUDED_NO_CONSENT"

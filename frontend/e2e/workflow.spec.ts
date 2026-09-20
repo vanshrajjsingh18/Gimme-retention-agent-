@@ -240,6 +240,28 @@ test.describe('Campaigns', () => {
 
     expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
   });
+
+  test('a draft campaign says who writes its copy, and previews it', async ({ page }) => {
+    const { errors } = guard(page);
+    await login(page);
+
+    await page.goto('/campaigns');
+    await page.locator('tbody tr').first().getByRole('link').first().click();
+
+    // The choice is on the campaign, where approval can see it — not a flag
+    // on the send button, which is how approved copy used to be replaced by
+    // a generated message with nothing on screen saying so.
+    const written = page.getByRole('radio', { name: /send the copy i write/i });
+    await expect(written).toBeVisible();
+    await expect(page.getByRole('radio', { name: /draft each message with ai/i })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Preview', exact: true }).click();
+    // A real recipient, and the message as they would read it.
+    await expect(page.getByRole('heading', { name: 'What recipients will get' })).toBeVisible();
+    await expect(page.locator('main').getByRole('link', { name: /\w/ }).first()).toBeVisible();
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
 });
 
 test.describe('Automations', () => {
@@ -433,6 +455,11 @@ test.describe('Data import', () => {
 
   async function previewCsv(page: Page) {
     await page.goto('/data');
+    // The page lands on the one-file format, which wants order columns this
+    // file does not have. A customers-only file is a deliberate choice now,
+    // so make it the way a person would — this spec was asserting on a
+    // preview the page had stopped producing.
+    await page.getByRole('button', { name: 'Customers', exact: true }).click();
     await page.setInputFiles('input[type="file"]', {
       name: 'e2e-import.csv',
       mimeType: 'text/csv',

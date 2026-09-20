@@ -944,3 +944,54 @@ and the route-auth test failed until it was added to the intentionally-public
 list with a justification. It is legitimately public — the login page has to
 load before anyone can authenticate — but the safeguard made that a decision
 rather than an oversight.
+
+---
+
+## 2026-09-20 — The campaign send ignored the copy somebody approved
+
+**Found by:** Writing a campaign the way the composer invites you to — "Kia ora
+#name#, your usual #favourite_product# is one tap away" — approving it, and
+reading what the five recipients actually received.
+
+**Failure:** None of them got it. Every message was a model-drafted one about
+days since their last order. The merge tags shipped the commit before and were
+unreachable from the dashboard, and, worse, approval was meaningless: a person
+vouched for one message and the system sent another.
+
+Drafting was a parameter on the send call, `generate_per_customer`, defaulting
+to `True`. The dashboard hardcoded `true` in its run request, and the scheduler
+called `run_campaign(db, campaign)` and took the default. So both routes into a
+send replaced the approved body with generated copy, and the only way to get
+the written copy sent was to call the API by hand with the flag off — which
+nothing did.
+
+The same page said both things at once. The Message card read "Per-customer
+personalisation is generated at send time", and the panel directly beneath it
+said each merge tag "is replaced with that customer's own detail when the
+message goes out". Both were describing the same body. Only one could be true.
+
+A test send hid it rather than exposing it: with a customer attached it always
+generated, whatever the campaign would do. The one screen for checking your own
+copy before sending showed a message the campaign would never send.
+
+**Fix:** `campaigns.copy_mode` — WRITTEN or DRAFTED — decided on the campaign,
+where the approver can see it. `run_campaign` reads it instead of taking a
+flag; the send-time parameter is gone, and a caller still passing it gets a 400
+saying where the setting moved rather than having it ignored. The test send
+follows the same value, changing the mode withdraws approval as any other
+content change does, and the compliance report records
+`COPY_DRAFTED_PER_RECIPIENT` so the approval record cannot imply somebody
+approved words a model had not yet written. A copy preview renders three real
+recipients through the same calls the send makes, so drafted copy can be read
+before it is approved rather than after it is sent.
+
+Campaigns that already existed are marked DRAFTED once, when the column
+appears, because that is what they have been doing; the alternative is an
+approved campaign quietly changing what it sends on an upgrade.
+
+**Preventive action:** Tests assert the written copy is what lands, that the
+scheduler path (which has no caller to pass a flag) honours the campaign, that
+a test send shows what the send will do in both modes, that the old flag is
+refused rather than ignored, and that previewing writes nothing. The general
+shape, twice now in this codebase: a setting that decides what customers
+receive must live on the thing being approved, not on the call that sends it.

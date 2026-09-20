@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.campaigns.service import CampaignError, run_campaign
-from app.core.enums import CampaignStatus, Channel, RecipientStatus
+from app.core.enums import CampaignCopyMode, CampaignStatus, Channel, RecipientStatus
 from app.core.security import api_keys_match, hash_api_key, hash_password, verify_password
 from app.models.entities import ApiKey, Campaign, CampaignRecipient, Customer, Message, User
 from app.services.optout import apply_global_opt_out
@@ -356,7 +356,7 @@ def test_campaign_cannot_send_without_approval(db, sendable_campaign):
     db.commit()
 
     with pytest.raises(CampaignError, match="approved"):
-        run_campaign(db, campaign, generate_per_customer=False, simulate_engagement=False)
+        run_campaign(db, campaign, simulate_engagement=False)
 
 
 def test_campaign_cannot_send_with_failing_compliance(db, sendable_campaign):
@@ -369,7 +369,7 @@ def test_campaign_cannot_send_with_failing_compliance(db, sendable_campaign):
     db.commit()
 
     with pytest.raises(CampaignError, match="compliance"):
-        run_campaign(db, campaign, generate_per_customer=False, simulate_engagement=False)
+        run_campaign(db, campaign, simulate_engagement=False)
 
 
 def test_consent_withdrawn_after_approval_is_still_honoured(db, sendable_campaign):
@@ -378,7 +378,7 @@ def test_consent_withdrawn_after_approval_is_still_honoured(db, sendable_campaig
     customer.marketing_consent = False
     db.commit()
 
-    stats = run_campaign(db, campaign, generate_per_customer=False, simulate_engagement=False)
+    stats = run_campaign(db, campaign, simulate_engagement=False)
     assert stats["sent"] == 0
     assert stats["skipped_ineligible"] == 1
 
@@ -393,7 +393,7 @@ def test_suppression_after_approval_is_still_honoured(db, sendable_campaign):
     customer.is_suppressed = True
     db.commit()
 
-    stats = run_campaign(db, campaign, generate_per_customer=False, simulate_engagement=False)
+    stats = run_campaign(db, campaign, simulate_engagement=False)
     assert stats["sent"] == 0
     recipient = db.execute(
         select(CampaignRecipient).where(CampaignRecipient.campaign_id == campaign.id)
@@ -406,7 +406,7 @@ def test_age_verification_revoked_after_approval_is_still_honoured(db, sendable_
     customer.age_verified = False
     db.commit()
 
-    stats = run_campaign(db, campaign, generate_per_customer=False, simulate_engagement=False)
+    stats = run_campaign(db, campaign, simulate_engagement=False)
     assert stats["sent"] == 0
     recipient = db.execute(
         select(CampaignRecipient).where(CampaignRecipient.campaign_id == campaign.id)
@@ -431,7 +431,9 @@ def test_message_failing_validation_is_never_sent(db, sendable_campaign, monkeyp
     monkeypatch.setattr("app.campaigns.service.generate_message", poisoned)
 
     campaign, _ = sendable_campaign
-    stats = run_campaign(db, campaign, generate_per_customer=True, simulate_engagement=False)
+    campaign.copy_mode = CampaignCopyMode.DRAFTED.value
+    db.commit()
+    stats = run_campaign(db, campaign, simulate_engagement=False)
 
     assert stats["sent"] == 0
     assert stats["generation_failed"] == 1

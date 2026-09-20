@@ -270,3 +270,59 @@ draft; blocking edits on approved automations entirely.
 the alternative is a gate that can be walked around by editing after the fact.
 Versioning would be better still and is the natural next step if approvals
 become frequent enough to be a nuisance.
+
+
+---
+
+## 2026-09-20 — Who writes a campaign's copy is the campaign's, not the send's
+
+**Decision:** `campaigns.copy_mode` holds WRITTEN or DRAFTED. `run_campaign`
+reads it; the `generate_per_customer` send-time parameter is removed, and a
+request still carrying it is refused with a message saying where the setting
+went. Changing the mode withdraws approval, exactly as changing the body does.
+
+**Reason:** Approval is a person vouching for a specific message going to a
+specific group of people. While drafting was a send-time flag defaulting to
+true, the words that were approved and the words that were sent had no
+necessary relationship: the dashboard passed `true` on every run and the
+scheduler took the default, so approved copy was replaced by a generated
+message on both paths, and nothing on screen said so.
+
+Storing it also makes the two honest ways to write a campaign nameable, which
+is what lets the UI stop contradicting itself — merge tags belong to written
+copy and are offered only there, and the body is labelled "Fallback body" when
+it is one.
+
+**Alternatives considered:** Keeping the flag but defaulting it to false —
+which fixes the accident and not the design, since anything calling the API
+could still send something other than what was approved. Having drafted copy
+require its own approval per recipient, which is unworkable for a send of any
+size and is what the grounding validator and compliance re-check exist to
+handle instead.
+
+**Tradeoffs:** Choosing is now part of writing a campaign, where before there
+was a default nobody saw. Existing campaigns are marked DRAFTED once, when the
+column appears, so an upgrade cannot change what an approved campaign sends —
+at the cost of a one-off backfill that a stricter reading would call a
+migration.
+
+---
+
+## 2026-09-20 — Drafted copy is previewed against real recipients, not described
+
+**Decision:** `GET /campaigns/{id}/copy-preview` renders the first few eligible
+recipients' messages through the same calls the send makes — merge tags filled
+for written copy, a real draft for drafted copy — and persists nothing. The
+campaign page shows it before approval, and hides it once the campaign has
+sent.
+
+**Reason:** For a drafted campaign there is no text on the page that is the
+message, so approving one is approving something unseen. A preview produced by
+the same code path is the only kind that cannot drift from what will be sent;
+anything else is a description of an intention.
+
+**Tradeoffs:** Previewing a drafted campaign runs the model for each sample,
+which costs real tokens against a live provider. Capped at five, generated with
+`persist=False`, and only when somebody asks. A draft that fails grounding is
+shown as "would not send" rather than as the fallback, because that is what the
+send does with it.

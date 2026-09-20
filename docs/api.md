@@ -204,7 +204,7 @@ re-approved.
 
 | Method | Path                                          | Purpose                               |
 | ------ | --------------------------------------------- | ------------------------------------- |
-| GET    | `/api/v1/campaigns/options`                   | Objectives, channels, statuses        |
+| GET    | `/api/v1/campaigns/options`                   | Objectives, channels, statuses, merge tags, copy modes |
 | GET    | `/api/v1/campaigns`                           | List                                  |
 | POST   | `/api/v1/campaigns`                           | Create a draft                        |
 | GET    | `/api/v1/campaigns/{id}`                      | Detail with rolled-up metrics         |
@@ -212,6 +212,7 @@ re-approved.
 | GET    | `/api/v1/campaigns/{id}/audience`             | Eligible / excluded breakdown         |
 | POST   | `/api/v1/campaigns/{id}/audience/snapshot`    | Materialise recipients                |
 | GET    | `/api/v1/campaigns/{id}/recipients`           | Recipient list with exclusion reasons |
+| GET    | `/api/v1/campaigns/{id}/copy-preview`         | What real recipients would receive    |
 | POST   | `/api/v1/campaigns/{id}/compliance-check`     | Run and store the compliance report   |
 | POST   | `/api/v1/campaigns/{id}/submit`               | Submit for approval                   |
 | POST   | `/api/v1/campaigns/{id}/approve`              | Human approval                        |
@@ -220,6 +221,42 @@ re-approved.
 | POST   | `/api/v1/campaigns/{id}/run`                  | Execute                               |
 | POST   | `/api/v1/campaigns/{id}/pause`                | Pause                                 |
 | POST   | `/api/v1/campaigns/{id}/cancel`               | Cancel                                |
+
+### Who writes the copy
+
+A campaign carries `copy_mode`, and it decides what is sent:
+
+- **`WRITTEN`** (the default) — the body is the message. Merge tags such as
+  `#name#` and `#favourite_product#` are filled from each recipient's own
+  record, so what was approved is what goes out.
+- **`DRAFTED`** — each recipient's message is written at send time from their
+  verified facts, and the body is the fallback used when a draft fails. Every
+  draft passes the same grounding and compliance checks as hand-written copy.
+
+It lives on the campaign rather than on the send call because it decides what
+the person approving is approving. Changing it resets the campaign to draft and
+clears the approval, the same as editing the body. `POST /run` no longer accepts
+`generate_per_customer`; a request carrying it is refused with a `400` naming
+`copy_mode`, rather than the flag being ignored.
+
+`GET /campaigns/{id}/copy-preview?count=3` returns what real recipients would
+receive, produced by the same calls the send makes and persisting nothing:
+
+```json
+{
+  "copy_mode": "DRAFTED",
+  "eligible_count": 48,
+  "samples": [
+    { "customer_id": 91, "full_name": "Kiri Zhang", "subject": "",
+      "body": "Hi Kiri, it's been 142 days since we last saw an order…",
+      "validation_failed": false }
+  ]
+}
+```
+
+`validation_failed` marks a draft that fails grounding. At send time that
+recipient is skipped rather than sent the fallback, which is why the preview
+shows it as such rather than showing the fallback.
 
 ### Sending is gated three ways
 

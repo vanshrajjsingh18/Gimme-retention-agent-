@@ -13,6 +13,7 @@ from app.campaigns.service import (
     cancel_campaign,
     pause_campaign,
     preview_audience,
+    preview_copy,
     run_campaign,
     run_compliance_check,
     schedule_campaign,
@@ -21,7 +22,7 @@ from app.campaigns.service import (
     submit_for_approval,
 )
 from app.core.database import get_db
-from app.core.enums import CampaignObjective, CampaignStatus, Channel
+from app.core.enums import CampaignCopyMode, CampaignObjective, CampaignStatus, Channel
 from app.models.entities import (
     AuditLog,
     Automation,
@@ -79,6 +80,25 @@ def campaign_options(_: User = Depends(get_current_user)) -> dict:
             {"hours": 168, "label": "7 days"},
         ],
         "merge_tags": MERGE_TAGS,
+        "copy_modes": [
+            {
+                "value": CampaignCopyMode.WRITTEN.value,
+                "label": "Send the copy I write",
+                "description": (
+                    "Everyone gets the message below, with merge tags filled in from "
+                    "their own details. What you approve is what goes out."
+                ),
+            },
+            {
+                "value": CampaignCopyMode.DRAFTED.value,
+                "label": "Draft each message with AI",
+                "description": (
+                    "Each recipient gets their own message, written at send time from "
+                    "their verified order history. The copy below is only the fallback "
+                    "if a draft fails, so preview before approving."
+                ),
+            },
+        ],
     }
 
 
@@ -179,8 +199,10 @@ def update_campaign(
         setattr(campaign, key, value.value if hasattr(value, "value") else value)
 
     # Any content or audience change invalidates the previous approval and
-    # compliance result.
-    if changes.keys() & {"subject", "body", "segment_id", "channel", "objective"}:
+    # compliance result. copy_mode counts as content: it decides whether the
+    # approved body is the message or a fallback, so switching it after
+    # approval would change what everybody receives without re-approval.
+    if changes.keys() & {"subject", "body", "segment_id", "channel", "objective", "copy_mode"}:
         campaign.status = CampaignStatus.DRAFT.value
         campaign.compliance_result = {}
         campaign.approved_by_id = None
@@ -212,6 +234,27 @@ def campaign_audience(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     audience.pop("_decisions", None)
     return audience
+
+
+@router.get("/campaigns/{campaign_id}/copy-preview", tags=["campaigns"])
+def copy_preview(
+    campaign_id: int,
+    count: int = Query(default=3, ge=1, le=5),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_write),
+) -> dict:
+    """What real recipients would receive, before anybody approves it.
+
+    Nothing is persisted, no metric moves and no message leaves the machine —
+    but a drafted campaign calls the model once per sample, which against a
+    live provider costs real money. That is not a read, so it takes the write
+    role rather than the viewer one.
+    """
+    campaign = _get(db, campaign_id)
+    try:
+        return preview_copy(db, campaign, count=count)
+    except CampaignError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/campaigns/{campaign_id}/audience/snapshot", tags=["campaigns"])
@@ -371,11 +414,21 @@ def run(
 ) -> dict:
     """Execute an approved campaign."""
     campaign = _get(db, campaign_id)
+    if payload.generate_per_customer is not None:
+        # Silently ignoring it would be the same defect in reverse: a caller
+        # asking for one thing and getting another without being told.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "generate_per_customer is no longer accepted at send time — it decided "
+                "what an approved campaign sent, so it now lives on the campaign as "
+                "copy_mode (WRITTEN or DRAFTED). Set it there and send again."
+            ),
+        )
     try:
         stats = run_campaign(
             db,
             campaign,
-            generate_per_customer=payload.generate_per_customer,
             simulate_engagement=payload.simulate_engagement,
             limit=payload.limit,
         )

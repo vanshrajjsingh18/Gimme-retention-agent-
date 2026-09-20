@@ -85,7 +85,7 @@ def _sent_message(db, campaign, customer) -> Message:
 
 def test_a_send_fills_the_tags_from_the_recipient(db, templated_campaign):
     campaign, customer = templated_campaign
-    run_campaign(db, campaign, generate_per_customer=False, simulate_engagement=False)
+    run_campaign(db, campaign, simulate_engagement=False)
 
     message = _sent_message(db, campaign, customer)
     assert "Hi Wiremu, Steinlager is back." in message.body
@@ -95,7 +95,7 @@ def test_a_send_fills_the_tags_from_the_recipient(db, templated_campaign):
 
 def test_the_subject_is_filled_as_well_as_the_body(db, templated_campaign):
     campaign, customer = templated_campaign
-    run_campaign(db, campaign, generate_per_customer=False, simulate_engagement=False)
+    run_campaign(db, campaign, simulate_engagement=False)
 
     assert _sent_message(db, campaign, customer).subject == "A note for Wiremu"
 
@@ -107,7 +107,7 @@ def test_copy_with_no_tags_is_delivered_exactly_as_written(db, templated_campaig
     campaign.body = "Hi there,  just checking in."
     db.commit()
 
-    run_campaign(db, campaign, generate_per_customer=False, simulate_engagement=False)
+    run_campaign(db, campaign, simulate_engagement=False)
     assert _sent_message(db, campaign, customer).body == "Hi there,  just checking in."
 
 

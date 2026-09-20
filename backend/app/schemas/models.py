@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.core.enums import (
     AutomationKind,
+    CampaignCopyMode,
     CampaignObjective,
     CampaignStatus,
     Channel,
@@ -459,6 +460,9 @@ class CampaignCreate(BaseModel):
     attribution_window_hours: int = Field(default=72, ge=1, le=720)
     subject: str = ""
     body: str = ""
+    #: New campaigns send the copy that was approved. Drafting per recipient
+    #: is a deliberate choice, made here, not a default nobody was shown.
+    copy_mode: CampaignCopyMode = CampaignCopyMode.WRITTEN
 
 
 class CampaignUpdate(BaseModel):
@@ -472,6 +476,7 @@ class CampaignUpdate(BaseModel):
     attribution_window_hours: int | None = Field(default=None, ge=1, le=720)
     subject: str | None = None
     body: str | None = None
+    copy_mode: CampaignCopyMode | None = None
 
 
 class CampaignOut(BaseModel):
@@ -490,6 +495,7 @@ class CampaignOut(BaseModel):
     attribution_window_hours: int
     subject: str
     body: str
+    copy_mode: str
     audience_snapshot: dict
     compliance_result: dict
     approved_at: datetime | None
@@ -514,9 +520,13 @@ class ScheduleRequest(BaseModel):
 
 
 class RunCampaignRequest(BaseModel):
-    generate_per_customer: bool = True
     simulate_engagement: bool = True
     limit: int | None = Field(default=None, ge=1, le=10000)
+    #: Was how a caller asked for drafted copy, and it defaulted to True, so
+    #: every send drafted whatever the campaign said. It now lives on the
+    #: campaign as `copy_mode`. Still accepted so an old caller is told that
+    #: rather than having the flag quietly ignored.
+    generate_per_customer: bool | None = None
 
 
 # --------------------------------------------------------------------------

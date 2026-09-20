@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import Base, engine
-from app.core.enums import UserRole
+from app.core.enums import CampaignCopyMode, UserRole
 from app.core.schema import reconcile_schema
 from app.core.security import hash_password
 from app.integrations.registry import ensure_default_integrations
@@ -32,6 +32,32 @@ def create_tables() -> None:
             "Schema reconciled: added %s",
             ", ".join(f"{table}.{column}" for table, columns in added.items() for column in columns),
         )
+    _preserve_existing_copy_mode(added)
+
+
+def _preserve_existing_copy_mode(added: dict[str, list[str]]) -> None:
+    """Keep campaigns that predate `copy_mode` sending what they sent before.
+
+    New campaigns default to WRITTEN, because approving one body and sending
+    another is the defect this column exists to fix. Campaigns that already
+    exist have no such expectation to honour: every send they ever made was
+    drafted per recipient, some of them are approved right now, and quietly
+    switching an approved campaign to send its stored body instead would be
+    the same class of surprise pointing the other way. So they are marked for
+    what they already do, once, at the moment the column appears.
+    """
+    if "copy_mode" not in added.get("campaigns", []):
+        return
+    with engine.begin() as connection:
+        result = connection.execute(
+            text("UPDATE campaigns SET copy_mode = :mode"),
+            {"mode": CampaignCopyMode.DRAFTED.value},
+        )
+    logger.info(
+        "Marked %s existing campaign(s) as %s, which is how they have been sending.",
+        result.rowcount,
+        CampaignCopyMode.DRAFTED.value,
+    )
 
 
 def ensure_admin_user(db: Session) -> User:

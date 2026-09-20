@@ -320,6 +320,29 @@ export interface SegmentPreview {
   }[];
 }
 
+export type CopyMode = 'WRITTEN' | 'DRAFTED';
+
+export interface CopyModeOption {
+  value: CopyMode;
+  label: string;
+  description: string;
+}
+
+/** One recipient's message exactly as they would receive it. */
+export interface CopySample {
+  customer_id: number;
+  full_name: string;
+  subject: string;
+  body: string;
+  validation_failed: boolean;
+}
+
+export interface CopyPreview {
+  copy_mode: CopyMode;
+  eligible_count: number;
+  samples: CopySample[];
+}
+
 export interface Campaign {
   id: number;
   name: string;
@@ -334,6 +357,8 @@ export interface Campaign {
   attribution_window_hours: number;
   subject: string;
   body: string;
+  /** WRITTEN: the body below is the message. DRAFTED: it is only the fallback. */
+  copy_mode: CopyMode;
   audience_snapshot: AudiencePreview | Record<string, never>;
   compliance_result: ComplianceReport | Record<string, never>;
   approved_at: string | null;

@@ -688,8 +688,17 @@ def check_campaign(
     segment_rule: dict | None,
     config: ComplianceConfig,
     approved_by_human: bool = False,
+    drafted: bool = False,
 ) -> ComplianceReport:
-    """Full campaign-level compliance report."""
+    """Full campaign-level compliance report.
+
+    `drafted` says the body below is a fallback rather than the message: each
+    recipient's copy is written at send time. It does not change what is
+    checked — the fallback has to be compliant too, and every draft is checked
+    again as it is written — but the report is the record of what a person
+    approved, and it would be a misleading record if it did not say that the
+    text in it is not the text that will be sent.
+    """
     findings: list[ComplianceFinding] = []
     combined = f"{subject}\n{body}" if channel == Channel.EMAIL else body
 
@@ -720,6 +729,18 @@ def check_campaign(
             ComplianceFinding(
                 "REQUIRES_HUMAN_APPROVAL",
                 "Campaign has not been approved by a human reviewer.",
+                ComplianceSeverity.INFO,
+                False,
+            )
+        )
+
+    if drafted:
+        findings.append(
+            ComplianceFinding(
+                "COPY_DRAFTED_PER_RECIPIENT",
+                "Each recipient's message is written at send time and is not the copy "
+                "checked here, which is used only if a draft fails. Every draft is "
+                "checked against these same rules before it sends.",
                 ComplianceSeverity.INFO,
                 False,
             )

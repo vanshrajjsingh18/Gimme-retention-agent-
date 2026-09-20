@@ -23,6 +23,8 @@ with the reason.
 - [x] Consent and suppression enforcement
 - [x] Compliance blocking
 - [x] Campaign approval required before sending
+- [x] Campaign copy is either written once with merge tags or drafted per
+      recipient, chosen on the campaign and honoured by every send path
 - [x] Mock campaign sending
 - [x] Event tracking
 - [x] Reactivation detection
@@ -54,11 +56,11 @@ with the reason.
 
 ## P2 — Quality and reliability
 
-- [x] Backend test suite (306 tests)
-- [x] Frontend unit tests (35 tests)
-- [x] Browser end-to-end tests (10 tests, failing on any console error)
+- [x] Backend test suite (747 tests)
+- [x] Frontend unit tests (63 tests)
+- [x] Browser end-to-end tests (17 tests, failing on any console error)
 - [x] Security review, codified as 29 tests
-- [x] AST check proving all 99 routes carry an auth dependency
+- [x] AST check proving all 129 routes carry an auth dependency
 - [x] Fresh-install verification from an empty tree
 - [x] Journey engine
 - [x] Journey UI (builder and execution log)
