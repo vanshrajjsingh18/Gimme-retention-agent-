@@ -135,16 +135,32 @@ for router in (
 # built bundle from here means one service, one domain, one certificate, and
 # no CORS configuration that can be got wrong. Mounted last so it can claim
 # "/" without shadowing any API route registered above.
-_dist = Path(settings.FRONTEND_DIST)
-if (_dist / "index.html").is_file():
 
-    #: Prefixes the dashboard must never answer for. Without this the catch-all
-    #: swallows them: a GET on a POST-only endpoint, or a mistyped path, would
-    #: return index.html with a 200, and the caller would be left parsing HTML
-    #: as JSON with no clue why.
-    API_PATHS = ("api/", "health", "docs", "redoc", "openapi.json")
+#: Prefixes the dashboard must never answer for. Without this the catch-all
+#: swallows them: a GET on a POST-only endpoint, or a mistyped path, would
+#: return index.html with a 200, and the caller would be left parsing HTML
+#: as JSON with no clue why.
+API_PATHS = ("api/", "health", "docs", "redoc", "openapi.json")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+
+def mount_dashboard(target: FastAPI, dist: Path) -> bool:
+    """Serve the built dashboard from `dist`, if it has been built.
+
+    A function rather than a block at import time so the behaviour can be
+    exercised against a directory a test controls. Registered inline, it could
+    only ever be tested on a machine where `npm run build` had already been
+    run — so the test asserting an API path never comes back as a page passed
+    or failed on whether the tree happened to be built, which is no test at
+    all. Returns whether the dashboard was mounted.
+    """
+    if not (dist / "index.html").is_file():
+        logger.info(
+            "No built dashboard at %s — API only. Run 'npm run build' in frontend/ to bundle it.",
+            dist,
+        )
+        return False
+
+    @target.get("/{full_path:path}", include_in_schema=False)
     def serve_dashboard(full_path: str) -> FileResponse:
         """Serve the built dashboard, falling back to index.html.
 
@@ -160,14 +176,13 @@ if (_dist / "index.html").is_file():
                 status_code=404,
                 detail=f"No GET endpoint at /{full_path}. See /docs for the API.",
             )
-        candidate = (_dist / full_path).resolve()
-        if full_path and candidate.is_file() and _dist.resolve() in candidate.parents:
+        candidate = (dist / full_path).resolve()
+        if full_path and candidate.is_file() and dist.resolve() in candidate.parents:
             return FileResponse(candidate)
-        return FileResponse(_dist / "index.html")
+        return FileResponse(dist / "index.html")
 
-    logger.info("Serving the dashboard from %s", _dist)
-else:
-    logger.info(
-        "No built dashboard at %s — API only. Run 'npm run build' in frontend/ to bundle it.",
-        _dist,
-    )
+    logger.info("Serving the dashboard from %s", dist)
+    return True
+
+
+mount_dashboard(app, Path(settings.FRONTEND_DIST))

@@ -11,6 +11,7 @@ import pathlib
 from datetime import datetime, timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.campaigns.service import CampaignError, run_campaign
@@ -657,7 +658,27 @@ def test_mock_mode_still_accepts_webhooks_without_a_secret(client, seeded):
 # ==========================================================================
 # Serving the dashboard alongside the API
 # ==========================================================================
-def test_the_dashboard_catch_all_never_answers_for_an_api_path(client, tmp_path, monkeypatch):
+def _dashboard_client(dist) -> TestClient:
+    """An app serving a dashboard out of `dist`, with the real API under it.
+
+    The dashboard is only mounted when a build exists, so asserting against
+    the running app tested nothing on a tree where `npm run build` had never
+    been run — which is every fresh clone. This builds the one condition the
+    behaviour needs instead of waiting for it to be true by luck.
+    """
+    from fastapi import FastAPI
+
+    from app.api.v1 import auth
+    from app.main import API_PREFIX, mount_dashboard
+
+    (dist / "index.html").write_text("<!doctype html><title>Dashboard</title>")
+    served = FastAPI()
+    served.include_router(auth.router, prefix=API_PREFIX)
+    assert mount_dashboard(served, dist) is True
+    return TestClient(served)
+
+
+def test_the_dashboard_catch_all_never_answers_for_an_api_path(client, tmp_path):
     """An API path must fail as JSON, not succeed as a web page.
 
     Serving the built dashboard from the API means a catch-all route on "/".
@@ -665,18 +686,35 @@ def test_the_dashboard_catch_all_never_answers_for_an_api_path(client, tmp_path,
     POST-only endpoint — or a typo — returns index.html with a 200, and the
     caller is left parsing HTML as JSON with no clue why.
     """
-    response = client.get("/api/v1/definitely-not-a-route")
+    dashboard = _dashboard_client(tmp_path)
+
+    # A client-side route is a page: that is what the catch-all is for.
+    page = dashboard.get("/customers/42")
+    assert page.status_code == 200
+    assert "text/html" in page.headers["content-type"]
+
+    response = dashboard.get("/api/v1/definitely-not-a-route")
     assert response.status_code == 404
     assert response.headers["content-type"].startswith("application/json")
 
     # A route that exists for POST must not come back as a page either.
-    assert client.get("/api/v1/auth/login").status_code == 404
-    assert "text/html" not in client.get("/api/v1/auth/login").headers["content-type"]
+    login = dashboard.get("/api/v1/auth/login")
+    assert login.status_code == 404
+    assert "text/html" not in login.headers["content-type"]
 
-    # /health stays a real API response.
+    # /health stays a real API response, on the app that actually serves it.
     health = client.get("/health")
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
+
+
+def test_no_dashboard_is_mounted_when_the_frontend_has_not_been_built(tmp_path):
+    """An unbuilt tree runs as an API, rather than serving a directory it lacks."""
+    from fastapi import FastAPI
+
+    from app.main import mount_dashboard
+
+    assert mount_dashboard(FastAPI(), tmp_path / "never-built") is False
 
 
 # ==========================================================================
