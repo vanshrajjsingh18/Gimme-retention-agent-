@@ -315,6 +315,22 @@ def test_a_send_without_the_flag_still_works(client, auth_headers, campaign_with
 
 
 # ==========================================================================
+# The seeded history says what it did
+# ==========================================================================
+def test_seeded_campaigns_are_marked_as_drafted(db, bootstrapped):
+    """A history of drafted messages must not present itself as written copy."""
+    from app.services.seed_campaigns import seed_campaigns
+
+    seed_campaigns(db, seed=11)
+
+    seeded = db.execute(
+        select(Campaign).where(Campaign.description.like("Seeded historical campaign%"))
+    ).scalars().all()
+    assert seeded
+    assert {c.copy_mode for c in seeded} == {CampaignCopyMode.DRAFTED.value}
+
+
+# ==========================================================================
 # Databases that predate the column
 # ==========================================================================
 def test_campaigns_that_predate_the_column_keep_drafting(tmp_path, monkeypatch):

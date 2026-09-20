@@ -56,7 +56,7 @@ with the reason.
 
 ## P2 — Quality and reliability
 
-- [x] Backend test suite (747 tests)
+- [x] Backend test suite (748 tests)
 - [x] Frontend unit tests (63 tests)
 - [x] Browser end-to-end tests (17 tests, failing on any console error)
 - [x] Security review, codified as 29 tests

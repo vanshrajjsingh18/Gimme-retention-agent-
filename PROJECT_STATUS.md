@@ -138,10 +138,10 @@ and who would not with the reason in plain English.
 
 | Suite | Count | Command |
 | --- | --- | --- |
-| Backend | 747 | `make test-backend` |
+| Backend | 748 | `make test-backend` |
 | Frontend | 63 | `make test-frontend` |
 | Browser (Playwright) | 17 | `make test-e2e` |
-| **Total** | **827** | `make test` |
+| **Total** | **828** | `make test` |
 
 ## Known bugs
 
@@ -191,7 +191,7 @@ five recipients received the approved copy with their own name and usual
 product in it, which is the behaviour the `copy_mode` work exists to produce.
 An existing database was upgraded in place: the new column was added and the
 ten campaigns already in it marked `DRAFTED`, which is how they had been
-sending. 747 backend, 63 frontend and 17 Playwright tests green, with zero
+sending. 748 backend, 63 frontend and 17 Playwright tests green, with zero
 console errors.
 
 Earlier, on the automation phase: all three automation types exercised end to

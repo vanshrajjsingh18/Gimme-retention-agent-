@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.enums import (
+    CampaignCopyMode,
     CampaignObjective,
     CampaignStatus,
     Channel,
@@ -186,6 +187,10 @@ def seed_campaigns(
             if channel == Channel.EMAIL
             else "",
             body=_campaign_body(db, spec["objective"], channel),
+            # Every message below is generated per recipient, so the campaign
+            # has to say that. Left at the WRITTEN default it would present a
+            # history of drafted messages as having been written once.
+            copy_mode=CampaignCopyMode.DRAFTED.value,
             created_by_id=approver.id if approver else None,
             approved_by_id=approver.id if approver else None,
             approved_at=sent_at - timedelta(hours=2),
