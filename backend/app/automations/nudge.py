@@ -24,18 +24,25 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.analytics.order_patterns import (
     MIN_ORDERS_FOR_PATTERN,
-    OrderPattern,
     OfferDecision,
     PATTERN_STALE_AFTER_DAYS,
-    compute_order_pattern,
     decide_offer,
-    next_nudge_time,
     should_recompute,
+)
+from app.analytics.order_predictions import (
+    DEFAULT_REMINDER_OFFSET,
+    REMINDER_OFFSETS,
+    OrderPrediction,
+)
+from app.services.reorder_timing import (
+    ReminderPlan,
+    clamp_to_window,  # noqa: F401 - re-exported; it lived here before
+    plan_for_customer,
 )
 from app.automations.cohort import resolve_audience
 from app.automations.runtime import Candidate, RunReport, execute_candidates
@@ -62,15 +69,6 @@ from app.services.intelligence import load_local_order_facts
 
 logger = logging.getLogger(__name__)
 
-#: Days ahead of the customer's usual slot to send. One day means the message
-#: lands the evening before they would typically order.
-DEFAULT_LEAD_DAYS = 0
-
-#: Hours ahead of their usual slot. The point of the feature is to arrive
-#: *before* they would have ordered, while they are still deciding — sending at
-#: the exact hour they usually buy is often too late to change anything.
-DEFAULT_LEAD_HOURS = 2
-
 #: Never nudge the same customer more often than this, regardless of pattern.
 #: A weekly buyer gets a weekly nudge; a monthly buyer does not get four.
 DEFAULT_MIN_GAP_DAYS = 7
@@ -85,12 +83,45 @@ STOP_OPTED_OUT = "Customer opted out."
 
 def config_of(automation: Automation) -> dict:
     cfg = dict(automation.config or {})
-    cfg.setdefault("lead_days", DEFAULT_LEAD_DAYS)
-    cfg.setdefault("lead_hours", DEFAULT_LEAD_HOURS)
+
+    # `lead_hours` was how far ahead of a bucketed hour to send, before the
+    # schedule moved onto the minute-level prediction. An automation created
+    # under the old model still means "send this far ahead", so it is carried
+    # across as the equivalent offset rather than ignored — an old setting
+    # silently doing nothing is how a campaign ends up sending at a time
+    # nobody chose.
+    legacy = {"lead_hours", "lead_days"} & set(cfg)
+    if legacy and "reminder_offset" not in cfg and "custom_offset_minutes" not in cfg:
+        # Mapped on the key being present, not on it being non-zero: a
+        # deliberate `lead_hours: 0` means "at their usual time", and reading
+        # that as "unset" would quietly move the send half an hour earlier
+        # than the person who configured it asked for.
+        cfg["custom_offset_minutes"] = (
+            int(cfg.get("lead_hours", 0)) * 60 + int(cfg.get("lead_days", 0)) * 1440
+        )
+
+    cfg.setdefault("reminder_offset", DEFAULT_REMINDER_OFFSET)
+    cfg.setdefault("custom_offset_minutes", None)
     cfg.setdefault("min_gap_days", DEFAULT_MIN_GAP_DAYS)
     cfg.setdefault("min_orders", MIN_ORDERS_FOR_PATTERN)
+    cfg.setdefault("min_confidence", 0)
     cfg.setdefault("pattern_max_age_days", PATTERN_STALE_AFTER_DAYS)
     return cfg
+
+
+def plan_for(
+    db: Session, customer_id: int, cfg: dict, *, now: datetime, after: datetime | None = None
+) -> ReminderPlan:
+    """This customer's next reminder, under this automation's settings."""
+    return plan_for_customer(
+        db,
+        customer_id,
+        now=now,
+        after=after or now,
+        offset=cfg["reminder_offset"],
+        custom_minutes=cfg["custom_offset_minutes"],
+        min_orders=cfg["min_orders"],
+    )
 
 
 # --------------------------------------------------------------------------
@@ -123,12 +154,19 @@ def enroll(
 
     enrolled = 0
     skipped_no_pattern = 0
+    skipped_low_confidence = 0
     for customer_id in resolve_audience(db, automation, now=now):
         if customer_id in existing:
             continue
-        pattern = compute_pattern(db, customer_id, now=now, min_orders=cfg["min_orders"])
-        if not pattern.has_pattern:
+        plan = plan_for(db, customer_id, cfg, now=now)
+        if not plan.has_plan:
             skipped_no_pattern += 1
+            continue
+        if plan.prediction.overall_confidence < cfg["min_confidence"]:
+            # A routine the engine is not confident in produces a message
+            # timed by coincidence. Counted rather than dropped silently, so
+            # the threshold's cost is visible where it is being paid.
+            skipped_low_confidence += 1
             continue
         db.add(
             AutomationEnrollment(
@@ -136,8 +174,8 @@ def enroll(
                 customer_id=customer_id,
                 status=EnrollmentStatus.ACTIVE.value,
                 enrolled_at=now,
-                pattern=pattern.as_dict(),
-                next_due_at=_due_from_pattern(pattern, after=now, lead_days=cfg["lead_days"], lead_hours=cfg["lead_hours"]),
+                pattern=_store_routine(plan, now=now),
+                next_due_at=plan.scheduled_utc,
             )
         )
         enrolled += 1
@@ -148,27 +186,30 @@ def enroll(
         "enrolled": enrolled,
         "already_enrolled": len(existing),
         "skipped_no_pattern": skipped_no_pattern,
+        "skipped_low_confidence": skipped_low_confidence,
     }
 
 
-def compute_pattern(
-    db: Session, customer_id: int, *, now: datetime, min_orders: int = MIN_ORDERS_FOR_PATTERN
-) -> OrderPattern:
-    """Derive one customer's ordering rhythm from their order history.
+#: Marks a stored routine as the minute-level prediction rather than the older
+#: hour-bucket pattern, so a blob written by the previous model is recomputed
+#: instead of being read with the wrong field names.
+ROUTINE_KIND = "prediction"
 
-    Both the orders and ``now`` are converted to business local time first.
-    The rest of this module already treats a pattern as local —
-    ``_due_from_pattern`` says so in as many words — but the orders were
-    handed over as the naive UTC the database stores, which for New Zealand
-    is twelve or thirteen hours out. A 7:40 PM Wednesday habit was read as
-    7:40 AM, and anything after midnight landed on the wrong weekday
-    entirely, so nudges were aimed at a time the customer never orders.
+
+def _store_routine(plan: ReminderPlan, *, now: datetime) -> dict:
+    """What goes in the enrollment's ``pattern`` column.
+
+    ``computed_at`` is written because staleness is read from it: without one,
+    ``should_recompute`` treats every stored routine as expired and the whole
+    audience is recomputed from order history on every five-minute run.
     """
-    return compute_order_pattern(
-        load_local_order_facts(db, customer_id),
-        now=to_local(now).replace(tzinfo=None),
-        min_orders=min_orders,
-    )
+    blob = plan.prediction.as_dict()
+    blob["kind"] = ROUTINE_KIND
+    blob["computed_at"] = now.isoformat()
+    blob["reminder_offset"] = plan.offset
+    blob["offset_minutes"] = plan.offset_minutes
+    blob["moved_for_send_window"] = plan.moved_for_send_window
+    return blob
 
 
 def refresh_patterns(
@@ -178,11 +219,20 @@ def refresh_patterns(
     now: datetime | None = None,
     force: bool = False,
     commit: bool = True,
+    skip_due: bool = False,
 ) -> dict:
     """Recompute stale patterns. Run monthly; habits drift.
 
     A customer whose history no longer supports a pattern is stopped rather
     than nudged on an old one.
+
+    ``skip_due`` is set by a live run, which is about to act on the
+    enrollments that have come due and must decide their fate before they are
+    replanned. Left to replan them, a customer who had just ordered would have
+    their slot moved out of the run's reach and vanish from it — no message,
+    which is right, but no reason in the ledger either. An operator asking to
+    refresh patterns on its own wants every stale routine recomputed, overdue
+    ones included, so the default is off.
     """
     now = now or utcnow()
     cfg = config_of(automation)
@@ -190,27 +240,35 @@ def refresh_patterns(
     dropped = 0
 
     for enrollment in _active(db, automation):
-        if not force and not should_recompute(
-            enrollment.pattern, now=now, max_age_days=cfg["pattern_max_age_days"]
-        ):
+        if skip_due and enrollment.next_due_at is not None and enrollment.next_due_at <= now:
             continue
-        pattern = compute_pattern(
-            db, enrollment.customer_id, now=now, min_orders=cfg["min_orders"]
+        stale = should_recompute(
+            enrollment.pattern, now=now, max_age_days=cfg["pattern_max_age_days"]
         )
-        enrollment.pattern = pattern.as_dict()
-        if not pattern.has_pattern:
+        # A routine stored by the previous, hour-bucket model is recomputed
+        # whatever its age: its fields mean something different, and reading
+        # it as a prediction would schedule from values that were never
+        # measured the same way.
+        outdated_shape = (enrollment.pattern or {}).get("kind") != ROUTINE_KIND
+        if not force and not stale and not outdated_shape:
+            continue
+        plan = plan_for(
+            db,
+            enrollment.customer_id,
+            cfg,
+            now=now,
+            after=max(now, enrollment.last_sent_at or now),
+        )
+        if not plan.has_plan:
+            enrollment.pattern = {"kind": ROUTINE_KIND, "has_prediction": False, "reason": plan.reason}
             enrollment.status = EnrollmentStatus.STOPPED.value
-            enrollment.stop_reason = pattern.reason
+            enrollment.stop_reason = plan.reason
             enrollment.stopped_at = now
             enrollment.next_due_at = None
             dropped += 1
             continue
-        enrollment.next_due_at = _due_from_pattern(
-            pattern,
-            after=max(now, enrollment.last_sent_at or now),
-            lead_days=cfg["lead_days"],
-            lead_hours=cfg["lead_hours"],
-        )
+        enrollment.pattern = _store_routine(plan, now=now)
+        enrollment.next_due_at = plan.scheduled_utc
         refreshed += 1
 
     if commit:
@@ -231,51 +289,9 @@ def _active(db: Session, automation: Automation) -> list[AutomationEnrollment]:
     )
 
 
-def _due_from_pattern(
-    pattern: OrderPattern, *, after: datetime, lead_days: int, lead_hours: int = 0
-) -> datetime | None:
-    """Next due time in naive UTC, from a pattern expressed in local time."""
-    local_after = to_local(after).replace(tzinfo=None)
-    local_due = next_nudge_time(pattern, after=local_after, lead_days=lead_days)
-    if local_due is None:
-        return None
-    # Arrive shortly before their usual window rather than during it.
-    local_due -= timedelta(hours=lead_hours)
-    clamped = clamp_to_window(local_due)
-    # Clamping an overnight pattern moves it to the evening before, which can
-    # land in the past. Roll to the next weekly occurrence rather than firing
-    # a nudge that was already due.
-    while clamped <= local_after:
-        clamped = clamp_to_window(local_due + timedelta(days=7))
-        local_due += timedelta(days=7)
-    return to_utc_naive(clamped)
-
-
-def clamp_to_window(local_due: datetime) -> datetime:
-    """Pull a nudge into business hours **on the customer's own day**.
-
-    A large share of drinks orders land after 7pm, and the generic
-    quiet-hours deferral would push those nudges to 9am the following
-    morning — past the moment the customer would have ordered, which defeats
-    the point of timing the message to their habit. So a late-evening pattern
-    is nudged *earlier the same day* instead, arriving while they are still
-    deciding. An overnight pattern is the mirror image: it belongs to the
-    evening before, not to a 9am the customer is asleep for.
-    """
-    start, end = settings.send_window
-    last_slot = (datetime.combine(local_due.date(), end) - timedelta(hours=1)).time()
-
-    if local_due.time() >= end:
-        return local_due.replace(
-            hour=last_slot.hour, minute=last_slot.minute, second=0, microsecond=0
-        )
-    if local_due.time() < start:
-        # Before opening: the previous evening is nearer their habit than
-        # waiting all morning, but never earlier than the window allows.
-        return (local_due - timedelta(days=1)).replace(
-            hour=last_slot.hour, minute=last_slot.minute, second=0, microsecond=0
-        )
-    return local_due
+def routine_of(enrollment: AutomationEnrollment) -> OrderPrediction:
+    """Rebuild the stored routine, ignoring stray and legacy keys."""
+    return OrderPrediction(**_pattern_fields(enrollment.pattern))
 
 
 # --------------------------------------------------------------------------
@@ -321,7 +337,7 @@ def render_nudge(
     db: Session,
     automation: Automation,
     customer: Customer,
-    pattern: OrderPattern,
+    routine: OrderPrediction,
     *,
     now: datetime,
 ) -> tuple[str, OfferDecision]:
@@ -339,7 +355,7 @@ def render_nudge(
         customer,
         brand,
         extra={
-            "usual_day": pattern.weekday_name or "usual day",
+            "usual_day": routine.preferred_weekday_name or "usual day",
             "usual_category": favourite_category(db, customer.id),
             "offer_line": offer_line,
             "promotion": offer.promotion or "",
@@ -364,6 +380,58 @@ def customers_with_pending_orders(db: Session, customer_ids: list[int]) -> set[i
         )
     ).all()
     return {row[0] for row in rows}
+
+
+#: Order states that mean "they have bought". A cancelled order is not one:
+#: somebody who cancelled has not been served and may well still want their
+#: usual.
+ORDERED_STATUSES = (OrderStatus.PENDING.value, OrderStatus.COMPLETED.value)
+
+
+def customers_who_already_ordered(
+    db: Session, cycle_start_by_customer: dict[int, datetime]
+) -> dict[int, datetime]:
+    """Customers who have ordered since the prediction was made.
+
+    The one message this feature must never send is "ready for your usual
+    order?" to somebody who ordered twenty minutes ago. Checking only for a
+    PENDING order caught an order still in flight and missed the finished
+    one — and a real order lands COMPLETED, so the common case was the one
+    that got through.
+
+    "Since the prediction was made" is the right boundary rather than "today"
+    or "recently": the prediction was built from their last order, so any
+    order after it is this cycle's, which is exactly the purchase the
+    reminder was trying to prompt. It also means a weekly customer is not
+    permanently suppressed by the order that taught us their routine.
+    """
+    if not cycle_start_by_customer:
+        return {}
+
+    rows = db.execute(
+        select(Order.customer_id, func.max(Order.ordered_at))
+        .where(
+            Order.customer_id.in_(list(cycle_start_by_customer)),
+            Order.status.in_(ORDERED_STATUSES),
+        )
+        .group_by(Order.customer_id)
+    ).all()
+
+    already: dict[int, datetime] = {}
+    for customer_id, latest in rows:
+        boundary = cycle_start_by_customer.get(customer_id)
+        if latest is not None and boundary is not None and latest > boundary:
+            already[customer_id] = latest
+    return already
+
+
+def _cycle_start(enrollment: AutomationEnrollment, routine: OrderPrediction) -> datetime | None:
+    """The order this customer's current prediction was built from, in UTC."""
+    if routine.last_order_at is None:
+        return None
+    # Stored local (the routine is learned on the customer's clock); the
+    # orders it is compared against are the naive UTC the database holds.
+    return to_utc_naive(routine.last_order_at)
 
 
 def _too_soon(
@@ -405,7 +473,16 @@ def build_candidates(
         return [], {}
 
     customer_ids = [e.customer_id for e in due]
+    routines = {e.customer_id: routine_of(e) for e in due}
     pending = customers_with_pending_orders(db, customer_ids)
+    already = customers_who_already_ordered(
+        db,
+        {
+            e.customer_id: start
+            for e in due
+            if (start := _cycle_start(e, routines[e.customer_id])) is not None
+        },
+    )
     customers = {
         c.id: c
         for c in db.execute(select(Customer).where(Customer.id.in_(customer_ids)))
@@ -419,10 +496,13 @@ def build_candidates(
         customer = customers.get(enrollment.customer_id)
         if customer is None:
             continue
-        pattern = OrderPattern(**_pattern_fields(enrollment.pattern))
-        if enrollment.customer_id in pending:
+        routine = routines[enrollment.customer_id]
+
+        suppression = _suppression_for(enrollment.customer_id, pending, already)
+        if suppression is not None:
             # Recorded as a candidate so the skip is visible in the ledger and
             # the preview, rather than the customer quietly disappearing.
+            reason, detail = suppression
             candidates.append(
                 Candidate(
                     customer_id=customer.id,
@@ -431,15 +511,15 @@ def build_candidates(
                     enrollment_id=enrollment.id,
                     context={
                         "source": "nudge",
-                        "suppressed": SkipReason.PENDING_ORDER.value,
-                        "detail": "Customer has an order in flight.",
+                        "suppressed": reason.value,
+                        "detail": detail,
                     },
                 )
             )
             by_customer[customer.id] = enrollment
             continue
 
-        body, offer = render_nudge(db, automation, customer, pattern, now=now)
+        body, offer = render_nudge(db, automation, customer, routine, now=now)
         candidates.append(
             Candidate(
                 customer_id=customer.id,
@@ -448,15 +528,43 @@ def build_candidates(
                 enrollment_id=enrollment.id,
                 context={
                     "source": "nudge",
-                    "usual_day": pattern.weekday_name,
-                    "usual_hour": pattern.typical_hour,
-                    "pattern_confidence": pattern.confidence,
+                    "usual_day": routine.preferred_weekday_name,
+                    "usual_time": routine.preferred_time_label,
+                    "predicted_order_at": (
+                        routine.predicted_next_order_at.isoformat()
+                        if routine.predicted_next_order_at
+                        else None
+                    ),
+                    "pattern_confidence": routine.overall_confidence,
                     "offer": offer.as_dict(),
                 },
             )
         )
         by_customer[customer.id] = enrollment
     return candidates, by_customer
+
+
+def _suppression_for(
+    customer_id: int, pending: set[int], already: dict[int, datetime]
+) -> tuple[SkipReason, str] | None:
+    """Why this customer must not be reminded, if they must not be.
+
+    An order in flight is checked first. Both facts stop the send, but a
+    pending order is the narrower statement — "their order is on its way"
+    tells an operator more than "they ordered at some point since we
+    predicted", and the ledger should carry the more specific of two true
+    reasons.
+    """
+    if customer_id in pending:
+        return (SkipReason.PENDING_ORDER, "Customer has an order in flight.")
+    if customer_id in already:
+        when = already[customer_id]
+        return (
+            SkipReason.ALREADY_ORDERED,
+            f"Customer ordered on {to_local(when):%-d %b at %-I:%M %p} — after this "
+            "reminder was predicted, so there is nothing to remind them about.",
+        )
+    return None
 
 
 def _prospective_enrollments(
@@ -483,8 +591,8 @@ def _prospective_enrollments(
     for customer_id in resolve_audience(db, automation, now=now):
         if customer_id in enrolled:
             continue
-        pattern = compute_pattern(db, customer_id, now=now, min_orders=cfg["min_orders"])
-        if not pattern.has_pattern:
+        plan = plan_for(db, customer_id, cfg, now=now)
+        if not plan.has_plan or plan.prediction.overall_confidence < cfg["min_confidence"]:
             continue
         prospective.append(
             AutomationEnrollment(
@@ -492,28 +600,32 @@ def _prospective_enrollments(
                 customer_id=customer_id,
                 status=EnrollmentStatus.ACTIVE.value,
                 enrolled_at=now,
-                pattern=pattern.as_dict(),
-                next_due_at=_due_from_pattern(
-                    pattern, after=now, lead_days=cfg["lead_days"],
-                    lead_hours=cfg["lead_hours"],
-                ),
+                pattern=_store_routine(plan, now=now),
+                next_due_at=plan.scheduled_utc,
             )
         )
     return prospective
 
 
 def _pattern_fields(blob: dict | None) -> dict:
-    """Rebuild an OrderPattern from its stored JSON, ignoring stray keys."""
+    """Rebuild an OrderPrediction from its stored JSON, ignoring stray keys."""
     from datetime import datetime as _dt
 
-    known = set(OrderPattern.__dataclass_fields__)
+    from app.analytics.order_predictions import IntervalStats
+
+    known = set(OrderPrediction.__dataclass_fields__)
     data = {k: v for k, v in (blob or {}).items() if k in known}
-    for key in ("window_start", "window_end", "computed_at"):
+    for key in ("last_order_at", "predicted_next_order_at"):
         if isinstance(data.get(key), str):
             try:
                 data[key] = _dt.fromisoformat(data[key])
             except ValueError:
                 data[key] = None
+    if isinstance(data.get("intervals"), dict):
+        fields = set(IntervalStats.__dataclass_fields__)
+        data["intervals"] = IntervalStats(
+            **{k: v for k, v in data["intervals"].items() if k in fields}
+        )
     return data
 
 
@@ -541,7 +653,7 @@ def run(
     else:
         enroll(db, automation, now=now, commit=False)
         db.flush()
-        refresh_patterns(db, automation, now=now, commit=False)
+        refresh_patterns(db, automation, now=now, commit=False, skip_due=True)
         _stop_opted_out(db, automation, now=now)
         db.commit()
         enrollments = _active(db, automation)
@@ -550,37 +662,43 @@ def run(
         db, automation, now=now, enrollments=enrollments, ignore_due_time=dry_run
     )
 
-    # Pending-order candidates carry no body; short-circuit them here so they
+    # Suppressed candidates carry no body; short-circuit them here so they
     # are logged as skips rather than sent as empty messages.
     sendable = [c for c in candidates if not c.context.get("suppressed")]
     report = execute_candidates(db, automation, sendable, now=now, dry_run=dry_run)
     for candidate in candidates:
         if candidate.context.get("suppressed"):
             report.results.append(
-                _pending_skip(db, automation, candidate, now=now, dry_run=dry_run)
+                _order_skip(db, automation, candidate, now=now, dry_run=dry_run)
             )
 
     if not dry_run:
-        _reschedule(
-            db, report, by_customer,
-            lead_days=cfg["lead_days"], lead_hours=cfg["lead_hours"], now=now,
-        )
+        _reschedule(db, report, by_customer, cfg=cfg, now=now)
         db.commit()
     return report
 
 
-def _pending_skip(
+def _order_skip(
     db: Session, automation: Automation, candidate: Candidate, *, now: datetime, dry_run: bool
 ):
+    """Record a skip for a customer whose orders rule the reminder out.
+
+    The reason comes from the candidate rather than being assumed here. It
+    was hard-coded to PENDING_ORDER, so even once an already-ordered customer
+    was detected the ledger would have said their order was still on its way —
+    which is a different fact, and the wrong one to show somebody asking why
+    no reminder went out.
+    """
     from app.automations.runtime import SendDecision, _record, priority_for
 
     when = candidate.scheduled_for
+    reason = SkipReason(candidate.context.get("suppressed", SkipReason.PENDING_ORDER.value))
     decision = SendDecision(
         customer_id=candidate.customer_id,
         status=SendStatus.SKIPPED,
         scheduled_for=when,
         local_date=local_date(when),
-        skip_reason=SkipReason.PENDING_ORDER,
+        skip_reason=reason,
         skip_detail=candidate.context.get("detail"),
         context=candidate.context,
     )
@@ -627,8 +745,7 @@ def _reschedule(
     report: RunReport,
     by_customer: dict[int, AutomationEnrollment],
     *,
-    lead_days: int,
-    lead_hours: int,
+    cfg: dict,
     now: datetime,
 ) -> None:
     """Set each customer's next due time after a run.
@@ -636,15 +753,22 @@ def _reschedule(
     A sent nudge advances from the send; a skipped one is pushed to the next
     matching slot rather than retried immediately, so a customer who lost a
     dedup contest is not chased the following morning.
+
+    Replanned from order history rather than from the stored routine, so a
+    customer who was skipped *because they just ordered* is rescheduled
+    around that new order — their cycle has restarted, and aiming at the old
+    prediction would chase them again next run.
     """
     for result in report.results:
         enrollment = by_customer.get(result.customer_id)
         if enrollment is None:
             continue
-        pattern = OrderPattern(**_pattern_fields(enrollment.pattern))
         if result.status == SendStatus.SENT:
             enrollment.last_sent_at = now
-        enrollment.next_due_at = _due_from_pattern(
-            pattern, after=now, lead_days=lead_days, lead_hours=lead_hours
-        )
+        plan = plan_for(db, enrollment.customer_id, cfg, now=now)
+        if plan.has_plan:
+            enrollment.pattern = _store_routine(plan, now=now)
+            enrollment.next_due_at = plan.scheduled_utc
+        else:
+            enrollment.next_due_at = None
     db.flush()

@@ -305,8 +305,11 @@ def test_the_reminder_lands_in_sams_evening_not_his_morning(db, sam, smart_reord
     nudge.enroll(db, smart_reorder, now=to_utc_naive(_local(4, "20:30")))
     enrollment = nudge._active(db, smart_reorder)[0]
 
-    assert enrollment.pattern["weekday_name"] == "Wednesday"
-    assert enrollment.pattern["typical_hour"] == 19, enrollment.pattern
+    assert enrollment.pattern["preferred_weekday_name"] == "Wednesday"
+    assert enrollment.pattern["preferred_hour"] == 19, enrollment.pattern
+    # To the minute, not to the hour: the reminder is aimed a set number of
+    # minutes ahead of this, so an hour-resolution answer cannot support it.
+    assert enrollment.pattern["preferred_time_label"] == "7:39 PM"
 
     local_due = to_local(enrollment.next_due_at)
     assert 9 <= local_due.hour <= 21, f"reminder scheduled for {local_due:%A %H:%M} local"

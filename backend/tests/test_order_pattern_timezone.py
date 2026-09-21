@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 import pytest
 
 from app.analytics.order_predictions import predict_next_order
-from app.automations.nudge import compute_pattern
 from app.core.timezones import to_utc_naive
+from app.services.reorder_timing import plan_for_customer
 from app.models.base import utcnow
 from app.models.entities import Customer, Order
 from app.services.intelligence import load_local_order_facts
@@ -48,18 +48,23 @@ def _sam_with_orders(db, local_times: list[datetime]) -> Customer:
 
 
 def test_an_evening_habit_is_not_read_as_a_morning_one(db):
-    """Wednesday 7:40 PM NZ must not come back as 7:40 AM."""
+    """Wednesday 7:40 PM NZ must not come back as 7:40 AM.
+
+    Asserted through the planner the scheduler itself calls, because that is
+    the layer that owns the conversion: the orders arrive as the naive UTC the
+    database stores, and anything reading a weekday or an hour off those
+    directly describes a habit nobody has.
+    """
     local = [datetime(2026, 8, 5, 19, 40) + timedelta(weeks=w) for w in range(5)]
     customer = _sam_with_orders(db, local)
 
-    pattern = compute_pattern(db, customer.id, now=utcnow())
+    routine = plan_for_customer(db, customer.id, now=utcnow()).prediction
 
-    assert pattern.has_pattern
-    assert pattern.weekday_name == "Wednesday"
-    assert pattern.typical_hour == 19, (
-        f"read as hour {pattern.typical_hour} — the UTC offset leaked in"
+    assert routine.has_prediction
+    assert routine.preferred_weekday_name == "Wednesday"
+    assert routine.preferred_hour == 19, (
+        f"read as hour {routine.preferred_hour} — the UTC offset leaked in"
     )
-    assert pattern.time_bucket in ("early_evening", "late_evening")
 
 
 def test_an_after_midnight_order_keeps_its_own_weekday(db):
@@ -67,11 +72,11 @@ def test_an_after_midnight_order_keeps_its_own_weekday(db):
     local = [datetime(2026, 8, 6, 0, 30) + timedelta(weeks=w) for w in range(5)]
     customer = _sam_with_orders(db, local)
 
-    pattern = compute_pattern(db, customer.id, now=utcnow())
+    routine = plan_for_customer(db, customer.id, now=utcnow()).prediction
 
-    assert pattern.has_pattern
-    assert pattern.weekday_name == "Thursday", (
-        f"landed on {pattern.weekday_name} — the order was dated in UTC"
+    assert routine.has_prediction
+    assert routine.preferred_weekday_name == "Thursday", (
+        f"landed on {routine.preferred_weekday_name} — the order was dated in UTC"
     )
 
 

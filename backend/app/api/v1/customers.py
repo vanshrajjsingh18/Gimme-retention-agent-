@@ -8,11 +8,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_current_user, require_write
 from app.automations.service import customer_history
 from app.services.intelligence import load_local_order_facts
-from app.analytics.order_predictions import (
-    describe_interval,
-    predict_next_order,
-    reminder_time_for,
-)
+from app.analytics.order_predictions import describe_interval
+from app.services.reorder_timing import plan_for_customer
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.timezones import to_local
@@ -565,6 +562,10 @@ def update_consent(
     return OperationResult(message="Consent updated.", detail=changes)
 
 
+def _iso(moment) -> str | None:
+    return moment.isoformat() if moment is not None else None
+
+
 @router.get("/customers/{customer_id}/order-pattern", tags=["customers"])
 def get_order_pattern(
     customer_id: int,
@@ -585,20 +586,29 @@ def get_order_pattern(
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found.")
 
-    local_now = to_local(utcnow()).replace(tzinfo=None)
-    prediction = predict_next_order(
-        load_local_order_facts(db, customer_id), now=local_now
-    )
+    plan = plan_for_customer(db, customer_id)
+    prediction = plan.prediction
 
     payload = prediction.as_dict()
     payload["customer_id"] = customer_id
     payload["timezone"] = settings.BUSINESS_TIMEZONE
     payload["confidence_band"] = prediction.band()
-    payload["reminder_at"] = (
-        reminder_time_for(prediction).isoformat()
-        if prediction.has_prediction
-        else None
+    # The time a reminder would actually be scheduled for, from the same call
+    # the scheduler makes. Showing the raw offset here instead meant the panel
+    # promised 7:09 PM while the automation was sending at 6:00 PM, and
+    # nothing on the page could have told you which was real.
+    payload["reminder_at"] = _iso(plan.scheduled_local)
+    payload["aimed_at"] = _iso(plan.reminder_local)
+    payload["moved_for_send_window"] = plan.moved_for_send_window
+    payload["reminder_offset"] = plan.offset
+    payload["reminder_offset_minutes"] = plan.offset_minutes
+    payload["send_window"] = (
+        f"{settings.send_window[0]:%H:%M}–{settings.send_window[1]:%H:%M}"
     )
+    if plan.predicted_local is not None:
+        # The cycle the reminder is aimed at, which is not always the first
+        # one the prediction named: a slot already in the past rolls forward.
+        payload["predicted_next_order_at"] = plan.predicted_local.isoformat()
     # Said once, here, rather than reconstructed in the browser from an hour
     # and a minute — the phrasing is part of the answer.
     payload["interval_label"] = (

@@ -941,7 +941,7 @@ class TestBehaviouralNudge:
 
         assert result["enrolled"] == 1
         enrollment = nudge._active(db, automation)[0]
-        assert enrollment.pattern["weekday_name"] == "Friday"
+        assert enrollment.pattern["preferred_weekday_name"] == "Friday"
 
     def test_a_customer_with_too_few_orders_is_not_enrolled(
         self, db, make_customer, make_automation
@@ -2161,10 +2161,16 @@ class TestMessageVariants:
 # Nudge lead time
 # ==========================================================================
 class TestNudgeLeadTime:
-    def test_the_nudge_arrives_before_their_usual_window(
+    def test_the_nudge_arrives_before_their_usual_time(
         self, db, make_customer, make_automation
     ):
-        """The point is to reach them while they are still deciding."""
+        """The point is to reach them while they are still deciding.
+
+        Half an hour ahead by default, measured from the minute-level
+        prediction rather than from the hour bucket the schedule used to be
+        built on — a customer who orders at 3:00 PM is texted at 2:30, not at
+        1:00 because their whole afternoon was rounded to one number.
+        """
         customer = make_customer()
         for order in friday_orders(customer.id, 6, hour=15):
             db.add(order)
@@ -2175,9 +2181,32 @@ class TestNudgeLeadTime:
         nudge.enroll(db, automation, now=MONDAY_10AM)
 
         due = to_local(nudge._active(db, automation)[0].next_due_at)
-        assert due.hour == 13, f"expected 15:00 minus a 2h lead, got {due}"
+        assert (due.hour, due.minute) == (14, 30), f"expected 15:00 less 30 min, got {due}"
 
-    def test_the_lead_is_configurable(self, db, make_customer, make_automation):
+    def test_the_offset_is_configurable(self, db, make_customer, make_automation):
+        customer = make_customer()
+        for order in friday_orders(customer.id, 6, hour=15):
+            db.add(order)
+        db.commit()
+        automation = make_automation(
+            kind=AutomationKind.NUDGE.value,
+            manual_customer_ids=[customer.id],
+            config={"reminder_offset": "2_HOURS_BEFORE"},
+        )
+        nudge.enroll(db, automation, now=MONDAY_10AM)
+
+        due = to_local(nudge._active(db, automation)[0].next_due_at)
+        assert (due.hour, due.minute) == (13, 0), f"expected 15:00 less 2h, got {due}"
+
+    def test_an_automation_configured_under_the_old_lead_model_keeps_its_timing(
+        self, db, make_customer, make_automation
+    ):
+        """`lead_hours: 0` meant "at their usual time" and still has to.
+
+        The setting was replaced, not abandoned. An automation carrying the
+        old key is read as the equivalent offset rather than falling back to
+        the default, which would move a send somebody had deliberately timed.
+        """
         customer = make_customer()
         for order in friday_orders(customer.id, 6, hour=15):
             db.add(order)
