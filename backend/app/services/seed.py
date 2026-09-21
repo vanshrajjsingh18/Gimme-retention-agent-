@@ -25,6 +25,7 @@ from app.core.enums import (
     EventType,
     OrderStatus,
 )
+from app.core.timezones import to_utc_naive
 from app.models.base import utcnow
 from app.models.entities import (
     AttributionRecord,
@@ -369,11 +370,22 @@ def generate_customers(
             if ordered_at > now:
                 continue
 
-            # Give orders a plausible time of day, skewed to evenings.
+            # Give orders a plausible time of day, skewed to evenings — in the
+            # customer's own evening. The column is naive UTC and New Zealand
+            # runs twelve or thirteen hours ahead, so writing a 7pm hour
+            # straight into it produces a 7am order: every seeded customer
+            # came out a breakfast buyer, and Smart Reorder dutifully learned
+            # to remind them at dawn. The comment said "evenings" and the data
+            # said otherwise for as long as nothing read the hour back.
             hour = rng.choices(
                 [11, 14, 16, 17, 18, 19, 20, 21], weights=[3, 4, 6, 10, 14, 16, 12, 8]
             )[0]
-            ordered_at = ordered_at.replace(hour=hour, minute=rng.randint(0, 59), second=0)
+            local_moment = ordered_at.replace(
+                hour=hour, minute=rng.randint(0, 59), second=0
+            )
+            ordered_at = to_utc_naive(local_moment)
+            if ordered_at > now:
+                continue
 
             # Baskets are sized to land the population AOV in the NZ drinks
             # delivery range (roughly $60-$95), so the value tiers stay meaningful.

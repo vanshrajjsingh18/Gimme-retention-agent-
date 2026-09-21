@@ -263,36 +263,51 @@ and time *they* usually order, and it continues until they opt out.
 
 | Setting | Default | Why |
 | --- | --- | --- |
-| `MIN_ORDERS_FOR_PATTERN` | 3 completed orders | With two orders, a repeated weekday is 1-in-7 luck. Guessing produces a message timed by coincidence |
+| `min_orders` | 3 completed orders | With two orders, a repeated weekday is 1-in-7 luck. Guessing produces a message timed by coincidence |
 | `DEFAULT_WINDOW_ORDERS` | last 8 orders | Recent behaviour beats ancient behaviour — a customer who moved from Fridays to Sundays should follow the change, not average across it |
-| `PATTERN_STALE_AFTER_DAYS` | 30 days | Habits drift; a pattern computed once and frozen slowly stops matching |
+| `min_confidence` | 0–100, campaign builder default 70 | Below this a routine is a loose tendency rather than a habit. Excluded customers are counted in the dry run, not dropped silently |
+| `PATTERN_STALE_AFTER_DAYS` | 30 days | Habits drift; a routine computed once and frozen slowly stops matching |
 
 Only **completed** orders count — a cancelled order says nothing about when
 somebody likes to buy.
 
-The weekday is the mode of the window. The time bucket is the mode of five
-buckets (`morning` 6–12, `afternoon` 12–17, `early_evening` 17–20,
-`late_evening` 20–24, `overnight` 0–6), and the representative hour is the
-median of the orders **inside** the modal bucket — averaging a lunchtime and a
-late-night order would land at neither.
+The weekday is the mode of the window. The time of day is the **circular mean**
+of the orders on that weekday, which gives a representative time to the
+minute and wraps correctly: orders at 23:50 and 00:10 are twenty minutes
+apart, and a plain average puts their centre at midday. The interval is the
+**median** gap between orders, so one holiday does not move the estimate.
 
-Confidence is `0.6 × weekday_confidence + 0.4 × time_confidence`: a weekday
-match is 1-in-7 by chance and a bucket match roughly 1-in-5, so the weekday
-signal is weighted higher.
+Confidence is `0.45 × day + 0.25 × time + 0.30 × interval`, all on a 0–100
+scale — weighted towards the weekday because a weekday match is 1-in-7 by
+chance while a tight clock time is common in customers with no weekly routine
+at all.
 
-Patterns are recomputed daily by `refresh_order_patterns_job`, which only
-touches patterns past their age. A customer whose history no longer supports a
-pattern is **stopped**, not nudged on a stale one.
+Routines are recomputed daily by `refresh_order_patterns_job`, which only
+touches ones past their age. A customer whose history no longer supports a
+routine is **stopped**, not nudged on a stale one.
 
 ### Arriving before the window
 
-`lead_hours` (default **2**) sends the nudge that far ahead of the customer's
-usual slot: the point is to reach them while they are still deciding, and a
-message arriving at the exact hour they normally buy is often too late to
-change anything. `lead_days` shifts whole days for a weekly rhythm.
+`reminder_offset` (default **`30_MIN_BEFORE`**) sets how far ahead of the
+customer's predicted order the reminder is aimed: the point is to reach them
+while they are still deciding, and a message arriving at the exact minute they
+normally buy is often too late to change anything.
 
-The lead never pushes a nudge outside business hours — a 10am buyer minus two
-hours would be 08:00, so the window clamp below brings it back to 09:00.
+| Option | Meaning |
+| --- | --- |
+| `15_MIN_BEFORE`, `30_MIN_BEFORE`, `60_MIN_BEFORE`, `2_HOURS_BEFORE` | Ahead of the predicted order |
+| `AT_PREDICTED_TIME` | At it |
+| `30_MIN_AFTER` | After it — legitimate for a customer who tends to order late |
+| `CUSTOM` | `custom_offset_minutes`; negative sends after |
+
+An automation created before this setting existed carries `lead_hours`, which
+is read as the equivalent offset — including a deliberate `lead_hours: 0`,
+which meant "at their usual time" and still does.
+
+**One engine.** `app/services/reorder_timing.py` produces the scheduled
+reminder, and both the scheduler and every screen call it. They used to
+differ: Customer 360 read the minute-level prediction and showed 7:09 PM
+while the sender read a three-hour bucket and fired at 5:00 PM.
 
 ### Timing into business hours
 
@@ -308,6 +323,12 @@ forward like other sends:
 Deferring a 9pm buyer to 9am Sunday would reach them after the moment had
 passed, which defeats the point of timing the message to their habit.
 
+A reminder the window moves is **reported as moved**: the order-pattern
+response carries `aimed_at`, `reminder_at` and `moved_for_send_window`, and
+the customer panel shows both. "Half an hour before they usually order" and
+"at 6pm" are different promises, and a screen showing only the second cannot
+tell you the first was not kept.
+
 ### Offers
 
 `decide_offer()` requires **two independent gates**, and both must pass:
@@ -322,9 +343,15 @@ Every decision carries its reason, visible in the dry-run preview.
 
 ### Safeguards
 
+- Never fires against a customer who **has already ordered**. The boundary is
+  the order the prediction was built from: any order after it belongs to this
+  cycle and is the purchase the reminder was trying to prompt, while the order
+  that taught us the routine does not suppress anything. Recorded as an
+  `ALREADY_ORDERED` skip, with the order's time in the reason.
 - Never fires against a customer with a **pending order** — they do not need
   reminding to buy what they have just bought. Recorded as a `PENDING_ORDER`
-  skip so it is visible, not a silent disappearance.
+  skip, the narrower of the two reasons, so it is visible rather than a silent
+  disappearance.
 - `DEFAULT_MIN_GAP_DAYS = 7` — a weekly buyer gets a weekly nudge; a monthly
   buyer does not get four.
 - Highest dedup priority, so a nudge displaces a bulk send rather than arriving

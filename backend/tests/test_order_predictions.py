@@ -7,6 +7,7 @@ whichever is easier.
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -289,3 +290,41 @@ def test_sam_reason_reads_naturally():
     )
     assert "about every 7 days" in p.reason
     assert "6.99" not in p.reason
+
+
+# ==========================================================================
+# Histories that do not describe a reorder cycle at all
+# ==========================================================================
+def test_orders_minutes_apart_do_not_hang_the_engine():
+    """Two orders ten minutes apart is one shopping trip, not a ten-minute habit.
+
+    It is also the shape that used to hang the process outright. The roll-forward
+    advances by the median interval and then snaps back to the customer's usual
+    weekday: with a sub-daily interval the snap returned the same date, the
+    clock fields were overwritten with the same time, and the loop compared an
+    unchanged value against `now` forever. A customer who forgets the mixers and
+    orders again is common, so this was reachable from Customer 360 by anybody
+    unlucky enough to open the wrong profile.
+    """
+    monday = datetime(2026, 8, 3, 19, 0)
+    history = [order(monday), order(monday + timedelta(minutes=10)), order(monday + timedelta(minutes=20))]
+
+    started = time.monotonic()
+    prediction = predict_next_order(history, now=datetime(2027, 1, 1, 12, 0))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 2, f"took {elapsed:.1f}s — the roll-forward is not advancing"
+    if prediction.has_prediction:
+        # Whatever it decides, it must be a moment still to come.
+        assert prediction.predicted_next_order_at > datetime(2027, 1, 1, 12, 0)
+
+
+def test_a_sub_daily_interval_still_lands_on_their_weekday():
+    """The weekly anchor is the only sensible reading of a same-day burst."""
+    monday = datetime(2026, 8, 3, 19, 0)
+    history = [order(monday), order(monday + timedelta(minutes=10)), order(monday + timedelta(minutes=20))]
+
+    prediction = predict_next_order(history, now=monday + timedelta(days=2))
+
+    if prediction.has_prediction:
+        assert prediction.predicted_next_order_at.weekday() == 0  # Monday

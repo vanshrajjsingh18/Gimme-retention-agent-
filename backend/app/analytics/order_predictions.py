@@ -250,6 +250,52 @@ def _snap_to_weekday(base: datetime, weekday: int, *, limit: int = MAX_WEEKDAY_S
     return base + timedelta(days=nearest)
 
 
+#: Cycles to roll forward before giving up. A weekly customer whose last
+#: order was three years ago needs about 150; anything past this is a history
+#: so old that the routine in it is not worth projecting from.
+MAX_ROLL_FORWARD_CYCLES = 400
+
+
+def _advance_past(
+    predicted: datetime,
+    now: datetime,
+    *,
+    step_days: float,
+    weekday: int,
+    centre: CircularTime,
+) -> datetime:
+    """Roll a prediction forward in whole cycles until it is in the future.
+
+    Each step has to actually move, which is not automatic. The step is the
+    customer's median interval, and the result is snapped back to their usual
+    weekday and then given their usual clock time — so for an interval shorter
+    than a day, the snap returns the same date and the clock fields overwrite
+    the advance with the value it started from. The comparison against ``now``
+    then never changes and the loop runs forever. Several orders within one
+    evening produce exactly that, and somebody who forgets the mixers and
+    orders again ten minutes later is not an exotic customer.
+
+    So progress is checked rather than assumed: a step that fails to advance
+    falls back to a whole week, which is what anchoring to a weekday means in
+    any case. The iteration cap is the backstop — a loop that cannot finish
+    should stop rather than hold a request open.
+    """
+    def at_usual_time(moment: datetime) -> datetime:
+        return moment.replace(
+            hour=centre.hour, minute=centre.minute, second=0, microsecond=0
+        )
+
+    step = timedelta(days=step_days)
+    for _ in range(MAX_ROLL_FORWARD_CYCLES):
+        if predicted > now:
+            return predicted
+        nxt = at_usual_time(_snap_to_weekday(predicted + step, weekday))
+        if nxt <= predicted:
+            nxt = at_usual_time(predicted + timedelta(days=7))
+        predicted = nxt
+    return predicted
+
+
 def predict_next_order(
     orders: list[OrderFact],
     *,
@@ -325,10 +371,7 @@ def predict_next_order(
     # A prediction already in the past is no use to a scheduler. Advance whole
     # cycles rather than jumping to "now plus something", which would invent a
     # routine the customer does not have.
-    while predicted <= now:
-        predicted = _snap_to_weekday(
-            predicted + timedelta(days=stats.median_days), weekday
-        ).replace(hour=centre.hour, minute=centre.minute, second=0, microsecond=0)
+    predicted = _advance_past(predicted, now, step_days=stats.median_days, weekday=weekday, centre=centre)
 
     day_pct = int(round(day_confidence * 100))
     time_pct = int(round(centre.concentration * 100))

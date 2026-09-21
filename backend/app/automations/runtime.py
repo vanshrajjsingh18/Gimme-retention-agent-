@@ -155,6 +155,10 @@ SKIP_EXPLANATIONS: dict[str, str] = {
     SkipReason.VALIDATION_FAILED.value: "the message failed compliance checks",
     SkipReason.TRIGGER_IN_PAST.value: "the trigger date has already passed",
     SkipReason.ENROLLMENT_PAUSED.value: "this customer's enrollment is paused",
+    # Reasons a customer never became a candidate. Not SkipReasons: nothing
+    # was scheduled for them to be skipped from.
+    "INSUFFICIENT_HISTORY": "too few orders to learn a routine from",
+    "LOW_CONFIDENCE": "their ordering routine is not consistent enough to time a message by",
 }
 
 
@@ -170,6 +174,12 @@ class RunReport:
     results: list[SendDecision] = field(default_factory=list)
     provider: str = ""
     is_mock: bool = True
+    #: Customers who never became candidates at all, by reason. A skip is
+    #: recorded per candidate, but somebody excluded *before* the audience was
+    #: built — too few orders to learn a routine from, a routine the engine is
+    #: not confident in — produces no candidate and so no skip, and would be
+    #: invisible in a preview whose whole job is explaining who is missing.
+    not_enrolled: dict[str, int] = field(default_factory=dict)
 
     @property
     def sent(self) -> int:
@@ -209,9 +219,12 @@ class RunReport:
         """
         reasons = self.skips_by_reason()
         would_send = self.previewed if self.dry_run else self.sent
-        lines = [f"{len(self.results):,} customers evaluated"]
+        evaluated = len(self.results) + sum(self.not_enrolled.values())
+        lines = [f"{evaluated:,} customers evaluated"]
         if would_send:
             lines.append(f"{would_send:,} eligible")
+        for reason, count in sorted(self.not_enrolled.items(), key=lambda kv: -kv[1]):
+            lines.append(f"{count:,} excluded — {SKIP_EXPLANATIONS.get(reason, reason)}")
         for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1]):
             lines.append(f"{count:,} excluded — {SKIP_EXPLANATIONS.get(reason, reason)}")
         lines.append(
@@ -227,12 +240,12 @@ class RunReport:
         return {
             "headline": "DRY RUN RESULTS" if self.dry_run else "RUN RESULTS",
             "lines": lines,
-            "evaluated": len(self.results),
+            "evaluated": evaluated,
             "eligible": would_send,
-            "excluded": self.skipped,
+            "excluded": self.skipped + sum(self.not_enrolled.values()),
             "excluded_by_reason": {
                 SKIP_EXPLANATIONS.get(reason, reason): count
-                for reason, count in reasons.items()
+                for reason, count in {**self.not_enrolled, **reasons}.items()
             },
             "dry_run": self.dry_run,
             "is_mock": self.is_mock,

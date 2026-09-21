@@ -196,6 +196,13 @@ def enroll(
 ROUTINE_KIND = "prediction"
 
 
+def _expected_offset_minutes(cfg: dict) -> int:
+    """The offset this automation's settings currently imply, in minutes."""
+    from app.services.reorder_timing import offset_minutes_for
+
+    return offset_minutes_for(cfg["reminder_offset"], cfg["custom_offset_minutes"])
+
+
 def _store_routine(plan: ReminderPlan, *, now: datetime) -> dict:
     """What goes in the enrollment's ``pattern`` column.
 
@@ -245,12 +252,19 @@ def refresh_patterns(
         stale = should_recompute(
             enrollment.pattern, now=now, max_age_days=cfg["pattern_max_age_days"]
         )
+        blob = enrollment.pattern or {}
         # A routine stored by the previous, hour-bucket model is recomputed
         # whatever its age: its fields mean something different, and reading
         # it as a prediction would schedule from values that were never
         # measured the same way.
-        outdated_shape = (enrollment.pattern or {}).get("kind") != ROUTINE_KIND
-        if not force and not stale and not outdated_shape:
+        outdated_shape = blob.get("kind") != ROUTINE_KIND
+        # The offset each slot was planned with is stored alongside it, so a
+        # change to the campaign's timing is visible here. Without this an
+        # operator moving "30 minutes before" to "2 hours before" changed
+        # nothing until the routine happened to go stale — up to thirty days
+        # of a setting that had been accepted and was doing nothing.
+        retimed = blob.get("offset_minutes") != _expected_offset_minutes(cfg)
+        if not force and not stale and not outdated_shape and not retimed:
             continue
         plan = plan_for(
             db,
@@ -568,13 +582,19 @@ def _suppression_for(
 
 
 def _prospective_enrollments(
-    db: Session, automation: Automation, *, now: datetime
+    db: Session, automation: Automation, *, now: datetime, not_enrolled: dict[str, int]
 ) -> list[AutomationEnrollment]:
     """Transient enrollments for customers who would join on a live run.
 
     Never added to the session — a dry run must not change state. Customers
     without a usable order pattern are left out here exactly as they would be
     by :func:`enroll`, so the preview count matches what a live run produces.
+
+    ``not_enrolled`` is filled in as it goes, because "who is missing and
+    why" is most of what a preview is for. Somebody excluded here produces no
+    candidate and therefore no skip, so without counting them the preview
+    would report a smaller audience with nothing to account for the
+    difference.
     """
     cfg = config_of(automation)
     enrolled = set(
@@ -592,7 +612,11 @@ def _prospective_enrollments(
         if customer_id in enrolled:
             continue
         plan = plan_for(db, customer_id, cfg, now=now)
-        if not plan.has_plan or plan.prediction.overall_confidence < cfg["min_confidence"]:
+        if not plan.has_plan:
+            not_enrolled["INSUFFICIENT_HISTORY"] = not_enrolled.get("INSUFFICIENT_HISTORY", 0) + 1
+            continue
+        if plan.prediction.overall_confidence < cfg["min_confidence"]:
+            not_enrolled["LOW_CONFIDENCE"] = not_enrolled.get("LOW_CONFIDENCE", 0) + 1
             continue
         prospective.append(
             AutomationEnrollment(
@@ -642,13 +666,14 @@ def run(
     now = now or utcnow()
     cfg = config_of(automation)
 
+    not_enrolled: dict[str, int] = {}
     if dry_run:
         # Enrollment only happens on a live run, so a preview of a nudge
         # nobody has joined yet would be empty and would tell an operator
         # nothing — which defeats the point of previewing before approving.
         # Simulate it in memory instead.
         enrollments = _active(db, automation) + _prospective_enrollments(
-            db, automation, now=now
+            db, automation, now=now, not_enrolled=not_enrolled
         )
     else:
         enroll(db, automation, now=now, commit=False)
@@ -671,6 +696,8 @@ def run(
             report.results.append(
                 _order_skip(db, automation, candidate, now=now, dry_run=dry_run)
             )
+
+    report.not_enrolled = not_enrolled
 
     if not dry_run:
         _reschedule(db, report, by_customer, cfg=cfg, now=now)

@@ -29,6 +29,7 @@ interface UpcomingCustomer {
   minutes_away: number;
   is_due_now: boolean;
   usual_day: string | null;
+  usual_time: string | null;
   confidence: number;
   interval_label: string;
   last_order_at: string | null;
@@ -63,7 +64,11 @@ interface AccuracyBlock {
 
 interface OverviewResponse {
   eligible_customers: number;
+  predicted_today: number;
   predicted_next_24h: number;
+  min_confidence: number;
+  enrolled_customers: number;
+  enrolled_due_next_24h: number;
   active_campaigns: number;
   predictions_pending: number;
   accuracy: AccuracyBlock;
@@ -189,11 +194,24 @@ export default function SmartReorderPage() {
         description="Customers are reminded around the time they usually order, learned from their own history. Every send still re-checks consent, the send window, and whether they have already ordered."
       />
 
+      {/* The first row is the opportunity, counted from every customer's
+          stored prediction — true whether or not a campaign is running. The
+          second is what a live campaign is actually watching. Showing only
+          the second made the whole page read zero until somebody activated
+          something, which is the opposite of what it is for. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Eligible customers" value={stats?.eligible_customers ?? 0} hint="Enough history for a routine" />
+        <Stat
+          label="Eligible customers"
+          value={stats?.eligible_customers ?? 0}
+          hint={`Confident routine (${stats?.min_confidence ?? 70}%+) and contactable`}
+        />
+        <Stat label="Predicted today" value={stats?.predicted_today ?? 0} hint="In their own local day" />
         <Stat label="Predicted next 24h" value={stats?.predicted_next_24h ?? 0} />
-        <Stat label="Active campaigns" value={stats?.active_campaigns ?? 0} />
-        <Stat label="Awaiting outcome" value={stats?.predictions_pending ?? 0} hint="Predictions not yet checked" />
+        <Stat
+          label="Enrolled in a campaign"
+          value={stats?.enrolled_customers ?? 0}
+          hint={`${stats?.active_campaigns ?? 0} active`}
+        />
       </div>
 
       <Card
@@ -223,10 +241,23 @@ export default function SmartReorderPage() {
         {upcoming.loading && !upcoming.data && <LoadingState label="Reading predictions…" />}
         {upcoming.error && <ErrorState message={upcoming.error} onRetry={upcoming.refetch} />}
 
+        {/* Two different situations, and telling them apart matters: "no
+            campaign is running" is something to go and fix, while "nobody is
+            due in the next two hours" is the system working. One message for
+            both told an operator with a live campaign and 22 enrolled
+            customers that they had neither. */}
         {upcoming.data && rows.length === 0 && (
           <EmptyState
-            title="Nobody is due in this window"
-            description="Customers appear here once a Smart Reorder campaign is active and they have enough order history for a routine to be learned."
+            title={
+              (stats?.enrolled_customers ?? 0) > 0
+                ? 'Nobody is due in this window'
+                : 'No campaign is watching yet'
+            }
+            description={
+              (stats?.enrolled_customers ?? 0) > 0
+                ? `${stats?.enrolled_customers} customers are enrolled, none of them due in the next ${hours} hours. Try a longer window.`
+                : 'Customers appear here once a Smart Reorder campaign is active and they have enough order history for a routine to be learned.'
+            }
           />
         )}
 
@@ -240,7 +271,12 @@ export default function SmartReorderPage() {
               <thead className="bg-slate-50">
                 <tr>
                   <th className="table-head">Customer</th>
-                  <th className="table-head">Predicted</th>
+                  {/* This column is the reminder, not the order. It was
+                      headed "Predicted", beside a "Usual" column holding the
+                      predicted order time — so the two times a reader most
+                      needs to tell apart were labelled as if the reminder
+                      were the prediction. */}
+                  <th className="table-head">Reminder</th>
                   <th className="table-head">When</th>
                   <th className="table-head">Confidence</th>
                   <th className="table-head">Usual</th>
@@ -283,7 +319,8 @@ export default function SmartReorderPage() {
                     </Badge>
                   </td>
                   <td className="table-cell whitespace-normal text-slate-600">
-                    {row.usual_day ?? '—'} · every {row.interval_label}
+                    {row.usual_day ?? '—'}
+                    {row.usual_time ? ` ${row.usual_time}` : ''} · every {row.interval_label}
                   </td>
                   <td className="table-cell">{row.channel}</td>
                   <td className="table-cell">

@@ -25,6 +25,31 @@ with the reason.
 - [x] Campaign approval required before sending
 - [x] Campaign copy is either written once with merge tags or drafted per
       recipient, chosen on the campaign and honoured by every send path
+
+## Smart Reorder (personal order-time reminder)
+
+- [x] Per-customer ordering routine: weekday, time of day to the minute
+      (circular mean), median interval, 0–100 confidence per signal
+- [x] Next-order prediction combining *when* they order with *how often*
+- [x] Configurable reminder offset (15/30/60/120 min before, at, after, custom)
+- [x] One timing engine shared by the scheduler and every screen
+- [x] Minimum-confidence threshold for enrollment, counted in the dry run
+- [x] Suppression when the customer has already ordered this cycle
+- [x] Suppression when an order is in flight
+- [x] Prediction stored on `customer_metrics` and refreshed with intelligence
+- [x] Dynamic segments: Smart Reorder Eligible / Today / Next 24 Hours
+- [x] Dashboard counts from stored predictions, before any campaign exists
+- [x] Customers-likely-to-order-now view with routine, confidence and reminder
+- [x] ORDERING PATTERN panel on Customer 360, in the customer's own timezone
+- [x] Prediction outcomes recorded and scored (accuracy, median error, bands)
+- [x] Dry run reporting who is excluded and why, including those who never
+      became candidates
+- [x] Idempotent scheduler — no duplicate reminder within the minimum gap
+- [x] SAM-TEST-001 end-to-end scenario from the brief
+- [ ] **A/B variants for reminder copy** — variants can be stored and
+      attributed but not authored per Smart Reorder campaign
+- [ ] **Per-customer channel fallback order surfaced in the builder** — the
+      priority is applied, but not editable per campaign
 - [x] Mock campaign sending
 - [x] Event tracking
 - [x] Reactivation detection
@@ -56,8 +81,8 @@ with the reason.
 
 ## P2 — Quality and reliability
 
-- [x] Backend test suite (748 tests)
-- [x] Frontend unit tests (63 tests)
+- [x] Backend test suite (771 tests)
+- [x] Frontend unit tests (65 tests)
 - [x] Browser end-to-end tests (17 tests, failing on any console error)
 - [x] Security review, codified as 29 tests
 - [x] AST check proving all 129 routes carry an auth dependency

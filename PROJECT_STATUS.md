@@ -1,6 +1,6 @@
 # PROJECT STATUS — GIMME Retention Engine
 
-**Last updated:** 2026-09-20
+**Last updated:** 2026-09-21
 **State:** MVP and campaign automations complete and verified from a clean
 install, plus deployment, the live TNZ path, Smart Reorder, GIMME data import,
 and campaign copy that is personalised and chosen rather than assumed.
@@ -45,6 +45,11 @@ Since then, and in commit order:
 - **Copy** — merge tags in campaign sends, age verification assumable by
   configuration where a file omits the column, and `copy_mode` on the campaign
   deciding whether the approved body is the message or a per-recipient draft.
+- **Smart Reorder** — the per-customer reorder reminder finished and made
+  coherent: one timing engine behind both the sender and the screens, the
+  reminder offset configurable per campaign, suppression when the customer has
+  already ordered this cycle, the prediction stored on `customer_metrics` so
+  segments and the dashboard can read it, and three dynamic segments over it.
 
 ## Completed features
 
@@ -138,10 +143,10 @@ and who would not with the reason in plain English.
 
 | Suite | Count | Command |
 | --- | --- | --- |
-| Backend | 748 | `make test-backend` |
-| Frontend | 63 | `make test-frontend` |
+| Backend | 771 | `make test-backend` |
+| Frontend | 65 | `make test-frontend` |
 | Browser (Playwright) | 17 | `make test-e2e` |
-| **Total** | **828** | `make test` |
+| **Total** | **853** | `make test` |
 
 ## Known bugs
 
@@ -185,14 +190,19 @@ Each has working code that could not be exercised here:
 
 ## Last successful verification
 
+2026-09-21, Smart Reorder end to end on seeded data: the campaign dry-run
+reported 27 evaluated / 12 eligible with every exclusion named, activation
+enrolled 27 customers, and the upcoming view showed each customer's learned
+routine with the reminder that follows from it — a 6:48 PM customer scheduled
+at 6:18 PM, exactly the configured 30 minutes ahead, and a 7:47 PM customer
+visibly pulled back to 6:00 PM because 7:17 PM is past the send window's
+close. 771 backend, 65 frontend and 17 Playwright tests green.
+
 2026-09-20, from an empty tree: `make setup`, `make seed-small`, both servers
 started, then a written campaign created, approved and sent in mock mode — the
 five recipients received the approved copy with their own name and usual
-product in it, which is the behaviour the `copy_mode` work exists to produce.
-An existing database was upgraded in place: the new column was added and the
-ten campaigns already in it marked `DRAFTED`, which is how they had been
-sending. 748 backend, 63 frontend and 17 Playwright tests green, with zero
-console errors.
+product in it. An existing database was upgraded in place: the new column was
+added and the ten campaigns already in it marked `DRAFTED`.
 
 Earlier, on the automation phase: all three automation types exercised end to
 end on real data (cohort send 35 sent / 73 skipped with reasons; sequence

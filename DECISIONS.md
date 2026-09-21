@@ -326,3 +326,71 @@ which costs real tokens against a live provider. Capped at five, generated with
 `persist=False`, and only when somebody asks. A draft that fails grounding is
 shown as "would not send" rather than as the fallback, because that is what the
 send does with it.
+
+
+---
+
+## 2026-09-21 — One timing engine, called by the sender and by every screen
+
+**Decision:** `app/services/reorder_timing.py` answers "when is this
+customer's reminder scheduled for?" — prediction, configured offset, and the
+send-window clamp in one call. The Smart Reorder scheduler and the customer
+API both use it. The offset lives on the campaign.
+
+**Reason:** There were two answers and they differed by two hours. A screen
+showing a time the sender will not use is worse than a screen showing
+nothing: it is a specific, checkable, wrong promise. The only structural fix
+is that the display and the send are the same call, because any other
+arrangement re-creates the drift the moment either side is changed.
+
+**Alternatives considered:** Teaching the automation to call the prediction
+engine directly and leaving the API as it was — which fixes today's
+mismatch and not the class of it; both would still have owned their own
+clamping and offset.
+
+**Tradeoffs:** The clamp is policy living in a service rather than in the
+automation layer, which is a slightly odd home for it. The alternative was
+duplicating it, which is how it drifts.
+
+---
+
+## 2026-09-21 — A reminder moved by the send window says so
+
+**Decision:** The plan carries `moved_for_send_window` and both the aimed
+and the scheduled time. The API returns all three; the composer and the
+customer panel say when they differ.
+
+**Reason:** A customer who orders at 7:39 PM has their reminder aimed at
+7:09 PM, which is past the 7 PM close of the send window, so it goes at 6:00
+PM instead. That is the right call — the alternative deferral rule would
+push it to 9am the following morning, after the moment it was timed to
+catch. But "half an hour before they usually order" and "at 6" are
+different promises, and an operator reading a page that only shows the
+second has no way to know the first was not kept.
+
+**Tradeoffs:** More fields on the response and more words on the screen, for
+a case that only arises for late-evening customers — who are a large share
+of this particular business.
+
+---
+
+## 2026-09-21 — The next-order prediction is stored, not computed on demand
+
+**Decision:** `customer_metrics` gains `predicted_next_order_at` (indexed),
+`prediction_confidence` and `typical_order_minute`, written by the
+intelligence refresh.
+
+**Reason:** Three things needed it at once. A segment cannot filter on a
+number that only exists inside a function call, so "Smart Reorder Eligible"
+was unbuildable. The scheduler was replaying every customer's order history
+on every five-minute run. And the dashboard could only count enrolled
+customers, so it read zero until somebody activated a campaign — the
+opposite of what a page for deciding whether to run one is for.
+
+**Alternatives considered:** Computing on read with a cache. That is a
+cache, with its invalidation, plus a second definition of "current".
+
+**Tradeoffs:** A stored prediction can be stale between refreshes, which is
+why the send path re-plans from live order history at send time rather than
+trusting the column. The column is for finding candidates; the send is for
+deciding.

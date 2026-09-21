@@ -6,6 +6,17 @@ import type { Automation, AutomationKind, Segment } from '../types';
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+/** How far ahead of the predicted order a Smart Reorder reminder is aimed. */
+const REMINDER_OFFSETS = [
+  { value: '15_MIN_BEFORE', label: '15 minutes before' },
+  { value: '30_MIN_BEFORE', label: '30 minutes before' },
+  { value: '60_MIN_BEFORE', label: '1 hour before' },
+  { value: '2_HOURS_BEFORE', label: '2 hours before' },
+  { value: 'AT_PREDICTED_TIME', label: 'At their usual time' },
+  { value: '30_MIN_AFTER', label: '30 minutes after' },
+  { value: 'CUSTOM', label: 'Custom…' },
+];
+
 type StepDraft = {
   name: string;
   offset_days: number;
@@ -46,6 +57,9 @@ export default function AutomationForm({
   const [variants, setVariants] = useState<string[]>([]);
   const [minOrders, setMinOrders] = useState(3);
   const [minGapDays, setMinGapDays] = useState(7);
+  const [reminderOffset, setReminderOffset] = useState('30_MIN_BEFORE');
+  const [customOffsetMinutes, setCustomOffsetMinutes] = useState(45);
+  const [minConfidence, setMinConfidence] = useState(70);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,7 +87,18 @@ export default function AutomationForm({
         steps: isSequence ? steps : [],
         trigger_type: isSequence ? triggerType : 'SEGMENT_ENTRY',
         message_variants: isSequence || isNudge ? [] : variants.filter((v) => v.trim()),
-        config: isNudge ? { min_orders: minOrders, min_gap_days: minGapDays } : {},
+        config: isNudge
+          ? {
+              min_orders: minOrders,
+              min_gap_days: minGapDays,
+              min_confidence: minConfidence,
+              reminder_offset: reminderOffset,
+              // Only sent when it is the chosen option, so a stale number in
+              // the custom box cannot silently override a named offset.
+              custom_offset_minutes:
+                reminderOffset === 'CUSTOM' ? customOffsetMinutes : null,
+            }
+          : {},
       });
       onCreated(automation);
     } catch (caught) {
@@ -422,7 +447,76 @@ export default function AutomationForm({
               </p>
             </div>
           </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label" htmlFor="nudge-offset">
+                When to send
+              </label>
+              <select
+                id="nudge-offset"
+                className="input"
+                value={reminderOffset}
+                onChange={(event) => setReminderOffset(event.target.value)}
+              >
+                {REMINDER_OFFSETS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">
+                Measured from the time that customer usually orders, to the minute.
+                Arriving while they are still deciding is the point.
+              </p>
+              {reminderOffset === 'CUSTOM' && (
+                <div className="mt-2">
+                  <label className="label" htmlFor="nudge-custom-offset">
+                    Minutes before
+                  </label>
+                  <input
+                    id="nudge-custom-offset"
+                    type="number"
+                    min={-240}
+                    max={1440}
+                    className="input"
+                    value={customOffsetMinutes}
+                    onChange={(event) =>
+                      setCustomOffsetMinutes(Number(event.target.value))
+                    }
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    A negative number sends after their usual time.
+                  </p>
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="label" htmlFor="nudge-min-confidence">
+                Minimum prediction confidence
+              </label>
+              <input
+                id="nudge-min-confidence"
+                type="number"
+                min={0}
+                max={100}
+                className="input"
+                value={minConfidence}
+                onChange={(event) => setMinConfidence(Number(event.target.value))}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                0–100. Below 70 a routine is a loose tendency rather than a habit, and
+                the message is timed by coincidence. Customers under the threshold are
+                not enrolled, and the dry run counts them.
+              </p>
+            </div>
+          </div>
           <p className="mt-3 text-xs text-slate-500">
+            Sends are confined to business hours, so a reminder aimed after closing is
+            moved earlier the same day rather than to the next morning — past the moment
+            it was timed to catch. The customer page shows the time that will actually be
+            used.
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
             This runs indefinitely until a customer opts out. A discount is included only
             where their own history justifies it <em>and</em> an approved promotion exists
             in Brand settings.

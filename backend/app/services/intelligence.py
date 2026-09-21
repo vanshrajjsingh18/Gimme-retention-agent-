@@ -23,7 +23,7 @@ from app.core.enums import (
     NextBestAction,
     OrderStatus,
 )
-from app.core.timezones import to_local
+from app.core.timezones import local_date, to_local, to_utc_naive
 from app.models.base import utcnow
 from app.models.entities import (
     ChurnScore,
@@ -296,6 +296,7 @@ def persist_intelligence(
     row.messages_received_30d = intel.engagement["messages_last_30d"]
     row.messages_opened_90d = intel.engagement["messages_opened_90d"]
     row.messages_sent_90d = intel.engagement["messages_sent_90d"]
+    _persist_order_prediction(db, customer, row, now=now)
     row.calculated_at = now
 
     # Lifecycle transition (only recorded when the stage actually changes).
@@ -435,6 +436,60 @@ def refresh_rfm(db: Session, *, now: datetime | None = None) -> int:
 # --------------------------------------------------------------------------
 # Flat customer view (used by segmentation and the customer list API)
 # --------------------------------------------------------------------------
+def _persist_order_prediction(
+    db: Session, customer: Customer, row: CustomerMetrics, *, now: datetime
+) -> None:
+    """Store when this customer is next likely to order.
+
+    Computed here, alongside everything else derived from their orders, so the
+    scheduler can ask "whose window is approaching?" as an indexed range scan
+    instead of replaying every customer's history every five minutes, and so
+    segmentation can filter on a prediction rather than on a number that only
+    exists inside a function call.
+
+    A customer without enough history gets nulls and a zero confidence rather
+    than a guess — the same answer the engine gives in words elsewhere.
+    """
+    from app.services.reorder_timing import plan_for_customer
+
+    plan = plan_for_customer(db, customer.id, now=now)
+    prediction = plan.prediction
+
+    row.typical_order_minute = prediction.preferred_minute
+    row.prediction_confidence = prediction.overall_confidence
+    # The cycle the reminder is aimed at, in UTC: the plan has already rolled
+    # past any slot that is behind us, so this is a moment still to come.
+    row.predicted_next_order_at = (
+        to_utc_naive(plan.predicted_local) if plan.predicted_local is not None else None
+    )
+
+
+def _prediction_view(metrics: CustomerMetrics, *, now: datetime | None = None) -> dict:
+    """Smart Reorder's prediction, in the shape a segment rule can read.
+
+    ``hours_until_predicted_order`` and ``predicted_order_today`` are derived
+    here rather than stored, because both are answers about *now* and a stored
+    one would be wrong within the hour. "Today" is the customer's local day,
+    not UTC's: for New Zealand those are different days for a large part of
+    the evening, which is exactly when this product is busy.
+    """
+    predicted = metrics.predicted_next_order_at
+    now = now or utcnow()
+
+    hours_until = None
+    is_today = False
+    if predicted is not None:
+        hours_until = round((predicted - now).total_seconds() / 3600.0, 2)
+        is_today = local_date(predicted) == local_date(now)
+
+    return {
+        "prediction_confidence": metrics.prediction_confidence,
+        "predicted_next_order_at": predicted,
+        "hours_until_predicted_order": hours_until,
+        "predicted_order_today": is_today,
+    }
+
+
 def build_customer_view(
     customer: Customer,
     metrics: CustomerMetrics | None,
@@ -500,8 +555,10 @@ def build_customer_view(
                 "top_products": metrics.top_products,
                 "typical_order_weekday": metrics.typical_order_weekday,
                 "typical_order_hour": metrics.typical_order_hour,
+                "typical_order_minute": metrics.typical_order_minute,
                 "estimated_ltv": metrics.estimated_ltv,
                 "engagement_score": metrics.engagement_score,
+                **_prediction_view(metrics),
             }
         )
     else:

@@ -13,17 +13,17 @@ usable at a hundred thousand customers instead of a thousand.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.analytics.order_predictions import describe_interval
 from app.core.database import get_db
 from app.core.enums import AutomationKind, AutomationStatus, EnrollmentStatus
-from app.core.timezones import to_local
+from app.core.timezones import local_date, to_local, to_utc_naive
 from app.models.base import utcnow
 from app.models.entities import (
     Automation,
@@ -102,10 +102,19 @@ def upcoming(
                 # Already overdue is a real state, not a bug: the scheduler
                 # runs on an interval and a window can open between ticks.
                 "is_due_now": due <= now,
-                "usual_day": pattern.get("weekday_name"),
-                "usual_hour": pattern.get("typical_hour"),
-                "confidence": int(round((pattern.get("confidence") or 0) * 100)),
-                "interval_label": describe_interval(pattern.get("median_interval_days")),
+                "usual_day": pattern.get("preferred_weekday_name"),
+                "usual_hour": pattern.get("preferred_hour"),
+                "usual_time": pattern.get("preferred_time_label"),
+                # Already on the 0-100 scale. It was stored 0-1 by the previous
+                # model and multiplied here; reading the new value the same way
+                # would report a confident customer as 9,000%.
+                "confidence": int(pattern.get("overall_confidence") or 0),
+                "interval_label": describe_interval(
+                    (pattern.get("intervals") or {}).get("median_days")
+                ),
+                "predicted_order_at_local": (
+                    pattern.get("predicted_next_order_at") or None
+                ),
                 "last_order_at": (
                     row_metrics.last_order_at.isoformat()
                     if row_metrics and row_metrics.last_order_at
@@ -192,11 +201,74 @@ def overview(
     ).all()
 
     report = accuracy_report(db)
+    population = _predicted_population(db, now=now)
     return {
         "generated_at": now.isoformat(),
-        "eligible_customers": len(enrolled),
-        "predicted_next_24h": len(due_24h),
+        # Who could be reached, from the stored predictions — true whether or
+        # not a campaign happens to be running. Reporting only the enrolled
+        # made the whole dashboard read zero until somebody activated
+        # something, which is the opposite of what it is for: deciding
+        # whether activating anything is worthwhile.
+        "eligible_customers": population["eligible"],
+        "predicted_today": population["today"],
+        "predicted_next_24h": population["next_24h"],
+        "min_confidence": ELIGIBLE_CONFIDENCE,
+        # Who a live campaign is actually watching.
+        "enrolled_customers": len(enrolled),
+        "enrolled_due_next_24h": len(due_24h),
         "active_campaigns": len(active_campaigns),
         "predictions_pending": pending_count(db),
         "accuracy": report.as_dict(),
+    }
+
+
+#: The confidence at or above which a routine is worth acting on. Matches the
+#: "Smart Reorder Eligible" segment and the campaign builder's default, so the
+#: dashboard headline and the audience a campaign would actually reach are the
+#: same number.
+ELIGIBLE_CONFIDENCE = 70
+
+
+def _predicted_population(db: Session, *, now: datetime) -> dict:
+    """Counts over the stored predictions, not over campaign enrollments.
+
+    Answers "is there anything here worth sending?" before a campaign exists.
+    Consent and suppression are part of the count because a customer who
+    cannot be contacted is not an opportunity, however predictable they are.
+    """
+    contactable = (
+        Customer.marketing_consent.is_(True),
+        Customer.is_suppressed.is_(False),
+    )
+    base = (
+        select(func.count())
+        .select_from(CustomerMetrics)
+        .join(Customer, Customer.id == CustomerMetrics.customer_id)
+        .where(
+            CustomerMetrics.prediction_confidence >= ELIGIBLE_CONFIDENCE,
+            CustomerMetrics.predicted_next_order_at.is_not(None),
+            *contactable,
+        )
+    )
+
+    # "Today" is the customer's local day. Converting the day's bounds once
+    # here keeps the comparison on an indexed UTC column instead of forcing a
+    # per-row conversion the database cannot use an index for.
+    day_start = to_utc_naive(datetime.combine(local_date(now), time.min))
+    day_end = day_start + timedelta(days=1)
+
+    return {
+        "eligible": db.execute(base).scalar_one(),
+        "today": db.execute(
+            base.where(
+                CustomerMetrics.predicted_next_order_at >= day_start,
+                CustomerMetrics.predicted_next_order_at < day_end,
+            )
+        ).scalar_one(),
+        "next_24h": db.execute(
+            base.where(
+                CustomerMetrics.predicted_next_order_at >= now,
+                CustomerMetrics.predicted_next_order_at <= now + timedelta(hours=24),
+            )
+        ).scalar_one(),
     }

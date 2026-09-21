@@ -193,6 +193,74 @@ def test_the_reminder_is_scheduled_for_the_time_the_screen_shows(
     ), f"sender schedules {scheduled:%A %-I:%M %p} but the screen shows {shown:%A %-I:%M %p}"
 
 
+def test_changing_when_to_send_moves_the_already_scheduled_reminders(db, sam, campaign):
+    """A timing change has to reach the customers already enrolled.
+
+    Routines are only recomputed once they go stale, so an operator moving
+    "30 minutes before" to "2 hours before" changed nothing for up to thirty
+    days: the setting was accepted, stored, and did nothing to the slots it
+    was about. The offset each slot was planned with is stored beside it, so
+    the mismatch is visible and the refresh picks it up.
+    """
+    enroll_at = to_utc_naive(_local(4, "20:30"))
+    nudge.enroll(db, campaign, now=enroll_at)
+    before = to_local(nudge._active(db, campaign)[0].next_due_at)
+
+    campaign.config = {**(campaign.config or {}), "reminder_offset": "2_HOURS_BEFORE"}
+    db.commit()
+    nudge.refresh_patterns(db, campaign, now=enroll_at)
+
+    after = to_local(nudge._active(db, campaign)[0].next_due_at)
+    assert after < before, f"reminder stayed at {before:%H:%M} after the offset changed"
+    # 7:39 PM less two hours is 5:39 PM, which the send window leaves alone.
+    assert (after.hour, after.minute) == (17, 39), after
+
+
+def test_the_dry_run_accounts_for_customers_who_never_became_candidates(
+    db, bootstrapped, sam, campaign
+):
+    """A preview that quietly drops people explains nothing.
+
+    Somebody with too few orders, or a routine too loose to time a message
+    by, produces no candidate at all — so no skip is recorded, and the
+    audience simply comes back smaller with nothing to account for the
+    difference. That is the one question a dry run exists to answer.
+    """
+    from app.automations.service import run_automation
+
+    thin = Customer(
+        external_id="SAM-TIMING-THIN",
+        email="thin@example.test",
+        phone="+64210000779",
+        first_name="Thin",
+        last_name="History",
+        age_verified=True,
+        marketing_consent=True,
+        sms_consent=True,
+        signup_date=to_utc_naive(_local(0, "19:32")),
+    )
+    db.add(thin)
+    db.flush()
+    db.add(
+        Order(
+            external_id="THIN-ORD-0",
+            customer_id=thin.id,
+            ordered_at=to_utc_naive(_local(0, "19:32")),
+            status=OrderStatus.COMPLETED.value,
+            total_amount=40.0,
+        )
+    )
+    campaign.manual_customer_ids = [sam.id, thin.id]
+    db.commit()
+
+    report = run_automation(db, campaign, now=to_utc_naive(_local(5, "10:00")), dry_run=True)
+    summary = report.dry_run_summary()
+
+    assert report.not_enrolled.get("INSUFFICIENT_HISTORY") == 1
+    assert summary["evaluated"] == 2, summary["lines"]
+    assert any("too few orders" in line for line in summary["lines"]), summary["lines"]
+
+
 def test_the_screen_says_when_the_send_window_moved_the_reminder(
     db, sam, client, auth_headers
 ):

@@ -89,6 +89,29 @@ FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
     "estimated_ltv": {"type": "number", "label": "Estimated LTV", "group": "Behaviour"},
     "engagement_score": {"type": "number", "label": "Engagement score", "group": "Behaviour"},
     "last_order_at": {"type": "date", "label": "Last order date", "group": "Behaviour"},
+    # Smart Reorder. These read the prediction the intelligence refresh
+    # stores, so a segment can be built on when somebody is next likely to
+    # order rather than only on what they have already done.
+    "prediction_confidence": {
+        "type": "number",
+        "label": "Reorder prediction confidence (0-100)",
+        "group": "Behaviour",
+    },
+    "predicted_next_order_at": {
+        "type": "date",
+        "label": "Predicted next order",
+        "group": "Behaviour",
+    },
+    "hours_until_predicted_order": {
+        "type": "number",
+        "label": "Hours until predicted order",
+        "group": "Behaviour",
+    },
+    "predicted_order_today": {
+        "type": "boolean",
+        "label": "Predicted to order today",
+        "group": "Behaviour",
+    },
     "preferred_categories": {
         "type": "list",
         "label": "Preferred categories",

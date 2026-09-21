@@ -995,3 +995,137 @@ a test send shows what the send will do in both modes, that the old flag is
 refused rather than ignored, and that previewing writes nothing. The general
 shape, twice now in this codebase: a setting that decides what customers
 receive must live on the thing being approved, not on the call that sends it.
+
+---
+
+## 2026-09-21 — Smart Reorder was two systems that disagreed about the time
+
+**Found by:** Writing the two assertions the screens already imply — "the
+reminder goes out when Customer 360 says it will" and "a customer who has
+ordered is not reminded" — and watching both fail.
+
+**Failure:** Two separate defects behind one feature.
+
+The timing came from two engines. Customer 360 read the minute-level
+prediction and showed a 7:09 PM reminder for a customer who orders around
+7:39 PM. The automation that actually sends read the older hour-bucket
+pattern, subtracted a hard-coded two hours, and scheduled 5:00 PM. Neither
+number was wrong on its own terms, and nothing on the page said they came
+from different models — so the screen was describing a system that did not
+exist, and the configurable "30 minutes before" the API advertised was not
+reachable from anywhere.
+
+The already-ordered check looked only for a PENDING order. A real order
+lands COMPLETED, so the common case — ordered at 7:15, reminded at 7:09 —
+went straight through. `SkipReason.ALREADY_ORDERED` was defined, had a
+phrase written for the ledger, and was set by nothing; the dry-run test
+that covered it accepted either reason and passed on the pending one. The
+Smart Reorder page stated in as many words that every send re-checks
+"whether they have already ordered".
+
+**Fix:** One engine, `app/services/reorder_timing.py`, called by the
+scheduler and by every screen — the only arrangement in which they cannot
+drift. The offset is the campaign's setting rather than a constant. The
+already-ordered check compares against the order the prediction was built
+from, so this cycle's purchase suppresses the reminder while the order that
+taught us the routine does not.
+
+Two consequences worth naming. The send window can still move a reminder,
+and now says so (`moved_for_send_window`, `aimed_at`) rather than quietly
+producing a different promise. And a due enrollment is no longer replanned
+before the run inspects it — it was, so a customer who had just ordered had
+their slot moved out of reach and vanished from the run: no message, which
+was right, and no reason in the ledger, which was not.
+
+**Preventive action:** A test asserts the scheduled slot and the slot on
+screen are the same weekday and clock time, which is what differed. Others
+cover a completed order suppressing the send, last week's order not
+suppressing it, and the preview accounting for customers who never became
+candidates at all.
+
+---
+
+## 2026-09-21 — predict_next_order hung forever on orders placed minutes apart
+
+**Found by:** Seeding the demo database after wiring the prediction into the
+intelligence refresh. A four-second job did not finish in ten minutes.
+
+**Failure:** An infinite loop, not a slow one. The roll-forward advances a
+prediction by the customer's median interval until it is in the future, then
+snaps it back to their usual weekday and overwrites the clock fields with
+their usual time. For an interval under a day the snap returns the same
+date and the overwrite restores the same time, so the value never changes
+and the `while predicted <= now` test never becomes false.
+
+Three orders fifteen minutes apart produce exactly that — somebody who
+forgets the mixers and orders again. Before the prediction moved into the
+refresh this was reachable from Customer 360 and the Smart Reorder page for
+any such customer: an ordinary page load that never returned.
+
+**Fix:** `_advance_past` checks that each step actually advances and falls
+back to a whole week when it does not, which is what anchoring to a weekday
+means anyway, with an iteration cap as a backstop. The previously hanging
+case now returns in under a millisecond.
+
+**Preventive action:** A test builds that history and asserts the call
+returns in under two seconds, so the failure reads as "the roll-forward is
+not advancing" rather than as a suite that hangs.
+
+The wider lesson: the loop was correct for every history anyone had tried
+it on, and its termination depended on a property of the data — an interval
+longer than a day — that nothing enforced or checked.
+
+---
+
+## 2026-09-21 — Every seeded customer was a breakfast buyer
+
+**Found by:** Reading the new dashboard's output rather than only its
+counts. The soonest predicted orders were 5:18 AM, 7:29 AM, 7:58 AM. For a
+drinks delivery business that is not a plausible reorder window.
+
+**Failure:** The seeder picks an order hour "skewed to evenings" — 5pm to
+9pm — and wrote it straight into `ordered_at`, which holds naive UTC. New
+Zealand runs twelve or thirteen hours ahead, so a 7pm order was stored as
+19:00 and read back as 7am the next morning. 90% of the demo data described
+a customer base that orders at dawn, and Smart Reorder faithfully learned
+to remind them then.
+
+This is the same defect the read side was fixed for in September, in the
+same codebase, on the other side of the boundary: the readers were taught
+to convert and the writer never was.
+
+**Fix:** The hour is chosen in local time and converted with `to_utc_naive`
+before it is stored. 678 of 749 seeded orders now fall between 4pm and 10pm
+on the customer's own clock, where the comment always said they were.
+
+**Preventive action:** A test asserts most seeded orders land in a local
+evening and that none lands between 1am and 8am. It fails loudly on the old
+behaviour, which is the point — the previous version was invisible for as
+long as nothing read the hour back.
+
+---
+
+## 2026-09-21 — Changing when a campaign sends did nothing to the people in it
+
+**Found by:** Changing the reminder offset on the running campaign to check a
+claim before writing it into VERIFICATION.md. The claim was wrong: the
+reminders did not move.
+
+**Failure:** Routines are recomputed only when they go stale, which is thirty
+days. The offset is applied when a slot is planned, so an operator moving
+"30 minutes before" to "2 hours before" changed the stored setting, returned
+200, and left every enrolled customer scheduled at the old time until their
+routine happened to expire. Nothing on screen said the change had not taken
+effect.
+
+**Fix:** The offset a slot was planned with is stored beside it, so the
+refresh can see that the campaign's setting no longer matches and replan.
+Verified on the running system: a 6:48 PM customer moved from a 6:18 PM
+reminder to 4:48 PM.
+
+**Preventive action:** A test changes the offset on an enrolled campaign and
+asserts the scheduled slot moves.
+
+The near-miss is the part worth keeping. This was found only because a line
+of documentation was checked against the product instead of against the code
+that was supposed to implement it.

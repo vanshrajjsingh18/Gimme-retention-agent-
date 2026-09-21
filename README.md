@@ -114,7 +114,7 @@ backend/          FastAPI application
     segmentation/   segment rule evaluation
     services/       persistence layer bridging engines and the database
   scripts/        init_db, seed_demo
-  tests/          748 backend tests
+  tests/          771 backend tests
 frontend/         React + TypeScript + Vite + Tailwind + Recharts
   src/
     api/ components/ features/ hooks/ layouts/ pages/ types/ utils/
@@ -130,8 +130,8 @@ docker/           Dockerfiles and nginx config
 
 ```bash
 make test          # backend (pytest) + frontend (vitest)
-make test-backend  # 748 tests
-make test-frontend # 63 tests
+make test-backend  # 771 tests
+make test-frontend # 65 tests
 make test-e2e      # 17 Playwright tests — needs both servers running
 ```
 

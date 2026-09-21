@@ -235,6 +235,55 @@ DEFAULT_SEGMENTS: list[dict] = [
             "value": ["Beer"],
         },
     },
+    # Smart Reorder. The eligibility rule deliberately mirrors what the
+    # automation itself enforces — enough history, enough confidence, consent,
+    # not suppressed — so that "who would this campaign reach?" can be
+    # answered from the segments list rather than only by running it. The
+    # send path still re-checks all of it at send time; a segment is a view,
+    # never a permission.
+    {
+        "name": "Smart Reorder Eligible",
+        "description": (
+            "Enough order history for a routine, confident enough to act on, "
+            "and contactable."
+        ),
+        "rule": {
+            "op": "AND",
+            "conditions": [
+                {"field": "completed_orders", "operator": "gte", "value": 3},
+                {"field": "prediction_confidence", "operator": "gte", "value": 70},
+                {"field": "marketing_consent", "operator": "is_true"},
+                {"field": "is_suppressed", "operator": "is_false"},
+            ],
+        },
+    },
+    {
+        "name": "Smart Reorder Today",
+        "description": "Predicted to place their next order today, in their own local day.",
+        "rule": {
+            "op": "AND",
+            "conditions": [
+                {"field": "predicted_order_today", "operator": "is_true"},
+                {"field": "prediction_confidence", "operator": "gte", "value": 70},
+                {"field": "marketing_consent", "operator": "is_true"},
+                {"field": "is_suppressed", "operator": "is_false"},
+            ],
+        },
+    },
+    {
+        "name": "Smart Reorder Next 24 Hours",
+        "description": "Predicted to order within the next 24 hours.",
+        "rule": {
+            "op": "AND",
+            "conditions": [
+                {"field": "hours_until_predicted_order", "operator": "gte", "value": 0},
+                {"field": "hours_until_predicted_order", "operator": "lte", "value": 24},
+                {"field": "prediction_confidence", "operator": "gte", "value": 70},
+                {"field": "marketing_consent", "operator": "is_true"},
+                {"field": "is_suppressed", "operator": "is_false"},
+            ],
+        },
+    },
 ]
 
 

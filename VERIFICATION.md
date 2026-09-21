@@ -6,7 +6,7 @@ Status of every requirement, and how each was verified.
 `TESTED` covered by automated tests; `IMPLEMENTED` code exists but is not
 exercised end to end; `BLOCKED` needs something unavailable.
 
-Last full run: 306 backend tests, 35 frontend tests, 10 browser tests — all
+Last full run: 771 backend tests, 65 frontend tests, 17 browser tests — all
 passing from a clean install.
 
 ---
@@ -161,6 +161,40 @@ the code.
 | Approval gate | VERIFIED | Editing approved copy withdraws approval and pauses the automation |
 | Attribution through existing reporting | VERIFIED | An order after an automation send is attributed to its backing campaign |
 | Job runner | VERIFIED | The five-minute tick was observed firing against seeded data |
+
+## Smart Reorder (personal order-time reminder)
+
+Added after the automations phase and finished on 2026-09-21. Every row was
+checked by running the system.
+
+| Requirement | Status | How verified |
+| --- | --- | --- |
+| Routine learned per customer | VERIFIED | Seeded customers show their own weekday and a time to the minute — "Wednesday 7:47 PM · every 24.9 days" |
+| Time of day survives midnight | TESTED | Circular mean; 23:50 and 00:10 average to midnight, not midday (`test_order_predictions.py`) |
+| Median interval, not mean | TESTED | One holiday does not move the estimate |
+| Confidence per signal, 0–100 | VERIFIED | Day, time and interval scored separately and shown apart on Customer 360 |
+| Prediction combines when *and* how often | TESTED | Not last order + 7 days: the interval sets the date, the weekday snaps it, the clock time lands it |
+| Prediction is always in the future | TESTED | Rolls whole cycles forward; a sub-daily interval falls back to a week rather than looping |
+| Configurable reminder offset | VERIFIED | A 6:48 PM customer scheduled at 6:18 PM on the default; switching the live campaign to `2_HOURS_BEFORE` moved it to 4:48 PM |
+| A timing change reaches customers already enrolled | VERIFIED | Found by trying it: the offset used is stored beside each slot, so the refresh replans it instead of waiting up to 30 days for the routine to go stale |
+| Screen and sender agree | TESTED | The scheduled slot and the slot on Customer 360 are asserted to be the same weekday and clock time |
+| Send window moves are visible | VERIFIED | A 7:47 PM customer is scheduled 6:00 PM and the response says `moved_for_send_window` |
+| Already ordered → no reminder | TESTED | A **completed** order after the prediction suppresses it; last week's order does not |
+| Order in flight → no reminder | TESTED | Recorded as `PENDING_ORDER`, the narrower reason |
+| Minimum order history | VERIFIED | Two orders produce no routine and no enrollment; the dry run counts them |
+| Minimum confidence | TESTED | Below the threshold is excluded and counted as `LOW_CONFIDENCE` |
+| Consent, suppression, caps, quiet hours | VERIFIED | Unchanged shared pipeline; dry run named 12 no-consent, 2 age, 1 suppressed |
+| No duplicate reminder | VERIFIED | Running the scheduler twice in the window produces one message |
+| Prediction stored and indexed | VERIFIED | 88 of 120 seeded customers carry a prediction; the dashboard counts from it without a campaign |
+| Smart Reorder segments | TESTED | Eligible / Today / Next 24 Hours, each re-evaluated live; withdrawing consent removes a customer |
+| Dashboard | VERIFIED | 14 eligible, 22 enrolled, 1 active, with the upcoming table showing routine, confidence and reminder |
+| Prediction accuracy | TESTED | Outcomes resolve to hit / early / late / no-order with median error; "not enough data yet" rather than 0% |
+| Mock mode | VERIFIED | Whole scenario run with no provider credentials |
+| SAM-TEST-001 | TESTED | The brief's scenario end to end: routine learned, dry run, sent once, not repeated, suppressed after an order, conversion and outcome recorded |
+| A/B variants for reminder copy | NOT MET | Variants store and attribute, but cannot be authored per Smart Reorder campaign |
+| Per-campaign channel fallback | NOT MET | The priority order is applied; it is not editable in the builder |
+
+---
 
 ---
 

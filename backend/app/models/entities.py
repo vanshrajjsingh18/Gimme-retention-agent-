@@ -231,6 +231,21 @@ class CustomerMetrics(Base, TimestampMixin):
     top_products: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     typical_order_weekday: Mapped[str | None] = mapped_column(String(12), nullable=True)
     typical_order_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Smart Reorder's answer, precomputed. Recalculating every customer's
+    # order history on each five-minute scheduler run does not survive contact
+    # with a real customer base, and a segment cannot filter on a number that
+    # only exists inside a function. Written by the intelligence refresh;
+    # read by segmentation, the Smart Reorder dashboard, and the scheduler's
+    # "whose window is approaching?" query.
+    typical_order_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Naive UTC, like every other timestamp here. Indexed because the
+    #: scheduler's central question is a range scan over it.
+    predicted_next_order_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
+    #: 0-100, the same scale the dashboard and the campaign threshold speak.
+    prediction_confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     estimated_ltv: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     engagement_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     messages_received_30d: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

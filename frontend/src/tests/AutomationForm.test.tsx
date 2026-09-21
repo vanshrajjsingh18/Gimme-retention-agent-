@@ -189,4 +189,53 @@ describe('AutomationForm', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('already exists');
     expect(onCreated).not.toHaveBeenCalled();
   });
+
+  it('sends the Smart Reorder timing and confidence the operator chose', async () => {
+    const submit = vi.fn(async (_payload: Record<string, unknown>) =>
+      stubAutomation({ kind: 'NUDGE' }),
+    );
+    render(
+      <AutomationForm kind="NUDGE" onCreated={vi.fn()} onCancel={vi.fn()} submit={submit} />,
+    );
+
+    await screen.findByRole('option', { name: /At Risk/ });
+    await userEvent.type(screen.getByLabelText('Name'), 'Smart Reorder');
+    await userEvent.selectOptions(screen.getByLabelText('Audience'), '7');
+    await userEvent.selectOptions(screen.getByLabelText('When to send'), '2_HOURS_BEFORE');
+    await userEvent.click(screen.getByRole('button', { name: /create as draft/i }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    const payload = submit.mock.calls[0][0] as unknown as { config: Record<string, unknown> };
+    expect(payload.config).toMatchObject({
+      reminder_offset: '2_HOURS_BEFORE',
+      min_confidence: 70,
+      min_orders: 3,
+    });
+  });
+
+  it('only sends a custom offset when custom is the chosen option', async () => {
+    // A number left in the custom box must not quietly override a named
+    // offset — that is how a campaign sends at a time nobody picked.
+    const submit = vi.fn(async (_payload: Record<string, unknown>) =>
+      stubAutomation({ kind: 'NUDGE' }),
+    );
+    render(
+      <AutomationForm kind="NUDGE" onCreated={vi.fn()} onCancel={vi.fn()} submit={submit} />,
+    );
+
+    await screen.findByRole('option', { name: /At Risk/ });
+    await userEvent.type(screen.getByLabelText('Name'), 'Smart Reorder');
+    await userEvent.selectOptions(screen.getByLabelText('Audience'), '7');
+    await userEvent.selectOptions(screen.getByLabelText('When to send'), 'CUSTOM');
+    const minutes = screen.getByLabelText('Minutes before');
+    await userEvent.clear(minutes);
+    await userEvent.type(minutes, '90');
+    await userEvent.selectOptions(screen.getByLabelText('When to send'), '15_MIN_BEFORE');
+    await userEvent.click(screen.getByRole('button', { name: /create as draft/i }));
+
+    await waitFor(() => expect(submit).toHaveBeenCalled());
+    const payload = submit.mock.calls[0][0] as unknown as { config: Record<string, unknown> };
+    expect(payload.config.custom_offset_minutes).toBeNull();
+    expect(payload.config.reminder_offset).toBe('15_MIN_BEFORE');
+  });
 });
