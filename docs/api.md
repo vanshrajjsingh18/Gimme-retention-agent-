@@ -188,12 +188,21 @@ curl -X POST http://127.0.0.1:8000/api/v1/message-fields/preview \
 }
 ```
 
-Fields: `first_name` `last_name` `full_name` `email` `phone` `city`
-`product` `product_name` `category` `brand` `preferred_category`
-`preferred_brand` `last_order_date` `last_order_amount`
-`average_order_value` `order_count` `preferred_order_day`
-`preferred_order_time`, plus the brand values `link` `company`
-`delivery_promise` `support_phone` `sign_off`.
+Fields, by the group the Personalize menu shows them under:
+
+| Group | Tags |
+| --- | --- |
+| Customer | `first_name` `last_name` `full_name` `email` `phone` `city` |
+| Order | `product` `product_name` `category` `brand` `last_order_date` `last_order_amount` `order_count` |
+| Behaviour | `preferred_category` `preferred_brand` `preferred_order_day` `preferred_order_time` `average_order_value` |
+| GIMME | `link` `company` `delivery_promise` `support_phone` `sign_off` |
+
+Where each value comes from is fixed in `app/services/merge_tags.py`:
+`#first_name#` is `customer.first_name`, `#product#` is the product on their
+most recent completed order (falling back to the one they order most),
+`#last_order_amount#` is that order's total, and the `preferred_*` tags are
+computed behaviour metrics. Nothing asks a model where a value should come
+from.
 
 Three things this deliberately does not do:
 
@@ -206,6 +215,15 @@ Three things this deliberately does not do:
 * **An unknown tag blocks the send.** It raises the blocking compliance
   finding `UNKNOWN_MERGE_TAG`, so a campaign cannot be approved and an
   automation cannot be activated while one is present.
+* **A gap no fallback can close is not sent.** A recipient whose message
+  would read "You have spent over orders" is recorded as `FAILED` with the
+  missing field named, and counted in the send's `missing_personalisation`.
+
+Column names in an uploaded file are mapped to these fields on import, so a
+spreadsheet with "First Name", "FirstName" or "Customer First Name" all feed
+`#first_name#`, and "Product", "Item Name" or "Product Name" all feed
+`#product_name#`. A CSV preview returns `column_mapping` saying how each of
+your columns was read.
 
 ## Messages
 

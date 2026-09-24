@@ -220,6 +220,20 @@ test.describe('Segments', () => {
   });
 });
 
+/**
+ * Open a campaign whose copy can still be edited.
+ *
+ * Clicking whichever row happens to be first reads whatever was created
+ * last — including a campaign that has already sent, whose body is
+ * deliberately read-only. The tests below are about the composer, so they
+ * have to ask for one that has a composer.
+ */
+async function openEditableCampaign(page: Page) {
+  const draft = page.locator('tbody tr').filter({ hasText: /Draft|Awaiting Approval/ }).first();
+  await expect(draft).toBeVisible({ timeout: 15_000 });
+  await draft.getByRole('link').first().click();
+}
+
 test.describe('Campaigns', () => {
   test('shows the audience breakdown with consent and age exclusions', async ({ page }) => {
     const { errors } = guard(page);
@@ -228,7 +242,7 @@ test.describe('Campaigns', () => {
     await page.getByRole('link', { name: 'Campaigns', exact: true }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Campaigns' })).toBeVisible();
 
-    await page.locator('tbody tr').first().getByRole('link').first().click();
+    await openEditableCampaign(page);
 
     // The workflow rail and audience panel render.
     await expect(page.getByText('Compliance', { exact: true }).first()).toBeVisible();
@@ -246,7 +260,7 @@ test.describe('Campaigns', () => {
     await login(page);
 
     await page.goto('/campaigns');
-    await page.locator('tbody tr').first().getByRole('link').first().click();
+    await openEditableCampaign(page);
 
     // The choice is on the campaign, where approval can see it — not a flag
     // on the send button, which is how approved copy used to be replaced by
@@ -270,7 +284,7 @@ test.describe('Campaigns', () => {
     await login(page);
 
     await page.goto('/campaigns');
-    await page.locator('tbody tr').first().getByRole('link').first().click();
+    await openEditableCampaign(page);
 
     const body = page.locator('#campaign-body');
     await expect(body).toBeVisible();
@@ -289,12 +303,43 @@ test.describe('Campaigns', () => {
     expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
   });
 
+  test('the same template previews differently for two customers', async ({ page }) => {
+    const { errors } = guard(page);
+    await login(page);
+
+    await page.goto('/campaigns');
+    await openEditableCampaign(page);
+
+    const body = page.locator('#campaign-body');
+    await expect(body).toBeVisible();
+    await body.fill('Hi #first_name#, fancy another #product#?');
+
+    // One template, two people, two messages — the whole claim of the
+    // feature, checked by reading the screen rather than the resolver.
+    const picker = page.getByLabel('Preview as customer');
+    const options = picker.locator('option');
+    await expect(options.nth(2)).toBeAttached({ timeout: 15_000 });
+
+    await picker.selectOption({ index: 1 });
+    const first = await page.locator('main p.whitespace-pre-wrap').first().innerText();
+
+    await picker.selectOption({ index: 2 });
+    await expect
+      .poll(async () => page.locator('main p.whitespace-pre-wrap').first().innerText())
+      .not.toBe(first);
+
+    // And neither of them is the template.
+    expect(first).not.toContain('#first_name#');
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
+
   test('a merge tag that is not a field is refused before approval', async ({ page }) => {
     const { errors } = guard(page);
     await login(page);
 
     await page.goto('/campaigns');
-    await page.locator('tbody tr').first().getByRole('link').first().click();
+    await openEditableCampaign(page);
 
     const body = page.locator('#campaign-body');
     await expect(body).toBeVisible();

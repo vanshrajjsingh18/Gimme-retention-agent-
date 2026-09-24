@@ -10,6 +10,40 @@ reported with its row number and reason, and everything else imports.
 
 ---
 
+## Column names
+
+Your columns do not have to be spelled the way this system spells them. Every
+header is mapped to an internal field once, before any of the validators see
+it, so a file written by hand and one exported by a developer import the same
+way.
+
+Two steps, in this order:
+
+1. **Word breaks and case are normalised.** `First Name`, `FirstName` and
+   ` FIRST_NAME ` are all `first_name`; `Total Amount` is `total_amount`.
+2. **Genuine renames are looked up in a table.** `Item Name`, `Product` and
+   `Product Name` all mean `product_name`; `Order Date` means `ordered_at`;
+   `Customer ID` means `customer_external_id`; `Mobile` means `phone`.
+
+A header matching neither keeps its own slug and no ingestor reads it. That is
+deliberate: a column nobody recognises is ignored rather than guessed at,
+because mapping `Delivery Notes` onto the nearest-looking field is how somebody
+ends up with an address in their name.
+
+A file carrying a single `Customer Name` column and no first/last is split on
+the first space — but only when there is no first-name column of its own, since
+guessing over the top of real data replaces it with a worse split.
+
+The preview returns `column_mapping`, saying what each of your columns was read
+as. Worth looking at before importing: "we read your 'Item Name' column as
+product_name" is the difference between trusting an import and finding out a
+month later that every product was blank.
+
+This is the same set of names the message merge tags use, so a column that maps
+to `first_name` is what `#first_name#` fills.
+
+---
+
 ## Preview is a real dry run
 
 Uploading a file runs the **actual ingestor over every row** and throws the

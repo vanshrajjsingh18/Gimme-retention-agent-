@@ -335,12 +335,18 @@ export interface CopySample {
   subject: string;
   body: string;
   validation_failed: boolean;
+  missing_fields: string[];
+  fallbacks_used: string[];
 }
 
 export interface CopyPreview {
   copy_mode: CopyMode;
   eligible_count: number;
   samples: CopySample[];
+  unknown_tags: string[];
+  /** Nobody is eligible *right now* because of quiet hours, so the samples
+   *  below are drawn from the segment instead. The copy is still theirs. */
+  outside_send_window: boolean;
 }
 
 export interface Campaign {

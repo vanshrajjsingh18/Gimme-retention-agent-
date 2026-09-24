@@ -38,6 +38,9 @@ interface PreviewResponse {
   missing_fields: string[];
   fallbacks_used: string[];
   unknown_tags: string[];
+  valid_tags: string[];
+  unfillable: string[];
+  ok: boolean;
   customer_id: number | null;
   customer_name: string;
   characters: number;
@@ -101,6 +104,8 @@ export default function MessagePersonalization({
             missing_fields: result?.missing_fields ?? [],
             fallbacks_used: result?.fallbacks_used ?? [],
             unknown_tags: result?.unknown_tags ?? [],
+            valid_tags: result?.valid_tags ?? [],
+            unfillable: result?.unfillable ?? [],
           });
         }
       })
@@ -212,6 +217,23 @@ export default function MessagePersonalization({
               As {preview.customer_name} would receive it · {preview.characters} characters
             </p>
 
+            {/* Tag by tag, because "a merge tag is wrong" in a 400-character
+                body is not something anybody can act on. */}
+            {(preview.valid_tags.length > 0 || preview.unknown_tags.length > 0) && (
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                {preview.valid_tags.map((tag) => (
+                  <span key={tag} className="font-mono text-xs text-emerald-700">
+                    ✓ #{tag}#
+                  </span>
+                ))}
+                {preview.unknown_tags.map((tag) => (
+                  <span key={tag} className="font-mono text-xs text-red-700">
+                    ✕ #{tag}# — unknown field
+                  </span>
+                ))}
+              </div>
+            )}
+
             {/* An unknown tag is the one thing here that stops a send, so it
                 is stated as a blocker rather than as a note. */}
             {preview.unknown_tags.length > 0 && (
@@ -222,15 +244,25 @@ export default function MessagePersonalization({
               </p>
             )}
 
-            {preview.unknown_tags.length === 0 && preview.missing_fields.length > 0 && (
-              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                This customer has nothing for{' '}
-                {preview.missing_fields.map((tag) => `#${tag}#`).join(', ')}.
-                {preview.fallbacks_used.length > 0
-                  ? ' A fallback was used above — other customers will see their own details.'
-                  : ' The tag was left out of the message above.'}
+            {/* A gap no fallback can close is not a note, it is a customer
+                who will be skipped — so it is said in those words. */}
+            {preview.unknown_tags.length === 0 && preview.unfillable.length > 0 && (
+              <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {preview.unfillable.map((tag) => `#${tag}#`).join(', ')} has no value for this
+                customer and no fallback to stand in, so they would be skipped rather than sent
+                a message with a gap in it.
               </p>
             )}
+
+            {preview.unknown_tags.length === 0 &&
+              preview.unfillable.length === 0 &&
+              preview.fallbacks_used.length > 0 && (
+                <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  This customer has nothing for{' '}
+                  {preview.fallbacks_used.map((tag) => `#${tag}#`).join(', ')}. A fallback was
+                  used above — other customers will see their own details.
+                </p>
+              )}
           </>
         )}
       </div>

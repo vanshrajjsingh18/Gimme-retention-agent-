@@ -390,6 +390,7 @@ def personalisation_audit(
         "missing_fields": sorted(set(subject.missing_fields) | set(body.missing_fields)),
         "fallbacks_used": sorted(set(subject.fallbacks_used) | set(body.fallbacks_used)),
         "unknown_tags": sorted(set(subject.unknown_tags) | set(body.unknown_tags)),
+        "unfillable": sorted(set(subject.unfillable) | set(body.unfillable)),
         "copy_mode": campaign.copy_mode,
     }
 
@@ -423,7 +424,27 @@ def preview_copy(db: Session, campaign: Campaign, *, count: int = 3) -> dict:
     drafted = drafts_per_recipient(campaign)
     samples: list[dict] = []
 
-    for entry in audience["sample_recipients"]:
+    # Who to show the copy filled in for. Normally the people who would
+    # receive it — but eligibility is a question about *now*, and reading
+    # your own copy is not. Between 7pm and 9am quiet hours exclude the whole
+    # audience, so a preview of the send is empty and an operator sitting
+    # down to write an evening campaign sees no message at all and concludes
+    # the composer is broken. The audience count above stays honest; this
+    # falls back to the segment so there is always somebody to read it as.
+    people = audience["sample_recipients"]
+    held_by_the_clock = audience["exclusion_samples"].get(
+        RecipientStatus.EXCLUDED_QUIET_HOURS.value, []
+    )
+    # Only when the clock is the reason there is nobody, and only showing the
+    # people the clock is holding — they are contactable and would receive
+    # this in the morning. Falling back to *anyone* excluded would render the
+    # copy as an opted-out customer, which is a different and worse lie than
+    # showing nothing.
+    timing_only = audience["eligible_count"] == 0 and bool(held_by_the_clock)
+    if timing_only:
+        people = held_by_the_clock[:count]
+
+    for entry in people:
         customer = db.get(Customer, entry["id"])
         if customer is None:
             continue
@@ -469,6 +490,9 @@ def preview_copy(db: Session, campaign: Campaign, *, count: int = 3) -> dict:
         "copy_mode": campaign.copy_mode,
         "eligible_count": audience["eligible_count"],
         "samples": samples,
+        # Said out loud rather than left for the operator to infer from a
+        # count of zero beside three sample messages.
+        "outside_send_window": timing_only,
         # A property of the copy, not of any one recipient — so it sits beside
         # the samples rather than inside each of them.
         "unknown_tags": sorted(
@@ -621,6 +645,7 @@ def run_campaign(
         "failed": 0,
         "skipped_ineligible": 0,
         "generation_failed": 0,
+        "missing_personalisation": 0,
         "simulated_events": 0,
     }
 
@@ -645,6 +670,24 @@ def run_campaign(
         subject, body = resolved_subject.text, resolved_body.text
         audit = personalisation_audit(campaign, resolved_subject, resolved_body)
         message_row: Message | None = None
+
+        # A tag with nothing behind it and no fallback to stand in leaves a
+        # hole in the sentence. Sending "You have spent over orders" is worse
+        # than not sending: it reads as a broken system to the one customer
+        # who was already the least engaged. They are recorded with the field
+        # that was missing, so the audience count and the reason agree.
+        if not generate_per_customer and audit["unfillable"]:
+            recipient.status = RecipientStatus.FAILED.value
+            recipient.exclusion_reason = (
+                "No value for "
+                + ", ".join(f"#{tag}#" for tag in audit["unfillable"])
+                + ", and no fallback for it."
+            )
+            stats["missing_personalisation"] += 1
+            stats["failed"] += 1
+            campaign.messages_failed += 1
+            db.commit()
+            continue
         if generate_per_customer:
             message_row = generate_message(
                 db,

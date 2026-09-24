@@ -745,7 +745,23 @@ function CopyPreviewCard({ campaignId, copyMode }: { campaignId: number; copyMod
           description="There is no recipient to preview for. Check the audience."
         />
       ) : (
-        <ul className="space-y-3">
+        <>
+          {/* The count beside these can legitimately read zero: quiet hours
+              exclude everybody between 7pm and 9am, and somebody writing an
+              evening campaign should still be able to read their own copy. */}
+          {data.outside_send_window && (
+            <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Nobody is eligible right now — the send window is closed. These are customers from
+              the segment, so the copy is theirs; the audience count will recover in the morning.
+            </p>
+          )}
+          {data.unknown_tags.length > 0 && (
+            <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {data.unknown_tags.map((tag) => `#${tag}#`).join(', ')} cannot be filled and would
+              be sent exactly as written. Fix before approving.
+            </p>
+          )}
+          <ul className="space-y-3">
           {data.samples.map((sample) => (
             <li
               key={sample.customer_id}
@@ -774,9 +790,15 @@ function CopyPreviewCard({ campaignId, copyMode }: { campaignId: number; copyMod
                   rather than sent the fallback.
                 </p>
               )}
+              {sample.fallbacks_used?.length > 0 && (
+                <p className="mt-1.5 text-xs text-amber-700">
+                  Fallback used for {sample.fallbacks_used.map((f) => `#${f}#`).join(', ')}.
+                </p>
+              )}
             </li>
           ))}
-        </ul>
+          </ul>
+        </>
       )}
     </Card>
   );

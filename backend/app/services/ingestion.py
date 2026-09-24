@@ -1075,6 +1075,142 @@ def template_csv(entity_type: str) -> str:
 # --------------------------------------------------------------------------
 # CSV handling
 # --------------------------------------------------------------------------
+#: Header spellings that are a genuine rename rather than a difference in
+#: punctuation, mapped to the field they mean. Punctuation and case are handled
+#: by :func:`canonical_header` on their own — "First Name", "FirstName" and
+#: "FIRST_NAME" all slug to ``first_name`` with nothing listed here. What needs
+#: listing is a header that uses different *words*: an export calling the
+#: product "Item Name" is not a formatting difference, and the importer used to
+#: drop that column silently and load every row with a blank product.
+#:
+#: Deliberately not exhaustive. A spelling nobody has sent us is a guess, and a
+#: wrong guess maps real data onto the wrong field.
+HEADER_ALIASES: dict[str, str] = {
+    # Who
+    "customer_first_name": "first_name",
+    "given_name": "first_name",
+    "customer_last_name": "last_name",
+    "surname": "last_name",
+    "family_name": "last_name",
+    "name": "full_name",
+    "customer_name": "full_name",
+    "email_address": "email",
+    "customer_email": "email",
+    "mobile": "phone",
+    "mobile_number": "phone",
+    "phone_number": "phone",
+    "customer_phone": "phone",
+    "dob": "date_of_birth",
+    "birth_date": "date_of_birth",
+    "suburb": "city",
+    "town": "city",
+    "post_code": "postcode",
+    "zip": "postcode",
+    "customer_id": "customer_external_id",
+    "customer_reference": "customer_external_id",
+    # The order
+    "order_id": "order_external_id",
+    "order_number": "order_external_id",
+    "order_date": "ordered_at",
+    "order_placed_at": "ordered_at",
+    "date": "ordered_at",
+    "order_status": "status",
+    "order_total": "total_amount",
+    "total": "total_amount",
+    "amount": "total_amount",
+    "grand_total": "total_amount",
+    "discount": "discount_amount",
+    "delivery_charge": "delivery_fee",
+    "shipping_fee": "delivery_fee",
+    # The line
+    "item_id": "item_external_id",
+    "line_id": "item_external_id",
+    "product": "product_name",
+    "item": "product_name",
+    "item_name": "product_name",
+    "description": "product_name",
+    "product_code": "sku",
+    "item_code": "sku",
+    "product_category": "category",
+    "product_type": "category",
+    "product_brand": "brand",
+    "supplier": "brand",
+    "qty": "quantity",
+    "units": "quantity",
+    "price": "unit_price",
+    "item_price": "unit_price",
+    "line_amount": "line_total",
+}
+
+#: A full-name column is split into the two the model actually holds.
+_FULL_NAME_COLUMN = "full_name"
+
+_HEADER_SLUG = re.compile(r"[^a-z0-9]+")
+#: The word break inside a camelCase header. "FirstName" carries the same break
+#: as "First Name" and has to slug the same way, or an export written by a
+#: developer imports differently from one written by hand.
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _raw_headers(content: bytes) -> tuple[list[str], str]:
+    """The header row exactly as the file spells it, for reporting back."""
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            text = content.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return [], ""
+    reader = csv.DictReader(io.StringIO(text))
+    return [h.strip() for h in (reader.fieldnames or []) if (h or "").strip()], text
+
+
+def canonical_header(header: str) -> str:
+    """The internal field name a spreadsheet column means.
+
+    Two steps, in this order. Word breaks and case are normalised — "First
+    Name", "FirstName" and " FIRST_NAME " are all ``first_name`` — and then a
+    genuine rename is looked up in :data:`HEADER_ALIASES`. A header that
+    matches neither is left as its slug, so an unrecognised column is ignored
+    by the ingestors rather than mapped onto something it is not.
+    """
+    spaced = _CAMEL_BOUNDARY.sub(" ", (header or "").strip())
+    slug = _HEADER_SLUG.sub("_", spaced.lower()).strip("_")
+    return HEADER_ALIASES.get(slug, slug)
+
+
+def header_mapping(headers: list[str]) -> list[dict[str, str]]:
+    """How each column in the file was read, for the preview to show.
+
+    Worth putting on screen: "we read your 'Item Name' column as product_name"
+    is the difference between trusting an import and finding out a month later
+    that every product was blank.
+    """
+    return [
+        {"column": header, "field": canonical_header(header)}
+        for header in headers
+        if (header or "").strip()
+    ]
+
+
+def _split_full_name(row: dict) -> None:
+    """Fill first and last name from a single name column, if that is all there is.
+
+    Only when the file has no first/last of its own. An export with both a
+    "Customer Name" and a "First Name" means the split columns; guessing over
+    the top of them would overwrite better data with a worse split.
+    """
+    full = str(row.get(_FULL_NAME_COLUMN) or "").strip()
+    if not full:
+        return
+    if not str(row.get("first_name") or "").strip():
+        first, _, last = full.partition(" ")
+        row["first_name"] = first
+        if not str(row.get("last_name") or "").strip():
+            row["last_name"] = last.strip()
+
+
 def parse_csv(content: bytes) -> tuple[list[str], list[dict]]:
     """Decode and parse CSV bytes into headers and row dicts."""
     for encoding in ("utf-8-sig", "utf-8", "latin-1"):
@@ -1093,10 +1229,15 @@ def parse_csv(content: bytes) -> tuple[list[str], list[dict]]:
     if not reader.fieldnames:
         raise ValueError("The file has no header row.")
 
-    headers = [h.strip() for h in reader.fieldnames]
+    # Canonicalised once, here, so every ingestor and the header check all see
+    # the same field names. Doing it per-reader is how one of them ends up
+    # understanding "Order Date" and the others quietly not.
+    headers = [canonical_header(h) for h in reader.fieldnames if (h or "").strip()]
     rows = []
     for raw in reader:
-        rows.append({(k.strip() if k else ""): v for k, v in raw.items() if k})
+        row = {canonical_header(k): v for k, v in raw.items() if (k or "").strip()}
+        _split_full_name(row)
+        rows.append(row)
     return headers, rows
 
 
@@ -1119,11 +1260,16 @@ def preview_csv(entity_type: str, content: bytes, *, rows: int = 5) -> dict:
     external id, a date in an unexpected format, a landline where a mobile was
     expected. Finding those after committing a customer list means unpicking it.
     """
+    raw_headers, _ = _raw_headers(content)
     headers, parsed = parse_csv(content)
     missing = validate_headers(entity_type, headers)
     preview = {
         "entity_type": entity_type,
         "headers": headers,
+        # What each of their columns was read as. A header check that only
+        # says "first_name is missing" is unhelpful to somebody looking at a
+        # file whose first column is plainly called "First Name".
+        "column_mapping": header_mapping(raw_headers),
         "total_rows": len(parsed),
         "missing_required_columns": missing,
         "valid": not missing,

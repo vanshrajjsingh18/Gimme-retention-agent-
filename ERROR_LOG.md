@@ -1156,3 +1156,64 @@ rather than keeping its own.
 **Preventive action:** A test renders the legacy spellings for a customer
 with no name and no order history and asserts the fallbacks appear. It fails
 on either engine, regardless of who the audience happens to start with.
+
+---
+
+## 2026-09-24 — The importer only understood its own column names
+
+**Found by:** Checking the merge-tag feature against the brief's section 4,
+which asks that "First Name", "FirstName" and "Customer First Name" all reach
+`first_name`. None of them did.
+
+**Failure:** `parse_csv` keyed every row by the header exactly as written, and
+each ingestor read `row.get("first_name")`. A GIMME export whose first column
+is called "First Name" therefore imported every customer with a blank name —
+and reported every row accepted, because a blank name is not an error. The
+same held for "Item Name" against `product_name`, "Order Date" against
+`ordered_at` and "Customer ID" against `customer_external_id`.
+
+Quiet in the worst way: the import looks clean, the customers are all there,
+and it only surfaces later as a campaign that greets the entire audience as
+"there" and offers them all "your usual order".
+
+**Fix:** One canonicalisation pass in `parse_csv`, so every ingestor and the
+header check see the same field names. Word breaks and case are normalised
+("First Name", "FirstName", " FIRST_NAME " → `first_name`); genuine renames
+are an explicit table. A header matching neither keeps its own slug and is
+ignored rather than guessed at — mapping "Delivery Notes" onto the nearest
+field is how somebody's address ends up in their name. The preview now
+returns `column_mapping` so an operator can see how each column was read
+before committing to the import.
+
+**Preventive action:** Tests take a file using none of the internal column
+names and assert a rendered message comes out the other end, rather than
+checking the mapping at the seam where it is easy to get right in isolation.
+
+---
+
+## 2026-09-24 — You could not read your own campaign copy after 7pm
+
+**Found by:** The browser suite, run at 19:20 NZ instead of the afternoon.
+A campaign preview test that had passed all day failed.
+
+**Failure:** The copy preview drew its samples from the eligible audience,
+and eligibility includes quiet hours evaluated at the current moment. Between
+7pm and 9am every SMS recipient is correctly excluded, so the preview came
+back empty — an operator sitting down after dinner to write tomorrow's
+campaign saw no message, no recipient and no reason, and would reasonably
+conclude the composer was broken.
+
+Worth separating: whether somebody may be *messaged now* and whether an
+operator may *read the copy* are different questions, and the preview was
+answering the first when it was asked the second.
+
+**Fix:** When the audience is empty and the clock is why, the samples fall
+back to the people quiet hours is holding — contactable customers who would
+receive this in the morning, not anyone excluded for any reason, which would
+have rendered the copy as an opted-out customer. The eligible count stays
+honest and the screen says which it is showing.
+
+**Preventive action:** A test pins a campaign's send time inside quiet hours
+and asserts the preview still produces a message. The send tests added with
+this feature also now pass an explicit `now`, because several of them were
+passing by virtue of the hour the suite happened to run.

@@ -51,6 +51,11 @@ class MetricResult:
     #: per recipient, and a per-recipient query over the order table is a cost
     #: paid on every send for a number the metrics pass already has in hand.
     last_order_amount: float = 0.0
+    #: The product on the most recent completed order, for #product#. "Fancy
+    #: another Corona Extra?" is about what they last bought, which is not
+    #: always what they buy most — a customer switching brands should be asked
+    #: about the new one.
+    last_order_product: str = ""
     days_since_last_order: int | None = None
     days_since_first_order: int | None = None
     average_purchase_interval_days: float | None = None
@@ -116,6 +121,14 @@ def compute_metrics(
     result.first_order_at = completed[0].ordered_at
     result.last_order_at = completed[-1].ordered_at
     result.last_order_amount = _round(completed[-1].total_amount)
+    result.last_order_product = next(
+        (
+            str(item["product_name"])
+            for item in (completed[-1].items or [])
+            if item.get("product_name")
+        ),
+        "",
+    )
     result.days_since_last_order = max((now - completed[-1].ordered_at).days, 0)
     result.days_since_first_order = max((now - completed[0].ordered_at).days, 0)
 

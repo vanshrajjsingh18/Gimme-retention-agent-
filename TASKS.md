@@ -62,6 +62,9 @@ with the reason.
 - [x] `GET /api/v1/message-fields`, `POST /api/v1/message-fields/preview`
 - [x] Per-send audit: template, resolved text, missing fields, fallbacks used
 - [x] Works with Smart Reorder, through the same resolver
+- [x] Excel/CSV column spellings mapped to canonical fields on import
+- [x] A gap no fallback can close is skipped rather than sent broken
+- [x] Copy preview works outside the send window
 - [x] Mock campaign sending
 - [x] Event tracking
 - [x] Reactivation detection

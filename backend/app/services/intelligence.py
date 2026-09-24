@@ -273,6 +273,7 @@ def persist_intelligence(
         "days_since_last_order",
         "days_since_first_order",
         "last_order_amount",
+        "last_order_product",
         "average_purchase_interval_days",
         "median_purchase_interval_days",
         "purchase_frequency_per_month",

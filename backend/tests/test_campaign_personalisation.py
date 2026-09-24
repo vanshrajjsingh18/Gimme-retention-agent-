@@ -116,5 +116,5 @@ def test_a_test_send_with_nobody_attached_shows_stand_ins(db, templated_campaign
     campaign, _ = templated_campaign
     result = send_test_message(db, campaign, to="preview@example.test")
 
-    assert result["body"] == "Hi Sarah, Steinlager is back. Order at gimmedelivery.co.nz."
+    assert result["body"] == "Hi Sarah, Corona is back. Order at gimmedelivery.co.nz."
     assert result["subject"] == "A note for Sarah"

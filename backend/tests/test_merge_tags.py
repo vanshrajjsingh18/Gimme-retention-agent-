@@ -14,7 +14,7 @@ tests here are about the three ways that goes wrong:
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -34,7 +34,7 @@ from app.core.enums import (
     Channel,
     RecipientStatus,
 )
-from app.core.timezones import to_local
+from app.core.timezones import to_local, to_utc_naive
 from app.models.base import utcnow
 from app.models.entities import (
     Campaign,
@@ -54,6 +54,10 @@ from app.services.merge_tags import (
 #: Every tag the composer offers for a customer, in one body. Written as one
 #: message rather than seventeen so that a tag which swallows the one after it
 #: — a regex that runs on — is visible.
+#: A fixed mid-morning send. Left to the wall clock, a send test passes all
+#: day and fails after 7pm, when quiet hours correctly hold the message.
+MORNING = to_utc_naive(datetime(2026, 9, 24, 11, 0))
+
 EVERY_TAG = (
     "#first_name# #last_name# #full_name# #email# #phone# #product# "
     "#product_name# #category# #brand# #last_order_date# #last_order_amount# "
@@ -380,7 +384,7 @@ def test_the_send_refuses_a_tag_that_is_not_a_field(db, bootstrapped):
     """
     campaign = _campaign(db, "Kia ora #first_name#, use #mystery_field# now.")
     with pytest.raises(CampaignError) as raised:
-        run_campaign(db, campaign, simulate_engagement=False)
+        run_campaign(db, campaign, simulate_engagement=False, now=MORNING)
     assert "#mystery_field#" in str(raised.value)
 
 
@@ -453,7 +457,7 @@ def test_the_stored_template_is_never_overwritten_by_a_send(db, bootstrapped):
     )
     db.commit()
 
-    run_campaign(db, campaign, simulate_engagement=False)
+    run_campaign(db, campaign, simulate_engagement=False, now=MORNING)
     db.refresh(campaign)
 
     assert campaign.body == template, "the send rewrote the campaign's own copy"
@@ -481,7 +485,7 @@ def test_the_send_records_what_was_filled_in_for_each_person(db, bootstrapped):
     )
     db.commit()
 
-    run_campaign(db, campaign, simulate_engagement=False)
+    run_campaign(db, campaign, simulate_engagement=False, now=MORNING)
 
     message = db.execute(
         select(Message).where(
@@ -504,6 +508,64 @@ def test_the_send_records_what_was_filled_in_for_each_person(db, bootstrapped):
     assert message.body != message.original_body
 
 
+def test_a_hole_in_the_sentence_is_not_sent(db, bootstrapped):
+    """A gap no fallback can close means no message, not a broken one.
+
+    "You have spent over orders" reads as a broken system to the one customer
+    who was already the least engaged. The recipient is recorded as failed
+    with the field that was missing named, so the audience count and the
+    reason agree — a send that silently comes back one short is worse than
+    one that says why.
+    """
+    customer = _customer(db, "hole")
+    customer.metrics.completed_orders = 0
+    db.commit()
+
+    campaign = _campaign(
+        db, "Kia ora #first_name#, that is #order_count# orders now. Reply STOP to opt out."
+    )
+    db.add(
+        CampaignRecipient(
+            campaign_id=campaign.id,
+            customer_id=customer.id,
+            status=RecipientStatus.ELIGIBLE.value,
+        )
+    )
+    db.commit()
+
+    stats = run_campaign(db, campaign, simulate_engagement=False, now=MORNING)
+
+    assert stats["sent"] == 0
+    assert stats["missing_personalisation"] == 1
+    recipient = db.execute(
+        select(CampaignRecipient).where(CampaignRecipient.campaign_id == campaign.id)
+    ).scalars().one()
+    assert recipient.status == RecipientStatus.FAILED.value
+    assert "#order_count#" in recipient.exclusion_reason
+
+
+def test_a_gap_a_fallback_can_close_is_sent(db, bootstrapped):
+    """The other side of the same rule, or it would block half the audience.
+
+    A missing first name is not a missing message — that is what the fallback
+    is for, and refusing to send would turn a greeting into a blocker.
+    """
+    customer = _customer(db, "greeting", first_name="")
+    campaign = _campaign(db, "Kia ora #first_name#, we are open late. Reply STOP to opt out.")
+    db.add(
+        CampaignRecipient(
+            campaign_id=campaign.id,
+            customer_id=customer.id,
+            status=RecipientStatus.ELIGIBLE.value,
+        )
+    )
+    db.commit()
+
+    stats = run_campaign(db, campaign, simulate_engagement=False, now=MORNING)
+    assert stats["sent"] == 1
+    assert stats["missing_personalisation"] == 0
+
+
 def test_two_recipients_get_their_own_details_from_one_template(db, bootstrapped):
     """The claim the composer makes, asserted across more than one person."""
     template = "Kia ora #first_name#, your #brand# awaits."
@@ -517,10 +579,39 @@ def test_two_recipients_get_their_own_details_from_one_template(db, bootstrapped
     assert personalise(db, campaign, two)[1] == "Kia ora Hemi, your Tui awaits."
 
 
+def test_you_can_read_your_own_copy_in_the_evening(db, bootstrapped):
+    """Quiet hours are a question about *when*, not about *who*.
+
+    Between 7pm and 9am every recipient is correctly excluded, which emptied
+    the copy preview — so an operator sitting down after dinner to write
+    tomorrow's campaign saw no message at all and no reason given. The
+    audience count stays honest; the samples fall back to the segment, and
+    the screen says which it is showing.
+    """
+    from app.campaigns.service import preview_copy
+
+    _customer(db, "evening")
+    # SMS, because quiet hours are an SMS and WhatsApp rule — email at night
+    # is not intrusive, so it is not the channel this bug shows up on.
+    campaign = _campaign(db, "Kia ora #first_name#, your #brand# awaits. Reply STOP to opt out.")
+    campaign.channel = Channel.SMS.value
+    # 9:30pm their time: inside quiet hours, so nobody is eligible to receive.
+    campaign.scheduled_at = to_utc_naive(datetime(2026, 9, 24, 21, 30))
+    db.commit()
+
+    preview = preview_copy(db, campaign)
+
+    assert preview["eligible_count"] == 0, "the audience count should stay honest"
+    assert preview["outside_send_window"] is True
+    assert preview["samples"], "an operator could not read their own copy"
+    body = preview["samples"][0]["body"]
+    assert body.startswith("Kia ora ") and "#" not in body
+
+
 def test_a_preview_with_nobody_attached_reads_as_a_message(db, bootstrapped):
     """A test send before an audience exists should not show raw tokens."""
     campaign = _campaign(db, "Kia ora #first_name#, your #brand# awaits.")
-    assert personalise(db, campaign, None)[1] == "Kia ora Sarah, your Steinlager awaits."
+    assert personalise(db, campaign, None)[1] == "Kia ora Sarah, your Corona awaits."
 
 
 # ==========================================================================

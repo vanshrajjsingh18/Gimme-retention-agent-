@@ -55,7 +55,9 @@ Since then, and in commit order:
   shared by the campaign composer, the automation composer and Smart Reorder.
   A tag resolves against that list or not at all, an unknown one blocks
   approval and activation, and every send records what was filled in and what
-  fell back.
+  fell back. Spreadsheet column names are mapped to those fields on import, so
+  an export calling it "First Name" or "Item Name" still feeds `#first_name#`
+  and `#product#`.
 
 ## Completed features
 

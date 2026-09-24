@@ -79,6 +79,9 @@ describe('Message personalization', () => {
       missing_fields: [],
       fallbacks_used: [],
       unknown_tags: [],
+      valid_tags: ['first_name'],
+      unfillable: [],
+      ok: true,
       customer_id: 7,
       customer_name: 'Aroha Ngata',
       characters: 27,
@@ -155,6 +158,9 @@ describe('Message personalization', () => {
       missing_fields: [],
       fallbacks_used: [],
       unknown_tags: ['discont_code'],
+      valid_tags: ['first_name'],
+      unfillable: [],
+      ok: false,
       customer_id: null,
       customer_name: 'Sample customer',
       characters: 33,
@@ -171,6 +177,9 @@ describe('Message personalization', () => {
       missing_fields: ['first_name'],
       fallbacks_used: ['first_name'],
       unknown_tags: [],
+      valid_tags: ['first_name'],
+      unfillable: [],
+      ok: true,
       customer_id: 7,
       customer_name: 'Aroha Ngata',
       characters: 13,
@@ -178,6 +187,45 @@ describe('Message personalization', () => {
     render(<Composer initial="Kia ora #first_name#" />);
 
     expect(await screen.findByText(/a fallback was used/i)).toBeInTheDocument();
+  });
+
+  it('marks each tag valid or unknown, one by one', async () => {
+    post.mockResolvedValue({
+      text: 'Kia ora Aroha, use #discont_code#',
+      template: '',
+      missing_fields: [],
+      fallbacks_used: [],
+      unknown_tags: ['discont_code'],
+      valid_tags: ['first_name'],
+      unfillable: [],
+      ok: false,
+      customer_id: null,
+      customer_name: 'Sample customer',
+      characters: 33,
+    });
+    render(<Composer initial="Kia ora #first_name#, use #discont_code#" />);
+
+    expect(await screen.findByText('✓ #first_name#')).toBeInTheDocument();
+    expect(screen.getByText('✕ #discont_code# — unknown field')).toBeInTheDocument();
+  });
+
+  it('warns that a gap no fallback can close means the customer is skipped', async () => {
+    post.mockResolvedValue({
+      text: 'You have spent over orders',
+      template: '',
+      missing_fields: ['order_count'],
+      fallbacks_used: [],
+      unknown_tags: [],
+      valid_tags: ['order_count'],
+      unfillable: ['order_count'],
+      ok: false,
+      customer_id: 7,
+      customer_name: 'Aroha Ngata',
+      characters: 26,
+    });
+    render(<Composer initial="You have spent over #order_count# orders" />);
+
+    expect(await screen.findByText(/would be skipped/i)).toHaveTextContent('#order_count#');
   });
 
   it('does not preview an empty message', () => {

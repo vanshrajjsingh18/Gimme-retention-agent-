@@ -455,3 +455,42 @@ copy reads oddly for one recipient and not another.
 
 **Tradeoffs:** A JSON blob per sent message. It sits in a column that already
 existed for the drafted-copy path.
+
+---
+
+## 2026-09-24 — Column names are canonicalised on import, once
+
+**Decision:** `parse_csv` maps every header to an internal field name before
+any ingestor sees it: word breaks and case normalised, then an explicit table
+for genuine renames. Unrecognised headers keep their slug and are ignored.
+
+**Reason:** The merge tags are only as good as the data behind them, and the
+join between the two is a name. Doing this per-ingestor is how one of them
+ends up understanding "Order Date" and the others quietly not.
+
+**Alternatives considered:** A fuzzy match on header similarity. It would
+handle spellings nobody has sent us, at the cost of occasionally mapping
+"Delivery Notes" onto a customer's name — and a wrong mapping is worse than a
+missing column, because a missing column is reported.
+
+**Tradeoffs:** A spelling not in the table is not imported. The preview now
+returns `column_mapping`, so that is visible before committing rather than
+discovered in a campaign.
+
+---
+
+## 2026-09-24 — #product# follows the latest order, not the longest habit
+
+**Decision:** `#product#` resolves to the product on the customer's most
+recent completed order, falling back to their most-ordered product. The
+most-ordered one keeps its own tags, `#preferred_brand#` and
+`#preferred_category#`.
+
+**Reason:** "Fancy another Corona Extra?" is a question about what they last
+bought. A customer who has just switched should be asked about the new thing,
+not told what they used to drink — which is what a most-ordered lookup says to
+anybody mid-switch.
+
+**Tradeoffs:** One more stored column, `customer_metrics.last_order_product`,
+written by the metrics pass. The alternative was a per-recipient query into
+the order lines on every send.

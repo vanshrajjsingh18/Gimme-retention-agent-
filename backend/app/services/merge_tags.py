@@ -82,6 +82,10 @@ class MessageField:
             "example": self.example,
             "fallback": self.fallback,
             "description": self.description,
+            # "category" is the documented name for this in the API; "group"
+            # is what the composer's menu calls it. Same value, both spellings
+            # served, because renaming one of them would break the other.
+            "category": self.group,
             # What a person types to use it. Spelled out so the UI never has
             # to build the syntax itself and get it subtly wrong.
             "tag": f"#{self.token}#",
@@ -101,55 +105,56 @@ CUSTOMER_FIELDS: list[MessageField] = [
     MessageField("email", "Email address", "Customer", "sarah@example.co.nz", "", "Their email address."),
     MessageField("phone", "Mobile number", "Customer", "021 555 0134", "", "Their mobile number."),
     MessageField(
-        "product", "Most ordered product", "Ordering", "Steinlager Classic 12pk",
-        "your usual order", "The product they order most often.",
+        "product", "Product", "Order", "Corona Extra", "your usual order",
+        "What they last ordered, falling back to what they order most.",
     ),
     MessageField(
-        "product_name", "Most ordered product", "Ordering", "Steinlager Classic 12pk",
-        "your usual order", "Same as #product#, for copy that reads better with the longer name.",
+        "product_name", "Product name", "Order", "Corona Extra", "your usual order",
+        "Same as #product#, for copy that reads better with the longer word.",
     ),
     MessageField(
-        "category", "Favourite category", "Ordering", "Beer", "your usual",
+        "category", "Category", "Order", "Beer", "your usual",
         "The category they buy from most.",
     ),
     MessageField(
-        "brand", "Favourite brand", "Ordering", "Steinlager", "your favourites",
+        "brand", "Brand", "Order", "Corona", "your favourites",
         "The brand they buy most.",
     ),
     MessageField(
-        "preferred_category", "Favourite category", "Ordering", "Beer", "your usual",
-        "Same as #category#.",
-    ),
-    MessageField(
-        "preferred_brand", "Favourite brand", "Ordering", "Steinlager", "your favourites",
-        "Same as #brand#.",
-    ),
-    MessageField(
-        "last_order_date", "Last order date", "Ordering", "14 Sep", "recently",
+        "last_order_date", "Last order date", "Order", "14 Sep", "recently",
         "When they last ordered, in New Zealand local time.",
     ),
     # No fallback on any of the money or count fields. A missing number is not
     # an excuse to make one up: "$0.00" and "0 orders" are statements about a
     # customer, and a wrong one is worse than a gap the tidy-up closes.
     MessageField(
-        "last_order_amount", "Last order amount", "Ordering", "$68.50", "",
+        "last_order_amount", "Last order amount", "Order", "$68.50", "",
         "What their last order came to.",
     ),
     MessageField(
-        "average_order_value", "Average order value", "Ordering", "$62.40", "",
-        "What they typically spend per order.",
-    ),
-    MessageField(
-        "order_count", "Number of orders", "Ordering", "12", "",
+        "order_count", "Number of orders", "Order", "12", "",
         "How many completed orders they have placed.",
     ),
+    # Behaviour: computed from their history rather than read off a record.
     MessageField(
-        "preferred_order_day", "Usual order day", "Ordering", "Wednesday", "your usual day",
+        "preferred_category", "Preferred category", "Behaviour", "Beer", "your usual",
+        "The category they buy from most.",
+    ),
+    MessageField(
+        "preferred_brand", "Preferred brand", "Behaviour", "Corona", "your favourites",
+        "The brand they buy most.",
+    ),
+    MessageField(
+        "preferred_order_day", "Preferred order day", "Behaviour", "Wednesday", "your usual day",
         "The day of the week they usually order, learned by Smart Reorder.",
     ),
     MessageField(
-        "preferred_order_time", "Usual order time", "Ordering", "7:39 pm", "your usual time",
+        "preferred_order_time", "Preferred order time", "Behaviour", "7:39 pm", "your usual time",
         "The time of day they usually order, learned by Smart Reorder.",
+    ),
+    MessageField(
+        "average_order_value", "Average order value", "Behaviour", "$62.40", "",
+        "What they typically spend per order.",
     ),
     MessageField("city", "City", "Customer", "Auckland", "your area", "The city we deliver to."),
 ]
@@ -300,8 +305,13 @@ def customer_field_values(customer: Customer | None) -> dict[str, str]:
     metrics = customer.metrics
     brands = _first(metrics.preferred_brands if metrics else None)
     categories = _first(metrics.preferred_categories if metrics else None)
-    product = _first(metrics.top_products if metrics else None)
     last_order_at = metrics.last_order_at if metrics else None
+    # "Fancy another Corona Extra?" is about what they last bought. Their
+    # most-ordered product is the fallback, not the first choice: a customer
+    # who has just switched brands should be asked about the new one.
+    product = (metrics.last_order_product if metrics else "") or _first(
+        metrics.top_products if metrics else None
+    )
 
     return {
         "first_name": (customer.first_name or "").strip(),
@@ -393,10 +403,16 @@ class ResolvedMessage:
     fallbacks_used: list[str] = field(default_factory=list)
     #: Tags naming something not on the whitelist. Left visible in the text.
     unknown_tags: list[str] = field(default_factory=list)
+    #: Tags that did resolve, in the order they appear.
+    valid_tags: list[str] = field(default_factory=list)
+    #: Missing values with no fallback to stand in for them. These are the
+    #: ones that stop a send rather than degrade it.
+    unfillable: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return not self.unknown_tags
+        """Safe to send: nothing unknown, and no gap a fallback cannot close."""
+        return not self.unknown_tags and not self.unfillable
 
     def as_dict(self) -> dict:
         return {
@@ -405,6 +421,9 @@ class ResolvedMessage:
             "missing_fields": self.missing_fields,
             "fallbacks_used": self.fallbacks_used,
             "unknown_tags": self.unknown_tags,
+            "valid_tags": self.valid_tags,
+            "unfillable": self.unfillable,
+            "ok": self.ok,
         }
 
 
@@ -429,24 +448,36 @@ def render_template(template: str | None, values: dict[str, str]) -> ResolvedMes
 
     missing: list[str] = []
     fell_back: list[str] = []
+    resolved: list[str] = []
+    unfillable: list[str] = []
 
     def substitute(match: re.Match) -> str:
         token = token_of(match)
         if token not in values:
             return match.group(0)
+        if token not in resolved:
+            resolved.append(token)
         value = clean_value(values[token] or "")
         if value:
             return value
         if token not in missing:
             missing.append(token)
         fallback = FALLBACKS.get(token, "")
-        if fallback and token not in fell_back:
-            fell_back.append(token)
+        if fallback:
+            if token not in fell_back:
+                fell_back.append(token)
+        elif token not in unfillable:
+            # Nothing there and nothing to put in its place. Recorded rather
+            # than papered over: the send decides what to do about it, and
+            # "the sentence has a hole in it" is a decision, not a detail.
+            unfillable.append(token)
         return fallback
 
     result.text = tidy(PLACEHOLDER.sub(substitute, template))
     result.missing_fields = missing
     result.fallbacks_used = fell_back
+    result.valid_tags = resolved
+    result.unfillable = unfillable
     result.unknown_tags = unknown_tags(template)
     return result
 
