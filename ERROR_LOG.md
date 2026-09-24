@@ -1129,3 +1129,30 @@ asserts the scheduled slot moves.
 The near-miss is the part worth keeping. This was found only because a line
 of documentation was checked against the product instead of against the code
 that was supposed to implement it.
+
+---
+
+## 2026-09-24 — The older merge tags stopped falling back, and only Postgres said so
+
+**Found by:** Running the suite against PostgreSQL after it passed on SQLite.
+One campaign test failed: "Kia ora, your is one tap away at gimmedelivery.co.nz".
+
+**Failure:** Moving the campaign sender onto the shared resolver gave it a
+fallback table covering only the fields on the new whitelist. The older
+spellings — `{name}`, `{favourite_brand}`, `{website}` — kept a second table
+inside `templates.py`, which the new path never consulted. Copy written
+against them rendered a bare gap mid-sentence.
+
+The reason SQLite missed it is the part worth keeping: the test previews
+against the first customer in the audience, and the two engines return that
+audience in a different order. On SQLite it happened to be somebody with a
+favourite brand and a first name, so every tag resolved and the missing
+fallbacks were invisible. The test was not weaker on SQLite; it was luckier.
+
+**Fix:** One table. `FALLBACKS` in `merge_tags.py` carries the legacy
+spellings alongside the whitelisted fields, and `templates.py` points at it
+rather than keeping its own.
+
+**Preventive action:** A test renders the legacy spellings for a customer
+with no name and no order history and asserts the fallbacks appear. It fails
+on either engine, regardless of who the audience happens to start with.

@@ -158,6 +158,55 @@ rule returns `400` naming the problem.
 
 ---
 
+## Personalisation (merge tags)
+
+| Method | Path                                    | Purpose                              |
+| ------ | --------------------------------------- | ------------------------------------ |
+| GET    | `/api/v1/message-fields`                | Every merge tag, and customers to preview against |
+| POST   | `/api/v1/message-fields/preview`        | Render a template as one customer would receive it |
+
+A merge tag is written `#field_name#` (the older `{field_name}` spelling still
+resolves). It is filled per recipient at send time; the stored template is
+never overwritten.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/message-fields/preview \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"template": "Kia ora #first_name#, your #brand#?", "customer_id": 42}'
+```
+
+```json
+{
+  "text": "Kia ora Aroha, your Steinlager?",
+  "template": "Kia ora #first_name#, your #brand#?",
+  "missing_fields": [],
+  "fallbacks_used": [],
+  "unknown_tags": [],
+  "customer_id": 42,
+  "customer_name": "Aroha Ngata",
+  "characters": 31
+}
+```
+
+Fields: `first_name` `last_name` `full_name` `email` `phone` `city`
+`product` `product_name` `category` `brand` `preferred_category`
+`preferred_brand` `last_order_date` `last_order_amount`
+`average_order_value` `order_count` `preferred_order_day`
+`preferred_order_time`, plus the brand values `link` `company`
+`delivery_promise` `support_phone` `sign_off`.
+
+Three things this deliberately does not do:
+
+* **A tag cannot name anything outside that list.** `#customer.password#`
+  and `{{ 7 * 7 }}` are not tags that fail — nothing evaluates them, and they
+  are carried through as the plain text they are.
+* **A missing figure is not invented.** `#first_name#` falls back to
+  "there"; `#last_order_amount#` and `#order_count#` fall back to nothing at
+  all, because "$0.00" is a statement about a customer's account.
+* **An unknown tag blocks the send.** It raises the blocking compliance
+  finding `UNKNOWN_MERGE_TAG`, so a campaign cannot be approved and an
+  automation cannot be activated while one is present.
+
 ## Messages
 
 | Method | Path                                    | Purpose                              |
@@ -212,7 +261,7 @@ re-approved.
 | GET    | `/api/v1/campaigns/{id}/audience`             | Eligible / excluded breakdown         |
 | POST   | `/api/v1/campaigns/{id}/audience/snapshot`    | Materialise recipients                |
 | GET    | `/api/v1/campaigns/{id}/recipients`           | Recipient list with exclusion reasons |
-| GET    | `/api/v1/campaigns/{id}/copy-preview`         | What real recipients would receive    |
+| GET    | `/api/v1/campaigns/{id}/copy-preview`         | What real recipients would receive, with any unknown merge tags |
 | POST   | `/api/v1/campaigns/{id}/compliance-check`     | Run and store the compliance report   |
 | POST   | `/api/v1/campaigns/{id}/submit`               | Submit for approval                   |
 | POST   | `/api/v1/campaigns/{id}/approve`              | Human approval                        |

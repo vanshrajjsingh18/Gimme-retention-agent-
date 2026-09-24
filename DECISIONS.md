@@ -394,3 +394,64 @@ cache, with its invalidation, plus a second definition of "current".
 why the send path re-plans from live order history at send time rather than
 trusting the column. The column is for finding candidates; the send is for
 deciding.
+
+---
+
+## 2026-09-24 — A merge tag is a field lookup, never an expression
+
+**Decision:** `app/services/merge_tags.py` holds one explicit whitelist of
+fields. A tag resolves against that table or it does not resolve at all.
+There is no attribute path, no expression, and no way to reach a column that
+is not listed — `#customer.password#` is not a tag that fails, it is text.
+Substitution is a single pass, and resolved values are stripped of control
+characters and of the tag delimiters themselves, so a value can never be read
+back as another tag.
+
+**Reason:** The obvious implementation — walk the attribute path on the ORM
+object — is four lines shorter and turns every column in the database into
+something a person writing marketing copy can put in a text message. The
+whitelist is the feature.
+
+**Alternatives considered:** A template engine (Jinja). It is a language, and
+a language in a field an operator types into is a much larger surface than
+this needs. Nothing here wants a loop.
+
+**Tradeoffs:** Adding a field is a code change rather than configuration.
+That is the intended cost.
+
+---
+
+## 2026-09-24 — An unknown merge tag blocks approval, not just the preview
+
+**Decision:** `UNKNOWN_MERGE_TAG` is a blocking compliance finding, checked
+again at the top of `run_campaign` and at automation activation. Each
+offending tag is named.
+
+**Reason:** A tag that cannot be filled is not a value that comes back empty
+— it is delivered verbatim to the whole audience. It is also the one failure
+a person reading the copy could have caught, so it belongs in the gate where
+somebody is still looking, rather than in a sent message. Automations matter
+more than campaigns here: they send unattended for as long as they are on, so
+activation is the last moment anybody is watching.
+
+**Tradeoffs:** The check is a regex pass over the copy at approve, send and
+activate. Cheap, and worth paying three times rather than trusting a
+compliance snapshot taken before the copy was last edited.
+
+---
+
+## 2026-09-24 — Personalisation happens on the way out, and is recorded
+
+**Decision:** The campaign row keeps the template. The resolved text goes on
+the `Message` row, with the template in `original_body` and a
+`personalisation` block in `generation_context` naming the missing fields and
+the fallbacks that stood in for them.
+
+**Reason:** Two different questions — "what was the copy?" and "what did this
+person receive?" — were being answered with one string. And "Hi there" is
+indistinguishable from a customer actually called There unless the fallback
+was recorded at the moment it was used, which is the first thing asked when
+copy reads oddly for one recipient and not another.
+
+**Tradeoffs:** A JSON blob per sent message. It sits in a column that already
+existed for the drafted-copy path.

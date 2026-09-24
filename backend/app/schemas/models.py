@@ -446,6 +446,17 @@ class SendTestRequest(BaseModel):
     customer_id: int | None = None
 
 
+class MessagePreviewRequest(BaseModel):
+    """Copy as it is being typed, and who to preview it against.
+
+    Bounded at the longest message any channel here sends, so a preview
+    cannot be used to hand the server an unbounded string.
+    """
+
+    template: str = Field(default="", max_length=4000)
+    customer_id: int | None = None
+
+
 # --------------------------------------------------------------------------
 # Campaigns
 # --------------------------------------------------------------------------

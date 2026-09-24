@@ -46,6 +46,11 @@ class MetricResult:
     total_units: int = 0
     first_order_at: datetime | None = None
     last_order_at: datetime | None = None
+    #: What the most recent completed order came to. Stored rather than
+    #: derived at read time because message personalisation asks for it once
+    #: per recipient, and a per-recipient query over the order table is a cost
+    #: paid on every send for a number the metrics pass already has in hand.
+    last_order_amount: float = 0.0
     days_since_last_order: int | None = None
     days_since_first_order: int | None = None
     average_purchase_interval_days: float | None = None
@@ -110,6 +115,7 @@ def compute_metrics(
     result.average_order_value = _round(result.lifetime_revenue / len(completed))
     result.first_order_at = completed[0].ordered_at
     result.last_order_at = completed[-1].ordered_at
+    result.last_order_amount = _round(completed[-1].total_amount)
     result.days_since_last_order = max((now - completed[-1].ordered_at).days, 0)
     result.days_since_first_order = max((now - completed[0].ordered_at).days, 0)
 

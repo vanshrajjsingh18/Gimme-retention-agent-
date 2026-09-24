@@ -19,6 +19,7 @@ from datetime import datetime, time
 
 from app.core.phone import is_sendable, normalize_nz_phone
 from app.core.enums import Channel, ComplianceSeverity, LifecycleStage, RecipientStatus
+from app.services.merge_tags import unknown_tags as unknown_merge_tags
 
 # --------------------------------------------------------------------------
 # Prohibited claim patterns
@@ -502,6 +503,25 @@ def check_content(
             phrase,
         )
         break
+
+    # 7a. Merge tags naming something that does not exist.
+    #
+    #     A tag resolves against a whitelist, so "#discont_code#" is not a
+    #     value that comes back empty — it is text, and it would be delivered
+    #     verbatim to everyone in the audience. Blocking is the point: the
+    #     typo has to be caught while somebody is still looking at the copy,
+    #     not read back off a sent message. Each offending tag is named,
+    #     because "a merge tag is wrong" in a 400-character body is not
+    #     something an operator can act on.
+    for tag in unknown_merge_tags(haystack):
+        add(
+            "UNKNOWN_MERGE_TAG",
+            f"Uses the merge tag '#{tag}#', which is not a field this system can "
+            "fill. It would be sent to the customer exactly as written.",
+            ComplianceSeverity.CRITICAL,
+            True,
+            f"#{tag}#",
+        )
 
     # 7. Unresolved template placeholders.
     match = UNRESOLVED_PLACEHOLDER.search(haystack)

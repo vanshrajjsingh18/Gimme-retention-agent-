@@ -212,6 +212,9 @@ class CustomerMetrics(Base, TimestampMixin):
     total_units: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     first_order_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_order_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    #: The most recent completed order's total, for the #last_order_amount#
+    #: merge tag. Read once per recipient at send time.
+    last_order_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     days_since_last_order: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     days_since_first_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     average_purchase_interval_days: Mapped[float | None] = mapped_column(Float, nullable=True)

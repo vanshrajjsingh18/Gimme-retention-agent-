@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { Spinner, notify } from '../components/ui';
+import MessagePersonalization from './MessagePersonalization';
 import { useQuery } from '../hooks/useApi';
 import type { Automation, AutomationKind, Segment } from '../types';
 
@@ -50,6 +51,8 @@ export default function AutomationForm({
   const [sendTime, setSendTime] = useState('10:00');
   const [enrollmentMode, setEnrollmentMode] = useState('ROLLING');
   const [messageTemplate, setMessageTemplate] = useState('');
+  // So a merge tag lands at the cursor rather than at the end.
+  const templateRef = useRef<HTMLTextAreaElement | null>(null);
   const [stopOnOrder, setStopOnOrder] = useState(true);
   const [endsAt, setEndsAt] = useState('');
   const [steps, setSteps] = useState<StepDraft[]>(STARTER_STEPS);
@@ -531,17 +534,28 @@ export default function AutomationForm({
           </label>
           <textarea
             id="automation-template"
+            ref={templateRef}
             className="input"
             rows={3}
             value={messageTemplate}
             onChange={(event) => setMessageTemplate(event.target.value)}
-            placeholder="Hi {first_name}, … Reply STOP to opt out."
+            placeholder="Hi #first_name#, … Reply STOP to opt out."
           />
-          <p className="mt-1 text-xs text-slate-500">
-            Available placeholders: {'{first_name}'}, {'{city}'}, {'{website}'},{' '}
-            {'{delivery_promise}'}
-            {isNudge ? ', {usual_day}, {usual_category}, {offer_line}' : ''}
-          </p>
+          {/* The same menu and the same preview as the campaign composer,
+              because it is the same resolver underneath. Listing the tags in
+              a paragraph was a second, hand-maintained copy of the whitelist
+              — and it was already out of date. */}
+          <MessagePersonalization
+            value={messageTemplate}
+            onChange={setMessageTemplate}
+            textareaRef={templateRef}
+          />
+          {isNudge && (
+            <p className="mt-1 text-xs text-slate-500">
+              Smart Reorder also fills {'{usual_day}'}, {'{usual_category}'} and{' '}
+              {'{offer_line}'} from the customer&apos;s learned routine.
+            </p>
+          )}
         </div>
       )}
 

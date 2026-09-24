@@ -502,19 +502,25 @@ what they receive and when. Create a new version instead.
 
 ## Message templates
 
-Templates use `{placeholder}` tokens filled from the customer's own record and
-approved brand settings — there is no free text, so a rendered message cannot
-claim anything the business has not signed off.
+Templates use merge tags filled from the customer's own record and approved
+brand settings — there is no free text, so a rendered message cannot claim
+anything the business has not signed off. `#first_name#` is the spelling the
+composer inserts; the older `{first_name}` resolves identically.
 
-`{first_name}` `{full_name}` `{city}` `{company}` `{website}`
-`{delivery_promise}` `{support_phone}` `{support_email}` `{sign_off}`
+The field list is one whitelist, in `app/services/merge_tags.py`, served to
+the composer by `GET /api/v1/message-fields` and resolved at send time by the
+same code. See [docs/api.md](api.md#personalisation-merge-tags) for the full
+list.
 
 Nudges add `{usual_day}`, `{usual_category}`, `{offer_line}`, `{promotion}`,
-`{coupon_code}`.
+`{coupon_code}` — values that come from the learned routine rather than from
+a customer column.
 
-An empty value renders a sensible fallback (`{first_name}` → "there"); an
-*unknown* token is left visible so it fails the compliance placeholder check
-rather than shipping a broken sentence.
+An empty value renders a sensible fallback (`#first_name#` → "there"), except
+for figures: `#last_order_amount#` and `#order_count#` render nothing rather
+than a made-up number. An *unknown* tag is left visible **and** raises the
+blocking compliance finding `UNKNOWN_MERGE_TAG`, so an automation carrying one
+cannot be activated.
 
 ### Sign-off
 

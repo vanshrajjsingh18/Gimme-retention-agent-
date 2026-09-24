@@ -11,17 +11,83 @@ from app.core.enums import Channel, MessageStatus
 from app.llm.factory import get_llm_provider, provider_mode
 from app.llm.prompts import TONE_INSTRUCTIONS
 from app.models.base import utcnow
-from app.models.entities import AuditLog, Customer, Message, User
+from app.models.entities import AuditLog, Customer, CustomerMetrics, Message, User
 from app.schemas.common import OperationResult
 from app.schemas.models import (
     GenerateMessageRequest,
     MessageEditRequest,
     MessageOut,
+    MessagePreviewRequest,
     SendTestRequest,
 )
+from app.services.merge_tags import field_catalog, resolve_message_template
 from app.services.messaging import generate_message, revalidate_message
 
 router = APIRouter()
+
+
+# --------------------------------------------------------------------------
+# Personalisation
+# --------------------------------------------------------------------------
+@router.get("/message-fields", tags=["messages"])
+def message_fields(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Every merge tag a message may use, and who it can be previewed against.
+
+    Served from the same whitelist the sender resolves against, so the menu
+    cannot offer a tag that would not be filled — the failure mode this
+    replaces was a composer listing tags from one hand-maintained list and a
+    renderer honouring another.
+    """
+    # Recent customers with something to show. A preview against somebody with
+    # no order history proves only that the fallbacks work.
+    samples = (
+        db.execute(
+            select(Customer)
+            .join(CustomerMetrics, CustomerMetrics.customer_id == Customer.id)
+            .where(CustomerMetrics.completed_orders > 0)
+            .order_by(CustomerMetrics.last_order_at.desc())
+            .limit(10)
+        )
+        .scalars()
+        .all()
+    )
+    fields = field_catalog()
+    return {
+        "fields": fields,
+        # Kept in first-appearance order rather than sorted, so the menu's
+        # groups read in the order somebody reaches for them.
+        "groups": list(dict.fromkeys(f["group"] for f in fields)),
+        "syntax": "#field_name#",
+        "sample_customers": [
+            {"id": c.id, "name": c.full_name or f"Customer {c.id}"} for c in samples
+        ],
+    }
+
+
+@router.post("/message-fields/preview", tags=["messages"])
+def preview_message_fields(
+    payload: MessagePreviewRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Render a template as one customer would receive it.
+
+    Takes the template as text rather than a campaign id on purpose: the
+    question an operator is asking is about the words in front of them, which
+    are usually unsaved. It calls the same resolver the send does, so a
+    preview cannot flatter the real thing.
+    """
+    resolved = resolve_message_template(db, payload.template, payload.customer_id)
+    customer = db.get(Customer, payload.customer_id) if payload.customer_id else None
+    return {
+        **resolved.as_dict(),
+        "customer_id": customer.id if customer else None,
+        "customer_name": customer.full_name if customer else "Sample customer",
+        "characters": len(resolved.text),
+    }
 
 
 @router.get("/messages/variations", tags=["messages"])

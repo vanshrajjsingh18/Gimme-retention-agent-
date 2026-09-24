@@ -262,6 +262,51 @@ test.describe('Campaigns', () => {
 
     expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
   });
+
+  test('a merge tag is inserted at the cursor and previewed against a customer', async ({
+    page,
+  }) => {
+    const { errors } = guard(page);
+    await login(page);
+
+    await page.goto('/campaigns');
+    await page.locator('tbody tr').first().getByRole('link').first().click();
+
+    const body = page.locator('#campaign-body');
+    await expect(body).toBeVisible();
+    await body.fill('Kia ora , the usual?');
+
+    // Cursor placed mid-sentence. Appending to the end is the behaviour that
+    // makes somebody give up and type the name in by hand.
+    await body.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(8, 8));
+    await page.getByLabel('Insert a merge tag').selectOption('#first_name#');
+    await expect(body).toHaveValue('Kia ora #first_name#, the usual?');
+
+    // And the preview says what that will read as, resolved by the server
+    // rather than by a second implementation in the browser.
+    await expect(page.getByText(/as .* would receive it/i)).toBeVisible({ timeout: 15_000 });
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
+
+  test('a merge tag that is not a field is refused before approval', async ({ page }) => {
+    const { errors } = guard(page);
+    await login(page);
+
+    await page.goto('/campaigns');
+    await page.locator('tbody tr').first().getByRole('link').first().click();
+
+    const body = page.locator('#campaign-body');
+    await expect(body).toBeVisible();
+    await body.fill('Kia ora #first_name#, use #discont_code#. Reply STOP to opt out.');
+
+    // Named, not just flagged: "a merge tag is wrong" in a 400-character body
+    // is not something an operator can act on.
+    await expect(page.getByText(/#discont_code#/).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/cannot be approved/i)).toBeVisible();
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
 });
 
 test.describe('Automations', () => {

@@ -18,17 +18,29 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import CampaignObjective
 from app.models.entities import BrandSettings, Customer
+from app.services.merge_tags import (
+    FALLBACKS,
+    MESSAGE_FIELDS,
+    PLACEHOLDER,
+    customer_field_values,
+    sample_values,
+    tidy,
+    token_of as _token,
+)
 
-#: Two spellings of the same thing. ``{token}`` is what the seeded templates
-#: use; ``#token#`` is the convention in every other SMS tool, and so the one
-#: somebody writing copy in the composer reaches for first. Both resolve
-#: against the same context, and neither is the second-class spelling.
-PLACEHOLDER = re.compile(r"\{([a-z_]+)\}|#([a-z_]+)#")
-
-
-def _token(match: re.Match) -> str:
-    """The token name, whichever of the two spellings matched."""
-    return match.group(1) or match.group(2)
+__all__ = [
+    "DEFAULT_SMS_TEMPLATES",
+    "MERGE_TAGS",
+    "PLACEHOLDER",
+    "build_context",
+    "default_template",
+    "get_brand",
+    "render",
+    "sample_context",
+    "sign_off",
+    "tidy",
+    "unresolved_tokens",
+]
 
 #: Default copy per campaign objective, reused as the segment-specific split
 #: for cohort sends: a lapsed repeat buyer gets a reorder reminder, a one-time
@@ -120,7 +132,10 @@ def build_context(
     setting — there is no free text, so a rendered message cannot claim
     anything the business has not signed off.
     """
-    first_name = (customer.first_name or "there").strip() or "there"
+    # Raw, not already fallen back. The renderer applies the fallback, and it
+    # can only report that it did so — "was this customer greeted by name or
+    # by default?" — if what reaches it is the empty value.
+    first_name = (customer.first_name or "").strip()
     # The favourites live on the metrics row the intelligence pass writes.
     # Absent for a customer with no order history, which the fallbacks cover.
     metrics = customer.metrics
@@ -137,11 +152,14 @@ def build_context(
     )
 
     context = {
+        # Every whitelisted customer field, read by one deterministic mapping
+        # so the composer's Personalize menu and the sender cannot disagree
+        # about what a tag means.
+        **customer_field_values(customer),
+        # The legacy spellings. The whitelist above owns first_name, last_name,
+        # full_name and city; repeating them here is how they came to be
+        # pre-filled with their own fallbacks in one place and not the other.
         "name": first_name,
-        "first_name": first_name,
-        "last_name": (customer.last_name or "").strip(),
-        "full_name": customer.full_name or "there",
-        "city": customer.city or "your area",
         "company": brand.company_name or "GIMME",
         "website": brand.website or "",
         "link": brand.website or "",
@@ -166,18 +184,11 @@ def build_context(
 #: The favourites are the reason this matters most: a customer with no order
 #: history has none, and "$10 off " is a worse message than "$10 off your
 #: favourites".
-_EMPTY_FALLBACKS = {
-    "website": "gimme",
-    "link": "gimme",
-    "usual_category": "usual",
-    "city": "your area",
-    "name": "there",
-    "first_name": "there",
-    "full_name": "there",
-    "favourite_brand": "your favourites",
-    "favourite_category": "your usual",
-    "favourite_product": "your usual order",
-}
+#:
+#: One table, shared with the resolver the campaign sender uses. Two of them
+#: meant a token could fall back here and render a bare gap there, which is
+#: exactly what happened to {favourite_brand} the first time this moved.
+_EMPTY_FALLBACKS = FALLBACKS
 
 
 def render(template: str, context: dict[str, str]) -> str:
@@ -197,39 +208,15 @@ def render(template: str, context: dict[str, str]) -> str:
     return tidy(rendered)
 
 
-def tidy(text: str) -> str:
-    """Clean up the punctuation an empty substitution leaves behind."""
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\s+([,.!?])", r"\1", text)
-    text = re.sub(r"([,.]) *\1+", r"\1", text)
-    text = re.sub(r" *\n *", "\n", text)
-    return text.strip()
-
-
 def unresolved_tokens(text: str) -> list[str]:
     """Placeholders still present after rendering — never safe to send."""
     return [_token(m) for m in PLACEHOLDER.finditer(text)]
 
 
-#: The tokens copy may use, for the composer to list. Ordered as a person
-#: writing a message would reach for them.
-MERGE_TAGS: list[dict[str, str]] = [
-    {"token": "name", "label": "First name", "example": "Sarah"},
-    {"token": "full_name", "label": "Full name", "example": "Sarah Patel"},
-    {"token": "city", "label": "City", "example": "Auckland"},
-    {"token": "favourite_brand", "label": "Favourite brand", "example": "Steinlager"},
-    {"token": "favourite_category", "label": "Favourite category", "example": "Beer"},
-    {
-        "token": "favourite_product",
-        "label": "Most ordered product",
-        "example": "Steinlager Classic 12pk",
-    },
-    {"token": "link", "label": "Order link", "example": "gimmedelivery.co.nz"},
-    {"token": "company", "label": "Company name", "example": "GIMME"},
-    {"token": "delivery_promise", "label": "Delivery promise", "example": "in 45 minutes"},
-    {"token": "support_phone", "label": "Support phone", "example": "09 123 4567"},
-    {"token": "sign_off", "label": "Sign-off", "example": "Alex, Customer Care"},
-]
+#: The tokens copy may use, for the composer to list. Read straight off the
+#: whitelist, so a field added there appears in the menu without anybody
+#: remembering to add it twice.
+MERGE_TAGS: list[dict[str, str]] = [f.as_dict() for f in MESSAGE_FIELDS]
 
 
 def sample_context() -> dict[str, str]:
@@ -238,7 +225,7 @@ def sample_context() -> dict[str, str]:
     A test send with nobody attached would otherwise show the raw tokens and
     read as broken. Showing an obvious stand-in is what a preview is for.
     """
-    return {tag["token"]: tag["example"] for tag in MERGE_TAGS}
+    return sample_values()
 
 
 def get_brand(db: Session) -> BrandSettings:

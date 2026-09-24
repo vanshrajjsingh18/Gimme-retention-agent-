@@ -1,6 +1,6 @@
 # PROJECT STATUS — GIMME Retention Engine
 
-**Last updated:** 2026-09-21
+**Last updated:** 2026-09-24
 **State:** MVP and campaign automations complete and verified from a clean
 install, plus deployment, the live TNZ path, Smart Reorder, GIMME data import,
 and campaign copy that is personalised and chosen rather than assumed.
@@ -50,6 +50,12 @@ Since then, and in commit order:
   reminder offset configurable per campaign, suppression when the customer has
   already ordered this cycle, the prediction stored on `customer_metrics` so
   segments and the dashboard can read it, and three dynamic segments over it.
+- **Personalisation** — one whitelist of customer fields behind a Personalize
+  menu that inserts at the cursor and a live preview rendered by the server,
+  shared by the campaign composer, the automation composer and Smart Reorder.
+  A tag resolves against that list or not at all, an unknown one blocks
+  approval and activation, and every send records what was filled in and what
+  fell back.
 
 ## Completed features
 

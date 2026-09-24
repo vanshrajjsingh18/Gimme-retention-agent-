@@ -14,12 +14,11 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.automations.templates import (
-    PLACEHOLDER,
-    build_context,
-    get_brand,
-    render,
-    sample_context,
+from app.services.merge_tags import (
+    ResolvedMessage,
+    context_for,
+    render_template,
+    unknown_tags,
 )
 from app.core.phone import normalize_nz_phone
 from app.compliance.engine import (
@@ -345,15 +344,21 @@ def schedule_campaign(db: Session, campaign: Campaign, when: datetime) -> Campai
 # --------------------------------------------------------------------------
 # Sending
 # --------------------------------------------------------------------------
-def _fill(text: str, context: dict[str, str]) -> str:
-    """Render merge tags, leaving untemplated copy exactly as written.
+def resolve_copy(
+    db: Session, campaign: Campaign, customer: Customer | None
+) -> tuple[ResolvedMessage, ResolvedMessage]:
+    """The campaign's subject and body, resolved for one recipient.
 
-    Copy with no tokens in it skips the renderer entirely, so nothing
-    reformats a message nobody asked to have templated.
+    Both go through the shared resolver, so the preview, the test send and
+    the real send cannot produce different words from the same template. The
+    campaign row is not touched: what is stored stays the copy that was
+    approved, and personalisation happens on the way out.
     """
-    if not text or not PLACEHOLDER.search(text):
-        return text
-    return render(text, context)
+    context = context_for(db, customer)
+    return (
+        render_template(campaign.subject or "", context),
+        render_template(campaign.body or "", context),
+    )
 
 
 def personalise(
@@ -365,10 +370,28 @@ def personalise(
     only thing that makes each message that person's. Sending the body as
     stored delivered a literal "Hi #name#".
     """
-    context = (
-        build_context(customer, get_brand(db)) if customer is not None else sample_context()
-    )
-    return _fill(campaign.subject or "", context), _fill(campaign.body or "", context)
+    subject, body = resolve_copy(db, campaign, customer)
+    return subject.text, body.text
+
+
+def personalisation_audit(
+    campaign: Campaign, subject: ResolvedMessage, body: ResolvedMessage
+) -> dict:
+    """What was filled in, for the record kept beside the sent message.
+
+    Copy reading oddly to one customer and not another is a question about
+    one send, and it cannot be answered from the template or from the final
+    text alone: "Hi there" is indistinguishable from a customer actually
+    called There unless the fallback was recorded when it was used.
+    """
+    return {
+        "template_subject": subject.template,
+        "template_body": body.template,
+        "missing_fields": sorted(set(subject.missing_fields) | set(body.missing_fields)),
+        "fallbacks_used": sorted(set(subject.fallbacks_used) | set(body.fallbacks_used)),
+        "unknown_tags": sorted(set(subject.unknown_tags) | set(body.unknown_tags)),
+        "copy_mode": campaign.copy_mode,
+    }
 
 
 def drafts_per_recipient(campaign: Campaign) -> bool:
@@ -404,7 +427,8 @@ def preview_copy(db: Session, campaign: Campaign, *, count: int = 3) -> dict:
         customer = db.get(Customer, entry["id"])
         if customer is None:
             continue
-        subject, body = personalise(db, campaign, customer)
+        resolved_subject, resolved_body = resolve_copy(db, campaign, customer)
+        subject, body = resolved_subject.text, resolved_body.text
         failed = False
         if drafted:
             message = generate_message(
@@ -429,6 +453,15 @@ def preview_copy(db: Session, campaign: Campaign, *, count: int = 3) -> dict:
                 # so the preview says so here rather than showing the body
                 # that would have been used had it passed.
                 "validation_failed": failed,
+                # Which tags this particular customer had nothing for. A
+                # preview that shows "Hi there" without saying why reads as
+                # copy nobody personalised.
+                "missing_fields": sorted(
+                    set(resolved_subject.missing_fields) | set(resolved_body.missing_fields)
+                ),
+                "fallbacks_used": sorted(
+                    set(resolved_subject.fallbacks_used) | set(resolved_body.fallbacks_used)
+                ),
             }
         )
 
@@ -436,6 +469,11 @@ def preview_copy(db: Session, campaign: Campaign, *, count: int = 3) -> dict:
         "copy_mode": campaign.copy_mode,
         "eligible_count": audience["eligible_count"],
         "samples": samples,
+        # A property of the copy, not of any one recipient — so it sits beside
+        # the samples rather than inside each of them.
+        "unknown_tags": sorted(
+            set(unknown_tags(campaign.subject)) | set(unknown_tags(campaign.body))
+        ),
     }
 
 
@@ -452,7 +490,8 @@ def send_test_message(
     customer = db.get(Customer, customer_id) if customer_id else None
     # With nobody attached this fills the stand-in values, so a test send shows
     # the shape of the real message rather than the raw tokens.
-    subject, body = personalise(db, campaign, customer)
+    resolved_subject, resolved_body = resolve_copy(db, campaign, customer)
+    subject, body = resolved_subject.text, resolved_body.text
 
     # A test send exists to show what the real send will do. Drafting here for
     # a campaign that sends its own copy showed the operator a message the
@@ -479,11 +518,14 @@ def send_test_message(
         objective=campaign.objective,
         subject=subject,
         body=body,
-        original_subject=subject,
-        original_body=body,
+        original_subject=resolved_subject.template,
+        original_body=resolved_body.template,
         status=MessageStatus.SENT.value if result.success else MessageStatus.FAILED.value,
         provider=adapter.provider,
         provider_message_id=result.provider_message_id,
+        generation_context={
+            "personalisation": personalisation_audit(campaign, resolved_subject, resolved_body)
+        },
         is_test=True,
         sent_at=utcnow() if result.success else None,
         error_message=result.error,
@@ -537,6 +579,19 @@ def run_campaign(
             "Re-run the compliance check after fixing them."
         )
 
+    # Checked again here rather than trusted from the approval. The report is
+    # a snapshot of copy at a moment, and this is the last point before the
+    # text leaves the building — a tag that cannot be filled is delivered to
+    # the whole audience verbatim, so it is worth the two regex passes.
+    bad_tags = sorted(
+        set(unknown_tags(campaign.subject)) | set(unknown_tags(campaign.body))
+    )
+    if bad_tags:
+        raise CampaignError(
+            "Campaign cannot send: it uses merge tags this system cannot fill — "
+            + ", ".join(f"#{tag}#" for tag in bad_tags)
+        )
+
     config = build_compliance_config(db)
     channel = Channel(campaign.channel)
     adapter = get_adapter(db, channel)
@@ -586,7 +641,9 @@ def run_campaign(
 
         stats["attempted"] += 1
 
-        subject, body = personalise(db, campaign, customer)
+        resolved_subject, resolved_body = resolve_copy(db, campaign, customer)
+        subject, body = resolved_subject.text, resolved_body.text
+        audit = personalisation_audit(campaign, resolved_subject, resolved_body)
         message_row: Message | None = None
         if generate_per_customer:
             message_row = generate_message(
@@ -635,12 +692,19 @@ def run_campaign(
                 objective=campaign.objective,
                 subject=subject,
                 body=body,
-                original_subject=subject,
-                original_body=body,
+                # The template, not the resolved text. "What did we send this
+                # person" and "what was the copy" are different questions and
+                # storing the answer twice answers neither.
+                original_subject=resolved_subject.template,
+                original_body=resolved_body.template,
             )
             db.add(message_row)
             db.flush()
 
+        message_row.generation_context = {
+            **(message_row.generation_context or {}),
+            "personalisation": audit,
+        }
         message_row.recipient_id = recipient.id
         message_row.provider = adapter.provider
         message_row.provider_message_id = result.provider_message_id

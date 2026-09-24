@@ -33,6 +33,40 @@ def create_tables() -> None:
             ", ".join(f"{table}.{column}" for table, columns in added.items() for column in columns),
         )
     _preserve_existing_copy_mode(added)
+    _backfill_last_order_amount(added)
+
+
+def _backfill_last_order_amount(added: dict[str, list[str]]) -> None:
+    """Fill the new column from the orders that are already there.
+
+    Without this, every existing customer carries 0.00 until the next
+    intelligence refresh touches their row, and a message using
+    ``#last_order_amount#`` quietly drops the figure for a customer who
+    plainly has one. The refresh would fix it eventually, which is no comfort
+    to the campaign that went out this afternoon.
+
+    Only completed orders count, which is the same rule the metrics pass
+    uses — a cancelled order is not what they last spent.
+    """
+    if "last_order_amount" not in added.get("customer_metrics", []):
+        return
+    with engine.begin() as connection:
+        result = connection.execute(
+            text(
+                """
+                UPDATE customer_metrics
+                   SET last_order_amount = COALESCE((
+                       SELECT o.total_amount
+                         FROM orders o
+                        WHERE o.customer_id = customer_metrics.customer_id
+                          AND o.status = 'COMPLETED'
+                     ORDER BY o.ordered_at DESC
+                        LIMIT 1
+                   ), 0.0)
+                """
+            )
+        )
+    logger.info("Backfilled last_order_amount for %s customer(s).", result.rowcount)
 
 
 def _preserve_existing_copy_mode(added: dict[str, list[str]]) -> None:

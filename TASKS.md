@@ -50,6 +50,18 @@ with the reason.
       attributed but not authored per Smart Reorder campaign
 - [ ] **Per-customer channel fallback order surfaced in the builder** — the
       priority is applied, but not editable per campaign
+
+## Personalisation (merge tags)
+
+- [x] One whitelist of fields, resolved by deterministic application code
+- [x] `#field_name#` in campaign and automation copy, filled per recipient
+- [x] Personalize menu inserting at the cursor, in both composers
+- [x] Live preview against a chosen customer or a sample one
+- [x] Fallbacks for missing values; no invented figures
+- [x] Unknown tags block campaign approval, sending, and automation activation
+- [x] `GET /api/v1/message-fields`, `POST /api/v1/message-fields/preview`
+- [x] Per-send audit: template, resolved text, missing fields, fallbacks used
+- [x] Works with Smart Reorder, through the same resolver
 - [x] Mock campaign sending
 - [x] Event tracking
 - [x] Reactivation detection

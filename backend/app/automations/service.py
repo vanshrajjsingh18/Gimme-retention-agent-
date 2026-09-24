@@ -34,6 +34,7 @@ from app.models.entities import (
     AutomationStep,
     Campaign,
 )
+from app.services.merge_tags import unknown_tags
 
 logger = logging.getLogger(__name__)
 
@@ -325,6 +326,24 @@ def activate(db: Session, automation: Automation, *, now: datetime | None = None
     if automation.require_approval and automation.approved_at is None:
         raise AutomationError(
             f"Automation '{automation.name}' must be approved before it is activated."
+        )
+
+    # An automation sends on its own schedule for as long as it is switched
+    # on, so a merge tag naming a field that does not exist is not one bad
+    # message — it is every message it will ever send, delivered with the tag
+    # still in the text. Activation is the last moment a person is looking.
+    bad_tags = sorted(
+        {
+            tag
+            for template in [automation.message_template, *(s.message_template for s in automation.steps)]
+            for tag in unknown_tags(template)
+        }
+    )
+    if bad_tags:
+        raise AutomationError(
+            f"Automation '{automation.name}' uses merge tags this system cannot fill — "
+            + ", ".join(f"#{tag}#" for tag in bad_tags)
+            + ". Fix them before activating."
         )
     automation.status = AutomationStatus.ACTIVE.value
     automation.starts_at = automation.starts_at or now

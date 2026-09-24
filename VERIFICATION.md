@@ -236,4 +236,5 @@ caught by a check rather than by reading code.
 | Browser tests | Missing React key on expandable order rows | `Fragment` with a key |
 | Fresh install | `.env.example` shipped the Docker database path, so a local install wrote its database to `/app/data` outside the project | Path left unset so the repo-relative default applies |
 | Security review | Mock webhook parser rejected the provider-style payload the docs tell users to post | Mock adapters accept both vocabularies |
+| Postgres run | The older merge tags (`{name}`, `{favourite_brand}`) stopped falling back when the campaign sender moved to the shared resolver — a second fallback table it never consulted. SQLite passed only because its audience happened to start with a customer who had every value | One fallback table, shared |
 | Seed review | Seeded SMS campaign excluded 100% of recipients — seed timestamps inherited the current wall-clock time, landing inside quiet hours | Historical campaigns send at a plausible mid-morning hour |

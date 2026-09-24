@@ -78,25 +78,43 @@ function stubCampaign(copyMode: CopyMode, status = 'DRAFT'): Campaign {
   } as unknown as Campaign;
 }
 
+const FIELDS = [
+  {
+    token: 'first_name',
+    label: 'First name',
+    group: 'Customer',
+    example: 'Sarah',
+    fallback: 'there',
+    description: '',
+    tag: '#first_name#',
+  },
+];
+
 vi.mock('../hooks/useApi', () => ({
+  // The personalisation panel debounces the template before previewing it.
+  // Pass-through here: a test asserting on rendered output should not have to
+  // wait out a timer that exists to spare the server.
+  useDebounced: <T,>(value: T) => value,
   useQuery: (path: string | null) => {
-    const data =
-      path === null
-        ? null
-        : path.includes('/options')
-          ? { merge_tags: [{ token: 'name', label: 'First name', example: 'Sarah' }], copy_modes: COPY_MODES }
-          : path.includes('/audience')
-            ? {
-                audience_size: 10,
-                eligible_count: 6,
-                excluded_count: 4,
-                excluded_by_reason: {},
-                exclusion_samples: {},
-                sample_recipients: [],
-              }
-            : path.includes('/recipients')
-              ? { recipients: [] }
-              : campaign;
+    const data = (() => {
+      if (path === null) return null;
+      if (path.includes('/message-fields')) {
+        return { fields: FIELDS, groups: ['Customer'], syntax: '#field_name#', sample_customers: [] };
+      }
+      if (path.includes('/options')) return { copy_modes: COPY_MODES };
+      if (path.includes('/audience')) {
+        return {
+          audience_size: 10,
+          eligible_count: 6,
+          excluded_count: 4,
+          excluded_by_reason: {},
+          exclusion_samples: {},
+          sample_recipients: [],
+        };
+      }
+      if (path.includes('/recipients')) return { recipients: [] };
+      return campaign;
+    })();
     return { data, loading: false, error: null, refetch: vi.fn() };
   },
   useMutation: (fn: (...args: unknown[]) => unknown) => ({ run: fn, loading: false, error: null }),
@@ -131,13 +149,13 @@ describe('Campaign copy mode', () => {
 
   it('offers merge tags for written copy', () => {
     renderPage();
-    expect(screen.getByRole('button', { name: '#name#' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '#first_name#' })).toBeInTheDocument();
   });
 
   it('does not offer merge tags when every message is drafted', () => {
     campaign = stubCampaign('DRAFTED');
     renderPage();
-    expect(screen.queryByRole('button', { name: '#name#' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '#first_name#' })).not.toBeInTheDocument();
     expect(screen.getByText(/fallback body/i)).toBeInTheDocument();
   });
 

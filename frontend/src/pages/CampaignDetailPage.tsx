@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { api } from '../api/client';
+import MessagePersonalization from '../features/MessagePersonalization';
 import {
   Badge,
   Card,
@@ -38,8 +39,6 @@ const EDITABLE = new Set([
   'AWAITING_APPROVAL',
 ]);
 
-type MergeTag = { token: string; label: string; example: string };
-
 /** The workflow steps shown as a progress rail at the top of the page. */
 const STEPS = [
   { key: 'content', label: 'Message' },
@@ -56,7 +55,7 @@ export default function CampaignDetailPage() {
     id ? `/api/v1/campaigns/${id}` : null,
   );
 
-  const { data: options } = useQuery<{ merge_tags?: MergeTag[]; copy_modes?: CopyModeOption[] }>(
+  const { data: options } = useQuery<{ copy_modes?: CopyModeOption[] }>(
     '/api/v1/campaigns/options',
   );
 
@@ -67,6 +66,9 @@ export default function CampaignDetailPage() {
   const [showTest, setShowTest] = useState(false);
   const [showRun, setShowRun] = useState(false);
   const [audience, setAudience] = useState<AudiencePreview | null>(null);
+  // Held so a merge tag lands at the cursor rather than at the end of
+  // whatever has been written so far.
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (campaign) {
@@ -332,6 +334,7 @@ export default function CampaignDetailPage() {
             </label>
             <textarea
               id="campaign-body"
+              ref={bodyRef}
               className="input min-h-[220px] leading-relaxed"
               value={body}
               onChange={(e) => {
@@ -343,33 +346,16 @@ export default function CampaignDetailPage() {
             {/* Merge tags fill in a written message. In drafted mode the whole
                 body is replaced per recipient, so offering them here would be
                 promising personalisation this campaign does differently. */}
-            {editable && copyMode === 'WRITTEN' && (options?.merge_tags?.length ?? 0) > 0 && (
-              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-                <p className="text-xs font-medium text-slate-700">
-                  Personalise it
-                </p>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  Tap to insert. Each one is replaced with that customer&apos;s own
-                  detail when the message goes out.
-                </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {options?.merge_tags?.map((tag) => (
-                    <button
-                      key={tag.token}
-                      type="button"
-                      title={`${tag.label} — e.g. ${tag.example}`}
-                      className="rounded-md border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-700 hover:border-blue-400 hover:text-blue-700"
-                      onClick={() => {
-                        setBody((current) => `${current}#${tag.token}#`);
-                        setDirty(true);
-                      }}
-                    >
-                      #{tag.token}#
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            <MessagePersonalization
+              value={body}
+              onChange={(next) => {
+                setBody(next);
+                setDirty(true);
+              }}
+              textareaRef={bodyRef}
+              disabled={!editable}
+              hidden={copyMode !== 'WRITTEN'}
+            />
             {dirty && (
               <p className="mt-2 text-xs text-amber-700">
                 Unsaved changes. Saving resets the campaign to draft and clears any approval.
