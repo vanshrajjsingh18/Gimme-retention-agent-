@@ -1217,3 +1217,42 @@ honest and the screen says which it is showing.
 and asserts the preview still produces a message. The send tests added with
 this feature also now pass an explicit `now`, because several of them were
 passing by virtue of the hour the suite happened to run.
+
+---
+
+## 2026-09-24 — Half of "you usually order Wednesday evening" was in UTC
+
+**Found by:** Uploading a file in the exact template format and rendering
+every merge tag from it. `#preferred_order_time#` read "7:00 pm" for an order
+placed at 19:40 — right by accident — while `#preferred_order_day#` and the
+minute beside them disagreed.
+
+**Failure:** `compute_metrics` counted `typical_order_weekday` and
+`typical_order_hour` straight off the naive-UTC column, while
+`typical_order_minute` is written by the Smart Reorder engine, which converts
+to local. So one time was assembled from two clocks: the hour from UTC, the
+minute from New Zealand. A 7:39pm customer read back as either 7:39 am or
+7:00 pm depending on which half you looked at.
+
+It reached further than the tag. The same fields go into the LLM prompt
+context as `typical_order_day`, so generated copy had been quoting the wrong
+day, and Customer 360 showed it.
+
+Same defect class as the seeder one fixed three days earlier — a local
+concept computed on the UTC side of the boundary — now found on a third
+code path.
+
+**Fix:** The weekday and hour are counted off `to_local(o.ordered_at)`, like
+every other piece of code in this system that reasons about the customer's
+clock.
+
+**What it exposed:** with all three fields agreeing, an uploaded `19:40`
+Wednesday now reads back as 7:00 am Thursday — which is the *correct*
+consequence of the still-open question about whether the export's `ordered_at`
+is local or UTC. The bug had been hiding it by being wrong in the opposite
+direction. `IMPORT_TIMESTAMPS_ARE_LOCAL` now makes that a setting rather than
+a code change, defaulted off so no existing data is silently reinterpreted.
+
+**Preventive action:** A test builds four Wednesday-evening orders as local
+moments and asserts `#preferred_order_day#` is Wednesday and
+`#preferred_order_time#` ends in "pm".

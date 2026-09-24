@@ -92,6 +92,8 @@ def load_order_facts(db: Session, customer_id: int) -> list[OrderFact]:
             total_amount=o.total_amount,
             discount_amount=o.discount_amount,
             status=o.status,
+            external_id=o.external_id,
+            delivery_city=o.delivery_city,
             items=[
                 {
                     "category": i.category,
@@ -274,6 +276,8 @@ def persist_intelligence(
         "days_since_first_order",
         "last_order_amount",
         "last_order_product",
+        "last_order_id",
+        "last_order_delivery_city",
         "average_purchase_interval_days",
         "median_purchase_interval_days",
         "purchase_frequency_per_month",

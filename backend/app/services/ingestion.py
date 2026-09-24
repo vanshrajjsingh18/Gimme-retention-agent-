@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.phone import normalize_nz_phone
+from app.core.timezones import to_utc_naive
 from app.core.enums import Channel, ConsentType, EventType, IngestionStatus, OrderStatus
 from app.models.base import utcnow
 from app.models.entities import (
@@ -96,9 +97,18 @@ def parse_datetime(value: Any, field: str, *, required: bool = False) -> datetim
     text = str(value).strip().replace("Z", "")
     for fmt in DATE_FORMATS:
         try:
-            return datetime.strptime(text, fmt)
+            parsed = datetime.strptime(text, fmt)
         except ValueError:
             continue
+        # A bare "2026-09-16 19:40:00" says nothing about which clock wrote
+        # it. The column it lands in holds naive UTC, so reading a local
+        # timestamp as UTC puts every order half a day out — and everything
+        # downstream is built on the hour: the learned routine, Smart
+        # Reorder's send time, #preferred_order_time#. Which it is depends on
+        # the export, so it is configuration rather than a guess.
+        if settings.IMPORT_TIMESTAMPS_ARE_LOCAL:
+            return to_utc_naive(parsed)
+        return parsed
     raise RowError(
         f"'{field}' value '{value}' is not a recognised date. "
         "Use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS."

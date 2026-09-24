@@ -508,6 +508,47 @@ def test_the_send_records_what_was_filled_in_for_each_person(db, bootstrapped):
     assert message.body != message.original_body
 
 
+def test_the_usual_day_and_time_are_the_customers_own(db, bootstrapped):
+    """"You usually order Wednesday evening" has to mean their Wednesday.
+
+    The weekday and hour were counted off the naive-UTC column while the
+    minute beside them came from the Smart Reorder engine, which converts. So
+    one time was assembled from two clocks: a 7:39pm customer read back as
+    "7:39 am", and the same wrong day went into the LLM prompt context and
+    Customer 360.
+
+    Asserted through the tag rather than on the column, because the tag is
+    what a customer actually reads.
+    """
+    from app.models.entities import Order
+
+    customer = _customer(db, "clock")
+    for order in db.execute(
+        select(Order).where(Order.customer_id == customer.id)
+    ).scalars().all():
+        db.delete(order)
+    # Four Wednesday-evening orders, written as the local moments they were.
+    for week in range(4):
+        db.add(
+            Order(
+                external_id=f"{customer.external_id}-CLOCK-{week}",
+                customer_id=customer.id,
+                ordered_at=to_utc_naive(datetime(2026, 8, 5 + week * 7, 19, 40)),
+                status="COMPLETED",
+                total_amount=68.50,
+            )
+        )
+    db.commit()
+
+    from app.services.intelligence import refresh_customer
+
+    refresh_customer(db, customer)
+    db.refresh(customer)
+
+    assert resolve_message_template(db, "#preferred_order_day#", customer.id).text == "Wednesday"
+    assert resolve_message_template(db, "#preferred_order_time#", customer.id).text.endswith("pm")
+
+
 def test_a_hole_in_the_sentence_is_not_sent(db, bootstrapped):
     """A gap no fallback can close means no message, not a broken one.
 

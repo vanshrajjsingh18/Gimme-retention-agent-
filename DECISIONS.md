@@ -494,3 +494,43 @@ anybody mid-switch.
 **Tradeoffs:** One more stored column, `customer_metrics.last_order_product`,
 written by the metrics pass. The alternative was a per-recipient query into
 the order lines on every send.
+
+---
+
+## 2026-09-24 — The merge tags are pinned to the upload format
+
+**Decision:** Every field names the upload column it reads
+(`MessageField.source_column`), the column heading works as a tag in its own
+right where the names differ (`#ordered_at#` = `#last_order_date#`), and every
+column in the upload template must either have a tag or appear in
+`NOT_FOR_MESSAGING` with a reason. A test enforces the last part.
+
+**Reason:** The two halves of personalisation are joined at a name, and
+nothing was holding them together — the upload format had carried `region`,
+`signup_date` and `delivery_city` all along while the tag list had never heard
+of them. The exclusion list is the more useful half: without it, a column with
+no tag is indistinguishable from a column somebody forgot.
+
+**Tradeoffs:** Adding a column to the upload format now fails a test until
+somebody decides whether it is message content. That is the intended cost — it
+is a decision, and it was previously being made by omission.
+
+---
+
+## 2026-09-24 — How a bare timestamp is read is configuration
+
+**Decision:** `IMPORT_TIMESTAMPS_ARE_LOCAL`, defaulting to false.
+
+**Reason:** `2026-09-16 19:40:00` in a CSV says nothing about which clock
+wrote it, and the column it lands in holds naive UTC. Most order exports
+record local time, in which case reading it as UTC puts every order half a day
+out — and the hour is what the learned routine, Smart Reorder's send time and
+`#preferred_order_time#` are all built on.
+
+**Alternatives considered:** Assuming local, since this is a New Zealand
+business and 5am alcohol deliveries are implausible. The inference is probably
+right and is still not ours to make silently: it changes what every
+already-imported timestamp means.
+
+**Tradeoffs:** Answering the question is a setting plus a re-import rather
+than a click. The default leaves existing data exactly as it is.

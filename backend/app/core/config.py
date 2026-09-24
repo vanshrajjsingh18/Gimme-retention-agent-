@@ -57,6 +57,21 @@ class Settings(BaseSettings):
     # Business timezone. The database stores naive UTC; customers experience
     # send times locally, so quiet hours and per-day capping resolve here.
     BUSINESS_TIMEZONE: str = "Pacific/Auckland"
+    # How to read a timestamp in an uploaded file that carries no timezone.
+    #
+    # The database stores naive UTC, and "2026-09-16 19:40:00" in a CSV says
+    # nothing about which clock it was written on. Most order exports record
+    # the local time the order was placed, in which case this should be true:
+    # left false, a 7:40pm New Zealand order is stored as 19:40 UTC and read
+    # back as 7:40am the next day, which is what every learned routine, the
+    # #preferred_order_time# tag and Smart Reorder would then be built on.
+    #
+    # Defaulted to false because it changes how existing data is interpreted:
+    # flipping it is a decision about what a particular export means, and it
+    # only applies to rows imported after the change. A timestamp that names
+    # its own offset ("2026-09-16T19:40:00+12:00") is honoured either way.
+    IMPORT_TIMESTAMPS_ARE_LOCAL: bool = False
+
     # Allowed sending window in business local time.
     SEND_WINDOW_START: str = "09:00"
     SEND_WINDOW_END: str = "19:00"

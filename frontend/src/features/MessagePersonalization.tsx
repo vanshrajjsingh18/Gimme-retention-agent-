@@ -22,6 +22,10 @@ export interface MessageField {
   example: string;
   fallback: string;
   description: string;
+  /** The column in the upload format this reads, or '' if not from a file. */
+  source_column: string;
+  /** That, said in a sentence — brand settings and computed values differ. */
+  source: string;
   tag: string;
 }
 
@@ -156,6 +160,7 @@ export default function MessagePersonalization({
                 {groupFields.map((field) => (
                   <option key={field.token} value={field.tag}>
                     {field.label} — {field.tag}
+                    {field.source_column ? ` (${field.source_column})` : ''}
                   </option>
                 ))}
               </optgroup>
@@ -173,7 +178,7 @@ export default function MessagePersonalization({
             <button
               key={field.token}
               type="button"
-              title={`${field.label} — e.g. ${field.example}`}
+              title={`${field.label} — ${field.source}. e.g. ${field.example}`}
               disabled={disabled}
               className="rounded-md border border-slate-300 bg-white px-2 py-1 font-mono text-xs text-slate-700 hover:border-blue-400 hover:text-blue-700 disabled:opacity-50"
               onClick={() => insert(field.tag)}

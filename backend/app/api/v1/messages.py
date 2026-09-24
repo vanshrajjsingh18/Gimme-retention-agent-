@@ -20,7 +20,11 @@ from app.schemas.models import (
     MessagePreviewRequest,
     SendTestRequest,
 )
-from app.services.merge_tags import field_catalog, resolve_message_template
+from app.services.merge_tags import (
+    NOT_FOR_MESSAGING,
+    field_catalog,
+    resolve_message_template,
+)
 from app.services.messaging import generate_message, revalidate_message
 
 router = APIRouter()
@@ -57,6 +61,14 @@ def message_fields(
     fields = field_catalog()
     return {
         "fields": fields,
+        # The columns that deliberately have no tag, with the reason. Half of
+        # the contract, and the half somebody looking at their spreadsheet
+        # actually needs: "there is no #sku# tag" is a different message from
+        # "your sku column was not read".
+        "not_for_messaging": [
+            {"column": column, "reason": reason}
+            for column, reason in NOT_FOR_MESSAGING.items()
+        ],
         # Kept in first-appearance order rather than sorted, so the menu's
         # groups read in the order somebody reaches for them.
         "groups": list(dict.fromkeys(f["group"] for f in fields)),

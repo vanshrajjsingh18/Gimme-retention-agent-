@@ -188,21 +188,75 @@ curl -X POST http://127.0.0.1:8000/api/v1/message-fields/preview \
 }
 ```
 
-Fields, by the group the Personalize menu shows them under:
+Every tag names the column in the [upload format](data-import.md) it reads,
+so a spreadsheet can be mapped without reading any code. The composer shows
+it too — the Personalize menu lists each field as `Label — #tag# (column)`.
 
-| Group | Tags |
+| Upload column | Merge tag | What it says |
+| --- | --- | --- |
+| `first_name` | `#first_name#` | Their first name. Falls back to 'there', so a greeting never reads 'Hi ,'. |
+| `last_name` | `#last_name#` | Their surname. |
+| `first_name + last_name` | `#full_name#` | First and last name together. |
+| `email` | `#email#` | Their email address. |
+| `phone` | `#phone#` | Their mobile number. |
+| `city` | `#city#` | The town or city on their record. |
+| `region` | `#region#` | The region on their record. |
+| `postcode` | `#postcode#` | Their postcode. |
+| `country` | `#country#` | Their country. |
+| `signup_date` | `#signup_date#` | When they joined, in New Zealand local time. |
+| `product_name` | `#product#` `#product_name#` | What they last ordered, falling back to what they order most. |
+| `category` | `#category#` | The category they buy from most. |
+| `brand` | `#brand#` | The brand they buy most. |
+| `ordered_at` | `#last_order_date#` | When they last ordered, in New Zealand local time. |
+| `total_amount` | `#last_order_amount#` | What their last order came to. |
+| `order_external_id` | `#last_order_id#` | The reference on their last order, as it appears in your own system. |
+| `delivery_city` | `#delivery_city#` | Where their last order was delivered, which is not always their address on file. |
+
+| Merge tag | What it says |
 | --- | --- |
-| Customer | `first_name` `last_name` `full_name` `email` `phone` `city` |
-| Order | `product` `product_name` `category` `brand` `last_order_date` `last_order_amount` `order_count` |
-| Behaviour | `preferred_category` `preferred_brand` `preferred_order_day` `preferred_order_time` `average_order_value` |
-| GIMME | `link` `company` `delivery_promise` `support_phone` `sign_off` |
+| `#order_count#` | How many completed orders they have placed. |
+| `#preferred_category#` | The category they buy from most, across every order. |
+| `#preferred_brand#` | The brand they buy most, across every order. |
+| `#preferred_order_day#` | The day of the week they usually order, learned by Smart Reorder. |
+| `#preferred_order_time#` | The time of day they usually order, learned by Smart Reorder. |
+| `#average_order_value#` | What they typically spend per order. |
 
-Where each value comes from is fixed in `app/services/merge_tags.py`:
-`#first_name#` is `customer.first_name`, `#product#` is the product on their
-most recent completed order (falling back to the one they order most),
-`#last_order_amount#` is that order's total, and the `preferred_*` tags are
-computed behaviour metrics. Nothing asks a model where a value should come
-from.
+Plus the verified brand values `#link#` `#company#` `#delivery_promise#`
+`#support_phone#` `#sign_off#`, which come from Brand settings rather than
+from any file.
+
+Your column heading works as a tag in its own right where the two names
+differ: `#ordered_at#`, `#total_amount#` and `#order_external_id#` resolve
+the same as `#last_order_date#`, `#last_order_amount#` and `#last_order_id#`.
+
+The rest of the upload format deliberately has no tag, and says why:
+
+| Column | Why it has no tag |
+| --- | --- |
+| `customer_external_id` | Your internal id for them. Not something to say to a customer. |
+| `item_external_id` | An internal line id. |
+| `sku` | An internal product code. #product# is the name a customer knows. |
+| `date_of_birth` | Used to verify age, never repeated back in marketing copy. |
+| `age_verified` | A compliance flag, not message content. |
+| `marketing_consent` | A compliance flag, not message content. |
+| `email_consent` | A compliance flag, not message content. |
+| `sms_consent` | A compliance flag, not message content. |
+| `whatsapp_consent` | A compliance flag, not message content. |
+| `acquisition_source` | How you found them. Saying it back is unsettling. |
+| `preferred_channel` | Decides how a message is sent, not what it says. |
+| `status` | Order state. A marketing message is not an order update. |
+| `channel` | Which of your channels the order came through. |
+| `currency` | Every amount is already formatted with its symbol. |
+| `discount_amount` | A component of the total. #last_order_amount# is the figure a customer recognises. |
+| `delivery_fee` | As above. |
+| `unit_price` | Line-level pricing. Quoting a price the checkout may no longer honour is a promise this system cannot keep. |
+| `line_total` | As above. |
+| `quantity` | Line-level detail that rarely reads well: 'fancy another 6?' |
+| `coupon_code` | Codes come from the verified list in Brand settings, never from an uploaded file. |
+
+A test asserts that every column in the upload template is either a tag or on
+that list, so adding a column to the format forces a decision rather than
+leaving a silent gap.
 
 Three things this deliberately does not do:
 

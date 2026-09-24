@@ -217,6 +217,10 @@ class CustomerMetrics(Base, TimestampMixin):
     last_order_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     #: The product on their most recent completed order, for #product#.
     last_order_product: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    #: That order's own reference and delivery town, for the merge tags named
+    #: after the order_external_id and delivery_city upload columns.
+    last_order_id: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    last_order_delivery_city: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     days_since_last_order: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     days_since_first_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     average_purchase_interval_days: Mapped[float | None] = mapped_column(Float, nullable=True)

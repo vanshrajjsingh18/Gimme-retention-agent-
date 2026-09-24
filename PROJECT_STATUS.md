@@ -57,7 +57,9 @@ Since then, and in commit order:
   approval and activation, and every send records what was filled in and what
   fell back. Spreadsheet column names are mapped to those fields on import, so
   an export calling it "First Name" or "Item Name" still feeds `#first_name#`
-  and `#product#`.
+  and `#product#`. Each tag names the column it reads, and a test holds the
+  two lists together: a column in the upload format either has a tag or has a
+  recorded reason for not having one.
 
 ## Completed features
 

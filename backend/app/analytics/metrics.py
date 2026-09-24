@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 
 from app.core.enums import OrderStatus
+from app.core.timezones import to_local
 from app.models.base import utcnow
 
 WEEKDAY_NAMES = [
@@ -34,6 +35,10 @@ class OrderFact:
     discount_amount: float = 0.0
     status: str = OrderStatus.COMPLETED.value
     items: list[dict] = field(default_factory=list)
+    #: Carried so the merge tags that name an upload column can read it off
+    #: the most recent order without a second query per recipient.
+    external_id: str = ""
+    delivery_city: str | None = None
 
 
 @dataclass
@@ -56,6 +61,10 @@ class MetricResult:
     #: always what they buy most — a customer switching brands should be asked
     #: about the new one.
     last_order_product: str = ""
+    #: The reference and delivery town on that same order, for the tags named
+    #: after the order_external_id and delivery_city upload columns.
+    last_order_id: str = ""
+    last_order_delivery_city: str = ""
     days_since_last_order: int | None = None
     days_since_first_order: int | None = None
     average_purchase_interval_days: float | None = None
@@ -121,6 +130,8 @@ def compute_metrics(
     result.first_order_at = completed[0].ordered_at
     result.last_order_at = completed[-1].ordered_at
     result.last_order_amount = _round(completed[-1].total_amount)
+    result.last_order_id = completed[-1].external_id or ""
+    result.last_order_delivery_city = completed[-1].delivery_city or ""
     result.last_order_product = next(
         (
             str(item["product_name"])
@@ -195,9 +206,18 @@ def compute_metrics(
         {"product_name": name, "quantity": qty} for name, qty in product_counter.most_common(5)
     ]
 
-    # Ordering habits
-    weekday_counter = Counter(o.ordered_at.weekday() for o in completed)
-    hour_counter = Counter(o.ordered_at.hour for o in completed)
+    # Ordering habits, on the customer's own clock.
+    #
+    # These are read back as "you usually order on a Wednesday evening", so
+    # they have to be the customer's Wednesday evening. Counted off the naive
+    # UTC column they were twelve or thirteen hours out for every New Zealand
+    # customer — a 7pm order became 7am, and the merge tag, the LLM prompt
+    # context and Customer 360 all repeated it. The minute beside them is
+    # written by the Smart Reorder engine, which has always converted, so the
+    # two halves of one time disagreed.
+    local_moments = [to_local(o.ordered_at) for o in completed]
+    weekday_counter = Counter(m.weekday() for m in local_moments)
+    hour_counter = Counter(m.hour for m in local_moments)
     if weekday_counter:
         result.typical_order_weekday = WEEKDAY_NAMES[weekday_counter.most_common(1)[0][0]]
     if hour_counter:

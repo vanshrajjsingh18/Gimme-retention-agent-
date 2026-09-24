@@ -65,6 +65,9 @@ with the reason.
 - [x] Excel/CSV column spellings mapped to canonical fields on import
 - [x] A gap no fallback can close is skipped rather than sent broken
 - [x] Copy preview works outside the send window
+- [x] Every tag names the upload column it reads; column headings work as tags
+- [x] Every upload column has a tag or a recorded reason for not having one
+- [x] `IMPORT_TIMESTAMPS_ARE_LOCAL` for exports that record local order times
 - [x] Mock campaign sending
 - [x] Event tracking
 - [x] Reactivation detection

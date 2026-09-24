@@ -40,7 +40,26 @@ product_name" is the difference between trusting an import and finding out a
 month later that every product was blank.
 
 This is the same set of names the message merge tags use, so a column that maps
-to `first_name` is what `#first_name#` fills.
+to `first_name` is what `#first_name#` fills. Every tag names the column it
+reads — see [the table in docs/api.md](api.md#personalisation-merge-tags) —
+and a test asserts that every column in the upload template either has a tag
+or has a recorded reason for not having one, so the two cannot drift apart.
+
+## Timestamps
+
+A cell reading `2026-09-16 19:40:00` says nothing about which clock wrote it,
+and the database stores naive UTC. If your export records the **local** time an
+order was placed — which most do — set `IMPORT_TIMESTAMPS_ARE_LOCAL=true`, or
+a 7:40pm New Zealand order is stored as 19:40 UTC and read back as 7:40am the
+next morning. That hour is what the learned routine, Smart Reorder's send time
+and `#preferred_order_time#` are all built on, so the whole feature is half a
+day out.
+
+It defaults to `false`, which leaves existing data alone: flipping it changes
+what an already-imported timestamp means, so it is a decision about a
+particular export rather than something to guess. It applies to rows imported
+after the change, so correcting it means re-importing. A timestamp that carries
+its own offset (`2026-09-16T19:40:00+12:00`) is honoured either way.
 
 ---
 

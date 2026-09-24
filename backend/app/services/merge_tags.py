@@ -65,6 +65,13 @@ class MessageField:
 
     ``fallback`` is what appears when the customer's record has nothing —
     never a placeholder-looking string, and never an invented number.
+
+    ``source_column`` names the column in the upload format the value comes
+    from. It is the whole point of the table: somebody looking at the
+    spreadsheet they are about to upload should be able to see which of their
+    columns becomes which tag, without reading any code. A field computed
+    from order history rather than read from a column leaves it empty and
+    says so in its description.
     """
 
     token: str
@@ -73,6 +80,7 @@ class MessageField:
     example: str
     fallback: str = ""
     description: str = ""
+    source_column: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -82,6 +90,17 @@ class MessageField:
             "example": self.example,
             "fallback": self.fallback,
             "description": self.description,
+            "source_column": self.source_column,
+            # One sentence a person can read, because "" means three
+            # different things: a column, a verified brand setting, and a
+            # number worked out from their orders.
+            "source": (
+                f"Your \u201c{self.source_column}\u201d column"
+                if self.source_column
+                else "Brand settings"
+                if self.group == "GIMME"
+                else "Worked out from their order history"
+            ),
             # "category" is the documented name for this in the API; "group"
             # is what the composer's menu calls it. Same value, both spellings
             # served, because renaming one of them would break the other.
@@ -99,65 +118,143 @@ CUSTOMER_FIELDS: list[MessageField] = [
     MessageField(
         "first_name", "First name", "Customer", "Sarah", "there",
         "Their first name. Falls back to 'there', so a greeting never reads 'Hi ,'.",
+        "first_name",
     ),
-    MessageField("last_name", "Last name", "Customer", "Patel", "", "Their surname."),
-    MessageField("full_name", "Full name", "Customer", "Sarah Patel", "there", "First and last name."),
-    MessageField("email", "Email address", "Customer", "sarah@example.co.nz", "", "Their email address."),
-    MessageField("phone", "Mobile number", "Customer", "021 555 0134", "", "Their mobile number."),
+    MessageField(
+        "last_name", "Last name", "Customer", "Patel", "", "Their surname.", "last_name",
+    ),
+    MessageField(
+        "full_name", "Full name", "Customer", "Sarah Patel", "there",
+        "First and last name together.", "first_name + last_name",
+    ),
+    MessageField(
+        "email", "Email address", "Customer", "sarah@example.co.nz", "",
+        "Their email address.", "email",
+    ),
+    MessageField(
+        "phone", "Mobile number", "Customer", "021 555 0134", "",
+        "Their mobile number.", "phone",
+    ),
+    MessageField(
+        "city", "City", "Customer", "Auckland", "your area",
+        "The town or city on their record.", "city",
+    ),
+    MessageField(
+        "region", "Region", "Customer", "Auckland", "your region",
+        "The region on their record.", "region",
+    ),
+    MessageField(
+        "postcode", "Postcode", "Customer", "1010", "", "Their postcode.", "postcode",
+    ),
+    MessageField(
+        "country", "Country", "Customer", "New Zealand", "New Zealand",
+        "Their country.", "country",
+    ),
+    MessageField(
+        "signup_date", "Signed up", "Customer", "3 Mar", "",
+        "When they joined, in New Zealand local time.", "signup_date",
+    ),
+
+    # ------------------------------------------------------------------
+    # Order — read off their most recent completed order.
+    # ------------------------------------------------------------------
     MessageField(
         "product", "Product", "Order", "Corona Extra", "your usual order",
         "What they last ordered, falling back to what they order most.",
+        "product_name",
     ),
     MessageField(
         "product_name", "Product name", "Order", "Corona Extra", "your usual order",
-        "Same as #product#, for copy that reads better with the longer word.",
+        "Same as #product#, named for the upload column.", "product_name",
     ),
     MessageField(
         "category", "Category", "Order", "Beer", "your usual",
-        "The category they buy from most.",
+        "The category they buy from most.", "category",
     ),
     MessageField(
         "brand", "Brand", "Order", "Corona", "your favourites",
-        "The brand they buy most.",
+        "The brand they buy most.", "brand",
     ),
     MessageField(
         "last_order_date", "Last order date", "Order", "14 Sep", "recently",
-        "When they last ordered, in New Zealand local time.",
+        "When they last ordered, in New Zealand local time.", "ordered_at",
     ),
     # No fallback on any of the money or count fields. A missing number is not
     # an excuse to make one up: "$0.00" and "0 orders" are statements about a
     # customer, and a wrong one is worse than a gap the tidy-up closes.
     MessageField(
         "last_order_amount", "Last order amount", "Order", "$68.50", "",
-        "What their last order came to.",
+        "What their last order came to.", "total_amount",
+    ),
+    MessageField(
+        "last_order_id", "Last order reference", "Order", "GIM-10412", "",
+        "The reference on their last order, as it appears in your own system.",
+        "order_external_id",
+    ),
+    MessageField(
+        "delivery_city", "Delivery town", "Order", "Ponsonby", "",
+        "Where their last order was delivered, which is not always their "
+        "address on file.", "delivery_city",
     ),
     MessageField(
         "order_count", "Number of orders", "Order", "12", "",
-        "How many completed orders they have placed.",
+        "How many completed orders they have placed.", "",
     ),
-    # Behaviour: computed from their history rather than read off a record.
+
+    # ------------------------------------------------------------------
+    # Behaviour — computed from their history, not read off a column.
+    # ------------------------------------------------------------------
     MessageField(
         "preferred_category", "Preferred category", "Behaviour", "Beer", "your usual",
-        "The category they buy from most.",
+        "The category they buy from most, across every order.", "",
     ),
     MessageField(
         "preferred_brand", "Preferred brand", "Behaviour", "Corona", "your favourites",
-        "The brand they buy most.",
+        "The brand they buy most, across every order.", "",
     ),
     MessageField(
         "preferred_order_day", "Preferred order day", "Behaviour", "Wednesday", "your usual day",
-        "The day of the week they usually order, learned by Smart Reorder.",
+        "The day of the week they usually order, learned by Smart Reorder.", "",
     ),
     MessageField(
         "preferred_order_time", "Preferred order time", "Behaviour", "7:39 pm", "your usual time",
-        "The time of day they usually order, learned by Smart Reorder.",
+        "The time of day they usually order, learned by Smart Reorder.", "",
     ),
     MessageField(
         "average_order_value", "Average order value", "Behaviour", "$62.40", "",
-        "What they typically spend per order.",
+        "What they typically spend per order.", "",
     ),
-    MessageField("city", "City", "Customer", "Auckland", "your area", "The city we deliver to."),
 ]
+
+#: Columns in the upload format that deliberately have no merge tag, and why.
+#:
+#: This is half of the contract, and the more useful half. Without it, a
+#: column with no tag is indistinguishable from a column somebody forgot, and
+#: the two get confused every time the format changes. A test asserts that
+#: every column in the upload template is either a tag above or listed here,
+#: so the format and the tags cannot drift apart silently.
+NOT_FOR_MESSAGING: dict[str, str] = {
+    "customer_external_id": "Your internal id for them. Not something to say to a customer.",
+    "item_external_id": "An internal line id.",
+    "sku": "An internal product code. #product# is the name a customer knows.",
+    "date_of_birth": "Used to verify age, never repeated back in marketing copy.",
+    "age_verified": "A compliance flag, not message content.",
+    "marketing_consent": "A compliance flag, not message content.",
+    "email_consent": "A compliance flag, not message content.",
+    "sms_consent": "A compliance flag, not message content.",
+    "whatsapp_consent": "A compliance flag, not message content.",
+    "acquisition_source": "How you found them. Saying it back is unsettling.",
+    "preferred_channel": "Decides how a message is sent, not what it says.",
+    "status": "Order state. A marketing message is not an order update.",
+    "channel": "Which of your channels the order came through.",
+    "currency": "Every amount is already formatted with its symbol.",
+    "discount_amount": "A component of the total. #last_order_amount# is the figure a customer recognises.",
+    "delivery_fee": "As above.",
+    "unit_price": "Line-level pricing. Quoting a price the checkout may no longer honour is a promise this system cannot keep.",
+    "line_total": "As above.",
+    "quantity": "Line-level detail that rarely reads well: 'fancy another 6?'",
+    "coupon_code": "Codes come from the verified list in Brand settings, never from an uploaded file.",
+}
 
 #: Verified brand settings. Not about the customer, but copy reaches for them
 #: in the same breath, and they are on the same whitelist for the same reason.
@@ -179,6 +276,17 @@ MESSAGE_FIELDS: list[MessageField] = CUSTOMER_FIELDS + BRAND_FIELDS
 #: first_name, and ``{usual_day}`` is filled by Smart Reorder from the
 #: routine, not from a customer column. Leaving them off the whitelist would
 #: have made every existing template fail validation the day this shipped.
+#: Upload column names that resolve as tags in their own right. Somebody
+#: looking at their spreadsheet should be able to type the column heading and
+#: have it work — #ordered_at# and #last_order_date# are the same question
+#: asked in the two vocabularies this system has, and refusing one of them
+#: teaches nothing.
+COLUMN_ALIASES: dict[str, str] = {
+    "ordered_at": "last_order_date",
+    "total_amount": "last_order_amount",
+    "order_external_id": "last_order_id",
+}
+
 LEGACY_TOKENS: frozenset[str] = frozenset(
     {
         "name",
@@ -194,7 +302,11 @@ LEGACY_TOKENS: frozenset[str] = frozenset(
     }
 )
 
-ALLOWED_TOKENS: frozenset[str] = frozenset(f.token for f in MESSAGE_FIELDS) | LEGACY_TOKENS
+ALLOWED_TOKENS: frozenset[str] = (
+    frozenset(f.token for f in MESSAGE_FIELDS)
+    | frozenset(COLUMN_ALIASES)
+    | LEGACY_TOKENS
+)
 
 #: Per-token fallbacks, keyed for the renderer. The legacy spellings carry the
 #: same fallback as the field they duplicate: "your favourites" has to mean
@@ -209,6 +321,9 @@ FALLBACKS: dict[str, str] = {
     "favourite_category": "your usual",
     "favourite_product": "your usual order",
 }
+FALLBACKS.update(
+    {alias: FALLBACKS[token] for alias, token in COLUMN_ALIASES.items() if token in FALLBACKS}
+)
 
 
 def field_catalog() -> list[dict[str, str]]:
@@ -238,6 +353,7 @@ def sample_values() -> dict[str, str]:
             "coupon_code": "",
         }
     )
+    values.update({alias: values[token] for alias, token in COLUMN_ALIASES.items()})
     return values
 
 
@@ -300,7 +416,7 @@ def customer_field_values(customer: Customer | None) -> dict[str, str]:
     report it afterwards.
     """
     if customer is None:
-        return {f.token: "" for f in CUSTOMER_FIELDS}
+        return {f.token: "" for f in CUSTOMER_FIELDS} | {a: "" for a in COLUMN_ALIASES}
 
     metrics = customer.metrics
     brands = _first(metrics.preferred_brands if metrics else None)
@@ -313,13 +429,21 @@ def customer_field_values(customer: Customer | None) -> dict[str, str]:
         metrics.top_products if metrics else None
     )
 
-    return {
+    values = {
         "first_name": (customer.first_name or "").strip(),
         "last_name": (customer.last_name or "").strip(),
         "full_name": (customer.full_name or "").strip(),
         "email": (customer.email or "").strip(),
         "phone": (customer.phone or "").strip(),
         "city": (customer.city or "").strip(),
+        "region": (customer.region or "").strip(),
+        "postcode": (customer.postcode or "").strip(),
+        "country": (customer.country or "").strip(),
+        "signup_date": (
+            f"{to_local(customer.signup_date):%-d %b}" if customer.signup_date else ""
+        ),
+        "last_order_id": (metrics.last_order_id if metrics else "") or "",
+        "delivery_city": (metrics.last_order_delivery_city if metrics else "") or "",
         "product": product,
         "product_name": product,
         "category": categories,
@@ -338,6 +462,10 @@ def customer_field_values(customer: Customer | None) -> dict[str, str]:
             metrics.typical_order_minute if metrics else None,
         ),
     }
+    # The upload spellings resolve to the same value, so a person can type
+    # either their column heading or the tag the menu offers.
+    values.update({alias: values[token] for alias, token in COLUMN_ALIASES.items()})
+    return values
 
 
 def brand_field_values(brand: BrandSettings | None) -> dict[str, str]:

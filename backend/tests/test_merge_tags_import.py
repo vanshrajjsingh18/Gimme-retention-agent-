@@ -78,6 +78,30 @@ def test_a_column_is_read_by_what_it_means_not_how_it_is_spelled(column, field):
     assert canonical_header(column) == field
 
 
+def test_how_a_bare_timestamp_is_read_is_configuration_not_a_guess(monkeypatch):
+    """"2026-09-16 19:40:00" says nothing about which clock wrote it.
+
+    The column it lands in holds naive UTC, so reading a local timestamp as
+    UTC puts every order half a day out — and the hour is what the learned
+    routine, Smart Reorder's send time and #preferred_order_time# are all
+    built on. A 7:40pm New Zealand order becomes 7:40am the next morning.
+
+    Which it is depends on the export, so it is a setting. The default leaves
+    today's behaviour alone, because flipping it reinterprets data that is
+    already imported.
+    """
+    from app.core.config import settings
+    from app.core.timezones import to_local
+    from app.services.ingestion import parse_datetime
+
+    monkeypatch.setattr(settings, "IMPORT_TIMESTAMPS_ARE_LOCAL", False)
+    assert parse_datetime("2026-09-16 19:40:00", "ordered_at") == datetime(2026, 9, 16, 19, 40)
+
+    monkeypatch.setattr(settings, "IMPORT_TIMESTAMPS_ARE_LOCAL", True)
+    stored = parse_datetime("2026-09-16 19:40:00", "ordered_at")
+    assert to_local(stored).strftime("%A %-I:%M %p") == "Wednesday 7:40 PM"
+
+
 def test_a_column_nobody_recognises_is_ignored_rather_than_guessed_at():
     """The line this stops short of.
 
@@ -104,6 +128,103 @@ def test_the_preview_says_how_each_column_was_read(client, auth_headers):
     assert mapping["Item Name"] == "product_name"
     assert mapping["Order Total"] == "total_amount"
     assert preview["missing_required_columns"] == []
+
+
+# ==========================================================================
+# The upload format and the merge tags are one list
+# ==========================================================================
+def test_every_upload_column_is_either_a_tag_or_deliberately_not_one():
+    """The contract between the two halves of this feature.
+
+    A column with no tag is indistinguishable from a column somebody forgot,
+    and the two get confused every time the format changes — which is how the
+    tag list came to be missing `region`, `signup_date` and `delivery_city`
+    while the upload template had carried them all along.
+
+    So every column in the template must be accounted for: it resolves as a
+    tag, or it is listed in NOT_FOR_MESSAGING with a reason a person can
+    disagree with. Adding a column to the upload format now fails this test
+    until somebody decides which it is.
+    """
+    from app.services.ingestion import TEMPLATE_HEADERS
+    from app.services.merge_tags import ALLOWED_TOKENS, NOT_FOR_MESSAGING
+
+    unaccounted = [
+        column
+        for column in TEMPLATE_HEADERS["combined"]
+        if column not in ALLOWED_TOKENS and column not in NOT_FOR_MESSAGING
+    ]
+    assert not unaccounted, (
+        "these upload columns have neither a merge tag nor a recorded reason "
+        f"for not having one: {unaccounted}"
+    )
+
+
+def test_every_excluded_column_is_a_real_column():
+    """The reverse, so the exclusion list cannot rot into fiction.
+
+    A reason given for a column that no longer exists reads as a decision
+    somebody made, and hides that the column it described is gone.
+    """
+    from app.services.ingestion import TEMPLATE_HEADERS
+    from app.services.merge_tags import NOT_FOR_MESSAGING
+
+    every_column = {c for headers in TEMPLATE_HEADERS.values() for c in headers}
+    stale = sorted(set(NOT_FOR_MESSAGING) - every_column)
+    assert not stale, f"reasons given for columns the upload format no longer has: {stale}"
+
+
+def test_a_tag_says_which_column_it_reads():
+    """So somebody can map their spreadsheet without reading any code.
+
+    Checked against the upload format rather than against a literal, because
+    a `source_column` naming a column that does not exist is worse than none.
+    """
+    from app.services.ingestion import TEMPLATE_HEADERS
+    from app.services.merge_tags import MESSAGE_FIELDS
+
+    every_column = {c for headers in TEMPLATE_HEADERS.values() for c in headers}
+    for field in MESSAGE_FIELDS:
+        for column in field.source_column.split(" + "):
+            column = column.strip()
+            if column:
+                assert column in every_column, f"#{field.token}# names a column that does not exist: {column}"
+
+    by_token = {f.token: f for f in MESSAGE_FIELDS}
+    assert by_token["product"].source_column == "product_name"
+    assert by_token["last_order_amount"].source_column == "total_amount"
+    # A computed field says so by having no column rather than by claiming one.
+    assert by_token["preferred_brand"].source_column == ""
+
+
+def test_the_upload_columns_work_as_tags_themselves(db, imported):
+    """Type your column heading and it resolves.
+
+    #ordered_at# and #last_order_date# are the same question asked in the two
+    vocabularies this system has. Refusing one of them teaches nobody
+    anything — they just conclude merge tags are unreliable.
+    """
+    assert (
+        resolve_message_template(db, "#ordered_at#", imported.id).text
+        == resolve_message_template(db, "#last_order_date#", imported.id).text
+    )
+    assert (
+        resolve_message_template(db, "#total_amount#", imported.id).text
+        == resolve_message_template(db, "#last_order_amount#", imported.id).text
+        == "$61.00"
+    )
+
+
+def test_the_new_columns_reach_a_message(db, imported):
+    """region, signup_date and delivery_city, uploaded and rendered."""
+    imported.region = "Wellington"
+    imported.postcode = "6011"
+    db.commit()
+
+    resolved = resolve_message_template(
+        db, "#region# #postcode# #country# #last_order_id#", imported.id
+    )
+    assert resolved.text == f"Wellington 6011 New Zealand {imported.external_id}-O3"
 
 
 # ==========================================================================
