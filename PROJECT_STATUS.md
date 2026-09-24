@@ -50,6 +50,13 @@ Since then, and in commit order:
   reminder offset configurable per campaign, suppression when the customer has
   already ordered this cycle, the prediction stored on `customer_metrics` so
   segments and the dashboard can read it, and three dynamic segments over it.
+- **Individual Smart Reorder reminders** — the campaign is the rule and
+  `scheduled_messages` is what it produced: one row per customer, rendered
+  and scheduled for their own predicted ordering minute, inspectable and
+  editable before it sends. Dispatch claims each message before sending it,
+  re-checks whether they have already ordered, and runs the same compliance
+  pipeline as every other automation. An order credits the reminder that
+  earned it and re-plans the next one.
 - **Personalisation** — one whitelist of customer fields behind a Personalize
   menu that inserts at the cursor and a live preview rendered by the server,
   shared by the campaign composer, the automation composer and Smart Reorder.

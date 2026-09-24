@@ -534,3 +534,107 @@ already-imported timestamp means.
 
 **Tradeoffs:** Answering the question is a setting plus a re-import rather
 than a click. The default leaves existing data exactly as it is.
+
+---
+
+## 2026-09-24 — A Smart Reorder reminder is a row before it is a message
+
+**Decision:** `scheduled_messages` holds one row per customer per reminder,
+written ahead of time with its text already rendered, and the scheduler
+dispatches from it.
+
+**Reason:** The engine that decides *when* each customer will next order
+already existed, and so did the gates that decide whether a message may go
+out. What was missing was the thing between them. Without a row per message a
+Smart Reorder campaign is a promise — one rule that will, at some point,
+produce thousands of different messages at thousands of different minutes,
+and nobody can see any of them until they have been sent. With it, an
+operator can read the exact string that will reach a named customer at a named
+minute, change it, move it, or call it off.
+
+Rendering at scheduling time rather than at send time is the part that makes
+it worth having: a queue that shows a template is a queue nobody can check.
+
+**Alternatives considered:** Computing the queue on read, from the existing
+enrollments. That shows what *would* be sent, which is not the same claim —
+it cannot be edited, cannot record that a person cancelled one, and changes
+under you between looking and sending.
+
+**Tradeoffs:** A row that can go stale. Handled by re-planning on every
+order rather than on a schedule, and by expiring a message whose moment has
+passed rather than sending it late.
+
+---
+
+## 2026-09-24 — The queue never decides eligibility
+
+**Decision:** Dispatch hands each message to `execute_candidates`, the same
+path every other automation takes. The only check the queue makes itself is
+whether the customer has already ordered.
+
+**Reason:** Consent, suppression, age, frequency caps, quiet hours, dedup and
+content compliance are one implementation or they are two, and the one that
+drifts is the one that texts somebody who opted out. The already-ordered
+check is the exception because it is the only one whose answer means "this
+reminder was a good idea and is no longer needed" rather than "this customer
+may not be messaged".
+
+**Tradeoffs:** The dispatcher is a translation layer — it maps the pipeline's
+decision back onto the message's own status. Worth it: a second copy of the
+compliance rules is a second thing to keep correct.
+
+---
+
+## 2026-09-24 — Claiming a message is a conditional update
+
+**Decision:** SCHEDULED → PROCESSING is an `UPDATE ... WHERE status =
+'SCHEDULED'`, and only a dispatcher whose update matched a row may send.
+
+**Reason:** Duplicate protection cannot rest on "the job never overlaps".
+That is not a property anybody can promise about a background worker — a
+retry, a second instance, a slow tick and an overlapping one all break it.
+The conditional update makes two racing schedulers produce one send and one
+no-op regardless.
+
+**Tradeoffs:** A message whose dispatcher dies mid-flight is left PROCESSING
+rather than retried immediately. Bounded by the attempt counter and the
+staleness window, both of which prefer silence to a reminder sent late.
+
+---
+
+## 2026-09-24 — A reviewer can vouch for what the engine cannot check
+
+**Decision:** Compliance findings split in two. Those the engine can judge —
+prohibited claims, targeting inferred vulnerability, unfillable merge tags —
+keep blocking. Those that report *an absence of data on our side* —
+`UNVERIFIED_COUPON_CODE`, `UNVERIFIED_PROMOTION`, `UNVERIFIED_PRICE_CLAIM`,
+`UNVERIFIED_DELIVERY_CLAIM`, `MISSING_SMS_OPT_OUT` — can be cleared by a named
+human confirming them at approval. The finding stays in the report at full
+severity, now carrying who vouched for it, and the confirmation is written to
+the audit log with the copy as it stood.
+
+**Reason:** This system holds no pricing data, no catalogue and no promotions
+beyond the few configured in Brand settings. "Mentions the promotion '$10
+off', which is not on the approved list" is not the engine detecting a lie —
+it is the engine reporting that it has nothing to check against. Treating that
+as a veto makes our ignorance outrank the knowledge of the person who typed
+it, and the only way past it is to stop writing real offers. A compliance
+engine people route around is worse than one that asks.
+
+Sign-off is per finding, not a blanket override: confirming the coupon code
+says nothing about the price.
+
+**Alternatives considered:** Disabling the rules. That loses the check for
+LLM-drafted copy, which is what they were built for — nobody reads each of
+those, and an invented promotion is exactly what they catch. Also considered
+maintaining a promotions list so the engine could verify properly; that is the
+better long-term answer and is what Brand settings is for, but it cannot be
+the precondition for sending today's campaign.
+
+**Tradeoffs:** `MISSING_SMS_OPT_OUT` is on the vouchable list at the business's
+request, and it is the one carrying real legal weight — a commercial
+electronic message must carry an unsubscribe facility. It is defensible here
+because GIMME sends via a TNZ short code that handles STOP at the carrier
+level, so a reviewer confirming "the facility exists" is saying something
+true. The recommendation remains that the copy says "Reply STOP to opt out",
+because the facility should be stated, not merely available.

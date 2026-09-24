@@ -1256,3 +1256,89 @@ a code change, defaulted off so no existing data is silently reinterpreted.
 **Preventive action:** A test builds four Wednesday-evening orders as local
 moments and asserts `#preferred_order_day#` is Wednesday and
 `#preferred_order_time#` ends in "pm".
+
+---
+
+## 2026-09-24 — Every reminder cancelled itself using the order it was built from
+
+**Found by:** Running the campaign against real imported customers rather than
+the test fixture. Every message came back CANCELLED / CUSTOMER_ALREADY_ORDERED
+before it could send — including for customers who had not ordered since the
+prediction was made.
+
+**Failure:** The final already-ordered check needs an instant after which an
+order counts as "they have already done it". At dispatch the only fields to
+hand were the predicted moment and the typical interval, so the window was
+worked back as *predicted − interval*. That lands an hour or two earlier than
+the customer's own last order, because the predicted time is the routine's
+average clock time and the last order is one particular evening. So the order
+the prediction was **derived from** fell inside the window, read as a purchase
+that had beaten us to it, and the reminder was called off.
+
+The shape of it is worth keeping: a derived value used as an anchor, where the
+exact value was known at a different moment and thrown away.
+
+**Fix:** The anchor is computed when the message is written — the one place
+the exact last-order time is in hand — and stored on the row as
+`cycle_start_at`. Dispatch reads it rather than re-deriving it.
+
+**Preventive action:** A test asserts the stored anchor is strictly after the
+customer's own last completed order, and that dispatching a fresh reminder
+cancels nothing. It fails on the old behaviour for every customer.
+
+The near-miss is that the unit tests passed throughout. Sam's fixture happens
+to order at almost exactly his average time, so *predicted − interval* landed
+within seconds of his last order and the window was right by coincidence. It
+took customers with ordinary variation to show it.
+
+---
+
+## 2026-09-24 — A dry run over an audience nobody had enrolled yet
+
+**Found by:** Walking section 45's acceptance criteria against the running
+app. The dry run reported "0 analysed, 0 would be scheduled" on a campaign
+with 47 matching customers.
+
+**Failure:** The queue builder iterated the automation's *enrollments*, which
+are created when a campaign is activated. A dry run is run precisely before
+that — its whole purpose is deciding whether to activate — so the preview was
+empty at the only moment anybody needed it to say something.
+
+**Fix:** The builder resolves the audience directly and looks the enrollment
+up if there is one. A live build still enrolls first, so newly eligible
+customers are picked up.
+
+**Preventive action:** The acceptance walk-through is scripted, and the dry
+run is asserted to return individual customers before the campaign is ever
+activated.
+
+---
+
+## 2026-09-24 — The company's own name was blocking its own campaigns
+
+**Found by:** A screenshot of the compliance panel: five critical findings on
+an ordinary GIMME offer, the first of which reported `GIMME` as an unverified
+coupon code.
+
+**Failure:** The coupon pattern requires an uppercase token containing a
+digit, written `\b(?=[A-Z0-9]{4,20}\b)(?=.*\d)[A-Z][A-Z0-9]{3,19}\b`. The
+digit lookahead `(?=.*\d)` is unanchored — it scans the whole rest of the
+message rather than the token — so `GIMME` matched whenever any digit appeared
+anywhere after it. Which is most messages: a price, a percentage, a pack size,
+a phone number.
+
+So the brand's own name was reported as an unverified coupon code in nearly
+every campaign, and every one of those was blocked from sending.
+
+**Fix:** The lookahead is bounded to the token's own character class:
+`(?=[A-Z0-9]*\d)`. `GIMME` no longer matches; `FIRST10` and `SUMMER24` still
+do.
+
+**Preventive action:** A test asserts the company name is not a coupon code
+with and without a digit elsewhere in the message, and that two real codes
+still are.
+
+The lesson is about lookaheads rather than about coupons: `(?=.*\d)` inside a
+token pattern reads as "this token contains a digit" and means "a digit occurs
+somewhere later in the subject". The two are the same only in a test string
+that ends at the token.

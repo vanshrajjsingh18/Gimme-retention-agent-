@@ -33,6 +33,7 @@ from app.models.entities import (
     User,
 )
 from app.schemas.models import (
+    ApproveCampaignRequest,
     CampaignCreate,
     CampaignOut,
     CampaignUpdate,
@@ -343,12 +344,26 @@ def submit(
 
 @router.post("/campaigns/{campaign_id}/approve", response_model=CampaignOut, tags=["campaigns"])
 def approve(
-    campaign_id: int, db: Session = Depends(get_db), user: User = Depends(require_write)
+    campaign_id: int,
+    payload: ApproveCampaignRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write),
 ) -> CampaignOut:
-    """Human approval. Required before any campaign can send."""
+    """Human approval. Required before any campaign can send.
+
+    ``confirm`` names the grounding findings this reviewer is taking
+    responsibility for — the coupon codes, prices and promotions the engine
+    holds no data to check. Everything else stays the engine's call.
+    """
     campaign = _get(db, campaign_id)
     try:
-        approve_campaign(db, campaign, user_id=user.id)
+        approve_campaign(
+            db,
+            campaign,
+            user_id=user.id,
+            vouch_for=(payload.confirm if payload else None),
+            reviewer=user.full_name or user.email,
+        )
     except CampaignError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.add(

@@ -239,9 +239,17 @@ class AutomationKind(StrEnum):
 
 class AutomationStatus(StrEnum):
     DRAFT = "DRAFT"
+    #: Live, but only for the handful of customers named as test recipients.
+    #: A Smart Reorder campaign covers thousands of people and each of them
+    #: gets a different message at a different minute, so "switch it on and
+    #: watch" is not something that can be done safely in one step.
+    TESTING = "TESTING"
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
+    #: Finished and put away. Distinct from COMPLETED, which the engine sets
+    #: when a campaign runs out of work; this one is a person's decision.
+    ARCHIVED = "ARCHIVED"
 
 
 class EnrollmentMode(StrEnum):
@@ -313,6 +321,65 @@ class SkipReason(StrEnum):
     TRIGGER_IN_PAST = "TRIGGER_IN_PAST"
     #: An operator paused this specific customer's enrollment.
     ENROLLMENT_PAUSED = "ENROLLMENT_PAUSED"
+
+
+class ScheduledMessageStatus(StrEnum):
+    """One individual reminder's life, from written to answered.
+
+    Deliberately separate from the campaign's own status: a paused campaign
+    still has thousands of scheduled messages, and "the campaign is active"
+    says nothing about whether any particular customer's message went out.
+
+    The sequence a message normally walks is SCHEDULED, PROCESSING, SENT,
+    DELIVERED, and then CONVERTED if they order inside the attribution
+    window. Everything else is a way of not being sent, kept apart because
+    they call for different responses: CANCELLED is the engine deciding
+    (usually because they ordered first), SUPPRESSED is a compliance gate,
+    FAILED is the provider, and EXPIRED is a message whose moment passed
+    while nobody was looking.
+    """
+
+    DRAFT = "DRAFT"
+    SCHEDULED = "SCHEDULED"
+    #: Claimed by a dispatcher. The transition into this state is what stops
+    #: two scheduler runs sending the same message twice.
+    PROCESSING = "PROCESSING"
+    SENT = "SENT"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    SUPPRESSED = "SUPPRESSED"
+    CONVERTED = "CONVERTED"
+    EXPIRED = "EXPIRED"
+
+
+#: Statuses a message can still be acted on from. Anything else is history.
+OPEN_MESSAGE_STATUSES = (
+    ScheduledMessageStatus.DRAFT.value,
+    ScheduledMessageStatus.SCHEDULED.value,
+)
+
+
+class CancellationReason(StrEnum):
+    """Why an individual reminder was called off.
+
+    Named rather than free text because these are counted on the dashboard,
+    and "already ordered" is the number that says the feature is working —
+    a reminder not sent because the customer beat us to it is the system
+    doing its job, not a failure.
+    """
+
+    CUSTOMER_ALREADY_ORDERED = "CUSTOMER_ALREADY_ORDERED"
+    #: Their routine changed, so this message was aimed at the wrong moment.
+    PREDICTION_SUPERSEDED = "PREDICTION_SUPERSEDED"
+    CAMPAIGN_PAUSED = "CAMPAIGN_PAUSED"
+    CAMPAIGN_ARCHIVED = "CAMPAIGN_ARCHIVED"
+    OPERATOR_CANCELLED = "OPERATOR_CANCELLED"
+    CUSTOMER_OPTED_OUT = "CUSTOMER_OPTED_OUT"
+    NO_LONGER_ELIGIBLE = "NO_LONGER_ELIGIBLE"
+    #: Its send time passed while the campaign was paused or the scheduler
+    #: was down. Sending it late would reference a moment that has gone.
+    WINDOW_MISSED = "WINDOW_MISSED"
 
 
 class RecurrenceKind(StrEnum):

@@ -616,4 +616,59 @@ def get_order_pattern(
         if prediction.intervals
         else None
     )
+    # What the engine has actually scheduled for this person, as opposed to
+    # what it would schedule. The two differ whenever a campaign is paused, a
+    # message was cancelled, or nobody has enrolled them — and "we predict
+    # Wednesday 7:07 PM" beside nothing queued is the state somebody needs to
+    # be able to see rather than infer.
+    payload["scheduled_message"] = _scheduled_message_view(db, customer_id)
+    payload["last_smart_reorder"] = _last_smart_reorder_view(db, customer_id)
     return payload
+
+
+def _scheduled_message_view(db: Session, customer_id: int) -> dict | None:
+    """This customer's pending Smart Reorder reminder, if one is queued."""
+    from app.core.enums import OPEN_MESSAGE_STATUSES
+    from app.models.entities import ScheduledMessage
+    from app.services import smart_reorder_queue as queue
+
+    message = (
+        db.execute(
+            select(ScheduledMessage)
+            .where(
+                ScheduledMessage.customer_id == customer_id,
+                ScheduledMessage.status.in_(OPEN_MESSAGE_STATUSES),
+            )
+            .order_by(ScheduledMessage.scheduled_at)
+        )
+        .scalars()
+        .first()
+    )
+    return queue.as_view(db, message) if message is not None else None
+
+
+def _last_smart_reorder_view(db: Session, customer_id: int) -> dict | None:
+    """The last reminder that reached a conclusion, whatever that was.
+
+    Includes the cancelled and suppressed ones on purpose: "we last messaged
+    them three weeks ago" and "we have tried four times and they had already
+    ordered every time" are different facts about a customer, and only one of
+    them is visible if this shows sends alone.
+    """
+    from app.core.enums import OPEN_MESSAGE_STATUSES
+    from app.models.entities import ScheduledMessage
+    from app.services import smart_reorder_queue as queue
+
+    message = (
+        db.execute(
+            select(ScheduledMessage)
+            .where(
+                ScheduledMessage.customer_id == customer_id,
+                ScheduledMessage.status.notin_(OPEN_MESSAGE_STATUSES),
+            )
+            .order_by(ScheduledMessage.updated_at.desc())
+        )
+        .scalars()
+        .first()
+    )
+    return queue.as_view(db, message) if message is not None else None

@@ -15,14 +15,19 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_write
 from app.analytics.order_predictions import describe_interval
 from app.core.database import get_db
-from app.core.enums import AutomationKind, AutomationStatus, EnrollmentStatus
+from app.core.enums import (
+    OPEN_MESSAGE_STATUSES,
+    AutomationKind,
+    AutomationStatus,
+    EnrollmentStatus,
+)
 from app.core.timezones import local_date, to_local, to_utc_naive
 from app.models.base import utcnow
 from app.models.entities import (
@@ -30,8 +35,12 @@ from app.models.entities import (
     AutomationEnrollment,
     Customer,
     CustomerMetrics,
+    ScheduledMessage,
     User,
 )
+from app.schemas.models import EditMessageRequest, RescheduleMessageRequest
+from app.services import smart_reorder_queue as queue
+from app.services.merge_tags import unknown_tags
 from app.services.prediction_accuracy import accuracy_report, pending_count
 
 router = APIRouter()
@@ -272,3 +281,161 @@ def _predicted_population(db: Session, *, now: datetime) -> dict:
             )
         ).scalar_one(),
     }
+
+
+# --------------------------------------------------------------------------
+# The individual message queue
+# --------------------------------------------------------------------------
+# Everything below is about one customer's one reminder. The endpoints above
+# answer "how is Smart Reorder doing"; these answer "what is about to be sent
+# to this person, and can I change it" — which is the question somebody has
+# before they switch a campaign on for thousands of people.
+@router.get("/smart-reorder/queue", tags=["smart-reorder"])
+def message_queue(
+    automation_id: int | None = None,
+    status: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """The individual messages this engine is preparing to send.
+
+    The operational screen. Each row is one customer, one predicted order
+    time, one send time and the exact text they will receive.
+    """
+    statuses = (status,) if status else OPEN_MESSAGE_STATUSES
+    messages = queue.upcoming(
+        db, automation_id=automation_id, statuses=statuses, limit=limit
+    )
+    now = utcnow()
+    rows = []
+    for message in messages:
+        view = queue.as_view(db, message)
+        view["minutes_away"] = _minutes_until(message.scheduled_at, now=now)
+        rows.append(view)
+    return {
+        "generated_at": now.isoformat(),
+        "count": len(rows),
+        "messages": rows,
+    }
+
+
+@router.get("/smart-reorder/queue/{message_id}", tags=["smart-reorder"])
+def message_detail(
+    message_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """One customer's reminder, with the reasoning that produced it."""
+    message = db.get(ScheduledMessage, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="That scheduled message does not exist.")
+    view = queue.as_view(db, message)
+    view["context"] = message.context
+    view["attempts"] = message.attempts
+    return view
+
+
+@router.post("/smart-reorder/queue/{message_id}/cancel", tags=["smart-reorder"])
+def cancel_message(
+    message_id: int,
+    payload: dict | None = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_write),
+) -> dict:
+    try:
+        message = queue.cancel_by_id(
+            db, message_id, detail=(payload or {}).get("reason", "")
+        )
+    except queue.QueueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return queue.as_view(db, message)
+
+
+@router.post("/smart-reorder/queue/{message_id}/reschedule", tags=["smart-reorder"])
+def reschedule_message(
+    message_id: int,
+    payload: RescheduleMessageRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_write),
+) -> dict:
+    """Move one customer's reminder. Nobody else's slot changes."""
+    try:
+        message = queue.reschedule(db, message_id, to_utc_naive(payload.scheduled_at))
+    except queue.QueueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return queue.as_view(db, message)
+
+
+@router.post("/smart-reorder/queue/{message_id}/edit", tags=["smart-reorder"])
+def edit_message(
+    message_id: int,
+    payload: EditMessageRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_write),
+) -> dict:
+    """Rewrite one customer's copy, leaving the campaign's template alone."""
+    unknown = unknown_tags(payload.body)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail="This message uses merge tags that cannot be filled: "
+            + ", ".join(f"#{tag}#" for tag in unknown),
+        )
+    try:
+        message = queue.edit(db, message_id, payload.body)
+    except queue.QueueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return queue.as_view(db, message)
+
+
+@router.post("/smart-reorder/{automation_id}/dry-run", tags=["smart-reorder"])
+def dry_run(
+    automation_id: int,
+    limit: int | None = Query(default=None, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Exactly what would be scheduled, with nothing written.
+
+    The same code path the real build takes, with the writes turned off — so
+    the counts are the rules executed rather than a second simulation of them.
+    """
+    automation = _nudge_or_404(db, automation_id)
+    return queue.build_queue(db, automation, dry_run=True, limit=limit).as_dict()
+
+
+@router.post("/smart-reorder/{automation_id}/build-queue", tags=["smart-reorder"])
+def build_queue_now(
+    automation_id: int,
+    limit: int | None = Query(default=None, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_write),
+) -> dict:
+    """Write the individual messages down.
+
+    ``limit`` is the production safeguard: a first activation can materialise
+    five customers rather than five thousand, so somebody can read what the
+    engine produced before letting it loose on the whole audience.
+    """
+    automation = _nudge_or_404(db, automation_id)
+    return queue.build_queue(db, automation, limit=limit).as_dict()
+
+
+@router.get("/smart-reorder/{automation_id}/dashboard", tags=["smart-reorder"])
+def campaign_dashboard(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """What this campaign has sent, cancelled and earned."""
+    return queue.dashboard(db, _nudge_or_404(db, automation_id))
+
+
+def _nudge_or_404(db: Session, automation_id: int) -> Automation:
+    automation = db.get(Automation, automation_id)
+    if automation is None or automation.kind != AutomationKind.NUDGE.value:
+        raise HTTPException(
+            status_code=404, detail="That Smart Reorder campaign does not exist."
+        )
+    return automation

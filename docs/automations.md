@@ -500,6 +500,52 @@ what they receive and when. Create a new version instead.
 
 ---
 
+## Smart Reorder: individual reminders
+
+A Smart Reorder campaign is **one rule that produces many different
+messages**, not one message sent to many people. Each eligible customer gets
+their own predicted ordering time, their own reminder time, their own rendered
+message and their own eligibility check.
+
+```
+CUSTOMER → ORDER HISTORY → ROUTINE → PREDICTED NEXT ORDER
+        → INDIVIDUAL REMINDER TIME → INDIVIDUAL MESSAGE (stored, rendered)
+        → FINAL ELIGIBILITY CHECK → SENT → ORDER → CONVERSION → RE-PLAN
+```
+
+The messages live in `scheduled_messages`, written ahead of time so they can
+be read before they are sent. **Upcoming messages** in the sidebar is that
+queue: one row per customer, with the predicted order time, the send time, the
+confidence and the exact text. Any row can be opened, edited, moved or
+cancelled without touching the campaign or anybody else's message.
+
+Two scheduled jobs drive it. `build_smart_reorder_queue` runs every fifteen
+minutes and writes the reminders down; `dispatch_smart_reorder` runs every
+minute and sends the ones whose moment has arrived. They are separate because
+materialising the queue walks the whole audience, and a slow rebuild must
+never delay somebody's 7:07 PM.
+
+Before anything sends, a message is **claimed** — SCHEDULED to PROCESSING as
+a conditional update — so two schedulers racing over the same row produce one
+send and one no-op. Then the already-ordered check runs, and then the same
+consent, suppression, frequency-cap, quiet-hours and content-compliance
+pipeline as every other automation. The queue decides nothing about
+eligibility itself.
+
+| Situation | What happens |
+| --- | --- |
+| They order before the reminder is due | `CANCELLED` / `CUSTOMER_ALREADY_ORDERED`, and counted as a success |
+| They order after receiving it | `CONVERTED`, with the revenue and a signed prediction error |
+| They order unexpectedly at any time | The pending reminder is cancelled as `PREDICTION_SUPERSEDED` and a new one written from the new history |
+| The campaign is paused | Nothing sends, and scheduled messages stay put |
+| The send time passes unnoticed | `EXPIRED` rather than sent late — a Wednesday-evening reminder is not worth delivering on Friday |
+| Their predicted time is outside the send window | Pulled back inside it, and the row says `moved_for_send_window` |
+
+Activating does not materialise thousands of messages at once: the build takes
+a `limit`, so a first run can write five and let somebody read them.
+
+---
+
 ## Message templates
 
 Templates use merge tags filled from the customer's own record and approved

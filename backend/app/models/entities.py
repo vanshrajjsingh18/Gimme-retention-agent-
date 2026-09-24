@@ -38,6 +38,7 @@ from app.core.enums import (
     RecipientStatus,
     PredictionStatus,
     RecurrenceKind,
+    ScheduledMessageStatus,
     SendStatus,
     SequenceTrigger,
     SegmentStatus,
@@ -556,6 +557,12 @@ class Campaign(Base, TimestampMixin):
 
     audience_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     compliance_result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    #: Claims a named reviewer has taken responsibility for, as
+    #: {rule code: who}. The engine holds no pricing data and no coupon list,
+    #: so a figure in hand-written copy is unverified *by us* rather than
+    #: untrue — this is the record of the person who said otherwise, kept on
+    #: the campaign so it survives a re-check.
+    compliance_vouched_for: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
     # Set once, when an automation creates this campaign as its plumbing, and
     # never cleared. The campaign list also derives the same fact from
@@ -1041,6 +1048,113 @@ class AutomationEnrollment(Base, TimestampMixin):
     pattern: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
     automation: Mapped["Automation"] = relationship(back_populates="enrollments")
+
+
+class ScheduledMessage(Base, TimestampMixin):
+    """One customer's own reminder, written down before it is sent.
+
+    The point of this table is that the message exists *as a record* between
+    the moment the engine decides to send it and the moment it goes out. A
+    Smart Reorder campaign is one rule producing thousands of different
+    messages at thousands of different minutes, and without a row per message
+    nobody can answer the question that matters before switching it on: what,
+    exactly, is this about to say, to whom, and when?
+
+    So the body is rendered and stored here at scheduling time rather than at
+    send time. That makes it inspectable, editable and cancellable — and it
+    means what an operator reads in the queue is the string that will be
+    handed to the provider, not a re-derivation of it that could differ.
+
+    It is not a second delivery ledger. ``AutomationSend`` stays the record of
+    what was attempted and why it was or was not sent; this is the intent that
+    preceded it, and the two are linked once a message is dispatched.
+    """
+
+    __tablename__ = "scheduled_messages"
+    __table_args__ = (
+        # The scheduler's central query: what is due, on a live campaign.
+        Index("ix_scheduled_messages_due", "status", "scheduled_at"),
+        Index("ix_scheduled_messages_customer_status", "customer_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    #: The Smart Reorder campaign this belongs to. Its backing campaign row is
+    #: carried separately so sends flow through the existing attribution.
+    automation_id: Mapped[int] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    campaign_id: Mapped[int | None] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    enrollment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_enrollments.id", ondelete="SET NULL"), nullable=True
+    )
+
+    #: Naive UTC, like every other timestamp here. This is *this customer's*
+    #: moment — the whole feature is that no two rows share it by design.
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    #: The order time this reminder is aimed at, and how far ahead of it.
+    predicted_order_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    offset_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    #: The instant after which an order means "they have already done it".
+    #: Anchored to the order this prediction was built from, and stored rather
+    #: than re-derived at send time: working it back from the predicted moment
+    #: minus the typical interval lands an hour or two early and sweeps up the
+    #: customer's own last order, cancelling a reminder that should have gone.
+    cycle_start_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: True when the send window moved this off its aimed time. "We text them
+    #: half an hour before they usually order" and "we text them at 6" are
+    #: different promises, and the queue has to be able to say which.
+    moved_for_send_window: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, default=Channel.SMS.value)
+    #: The campaign's copy as it stood when this was scheduled, kept beside
+    #: the rendered text: "what was the template" and "what will this person
+    #: receive" are different questions and one string cannot answer both.
+    template: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    rendered_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: Set when a person edits the copy for this one customer, so a later
+    #: refresh does not quietly overwrite what they wrote.
+    edited_by_operator: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ScheduledMessageStatus.SCHEDULED.value, index=True
+    )
+    cancellation_reason: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    cancellation_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Bounded, because a provider that is refusing every message should not
+    #: be retried into the ground.
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    #: Filled in once the message is dispatched, linking intent to outcome.
+    message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
+    send_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_sends.id", ondelete="SET NULL"), nullable=True
+    )
+    #: The order this reminder is credited with, inside the attribution window.
+    converted_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
+    )
+    converted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    #: Everything the queue shows that is not a column: the routine it was
+    #: built from, the product named in the copy, the test-mode flag.
+    context: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    customer: Mapped["Customer"] = relationship()
 
 
 class AutomationSend(Base):

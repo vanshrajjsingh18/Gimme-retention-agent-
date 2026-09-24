@@ -22,6 +22,7 @@ from app.services.merge_tags import (
 )
 from app.core.phone import normalize_nz_phone
 from app.compliance.engine import (
+    VOUCHABLE_RULES,
     ComplianceConfig,
     ComplianceReport,
     RecipientView,
@@ -40,6 +41,7 @@ from app.integrations.mock_adapters import BaseMockAdapter
 from app.integrations.registry import get_adapter
 from app.models.base import utcnow
 from app.models.entities import (
+    AuditLog,
     Campaign,
     CampaignRecipient,
     Customer,
@@ -269,6 +271,7 @@ def run_compliance_check(
         approved_by_human=campaign.status
         in (CampaignStatus.APPROVED.value, CampaignStatus.SCHEDULED.value),
         drafted=drafts_per_recipient(campaign),
+        vouched_for=campaign.compliance_vouched_for or {},
     )
     campaign.compliance_result = report.as_dict()
     if campaign.status in (
@@ -294,8 +297,31 @@ def submit_for_approval(db: Session, campaign: Campaign) -> Campaign:
     return campaign
 
 
-def approve_campaign(db: Session, campaign: Campaign, *, user_id: int) -> Campaign:
-    """Approve a campaign. Requires a passing compliance report."""
+def approve_campaign(
+    db: Session,
+    campaign: Campaign,
+    *,
+    user_id: int,
+    vouch_for: list[str] | None = None,
+    reviewer: str = "",
+) -> Campaign:
+    """Approve a campaign, optionally vouching for what the engine cannot check.
+
+    Approval is a person reading the message and saying it is fit to send. For
+    most rules the engine has already decided — a health claim is a health
+    claim whoever approves it. But the grounding checks are different: this
+    system holds no pricing data, no catalogue and no coupon list beyond the
+    few in Brand settings, so a figure or a code in hand-written copy is
+    unverified *by us*, which is not the same as untrue.
+
+    Blocking those outright makes the engine's ignorance outrank the
+    reviewer's knowledge, and the only way past it is to stop writing real
+    offers. So a reviewer may take responsibility for them by name instead,
+    and the report keeps saying what was vouched for and who said it.
+
+    What cannot be vouched for stays blocking. A reviewer cannot make a
+    prohibited claim acceptable by agreeing with it.
+    """
     if campaign.status not in (
         CampaignStatus.AWAITING_APPROVAL.value,
         CampaignStatus.COMPLIANCE_CHECKED.value,
@@ -307,6 +333,35 @@ def approve_campaign(db: Session, campaign: Campaign, *, user_id: int) -> Campai
 
     config = build_compliance_config(db)
     segment = db.get(Segment, campaign.segment_id) if campaign.segment_id else None
+
+    if vouch_for:
+        who = reviewer or f"user {user_id}"
+        unvouchable = sorted(set(vouch_for) - VOUCHABLE_RULES)
+        if unvouchable:
+            raise CampaignError(
+                "These findings cannot be signed off by a reviewer: "
+                + ", ".join(unvouchable)
+                + ". They are rules the engine can judge on its own."
+            )
+        campaign.compliance_vouched_for = {
+            **(campaign.compliance_vouched_for or {}),
+            **{code: who for code in vouch_for},
+        }
+        db.add(
+            AuditLog(
+                actor=str(user_id),
+                action="COMPLIANCE_VOUCHED",
+                entity_type="campaign",
+                entity_id=str(campaign.id),
+                detail={
+                    "campaign": campaign.name,
+                    "reviewer": who,
+                    "codes": sorted(vouch_for),
+                    "body": campaign.body,
+                },
+            )
+        )
+
     report = check_campaign(
         subject=campaign.subject,
         body=campaign.body,
@@ -316,13 +371,21 @@ def approve_campaign(db: Session, campaign: Campaign, *, user_id: int) -> Campai
         config=config,
         approved_by_human=True,
         drafted=drafts_per_recipient(campaign),
+        vouched_for=campaign.compliance_vouched_for or {},
     )
     campaign.compliance_result = report.as_dict()
     if not report.passed:
         db.commit()
+        vouchable = report.needs_vouching
+        detail = "; ".join(f.message for f in report.blocking_findings)
+        if vouchable:
+            detail += (
+                " — "
+                + ", ".join(sorted({f.code for f in vouchable}))
+                + " can be approved by confirming them, if you know they are right."
+            )
         raise CampaignError(
-            "Campaign has blocking compliance findings and cannot be approved: "
-            + "; ".join(f.message for f in report.blocking_findings)
+            "Campaign has blocking compliance findings and cannot be approved: " + detail
         )
 
     campaign.status = CampaignStatus.APPROVED.value

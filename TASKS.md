@@ -46,6 +46,25 @@ with the reason.
       became candidates
 - [x] Idempotent scheduler — no duplicate reminder within the minimum gap
 - [x] SAM-TEST-001 end-to-end scenario from the brief
+- [x] Individual scheduled message per customer, rendered and stored ahead
+      of the send, in `scheduled_messages`
+- [x] Upcoming Smart Reorder Messages queue with open / edit / reschedule /
+      cancel per customer
+- [x] Smart Reorder Reminder as a type in Campaigns → Create Campaign
+- [x] Dry run over the whole audience before activation, writing nothing
+- [x] Batch cap on the first build, so activation does not materialise
+      thousands of messages at once
+- [x] Idempotent dispatch — SCHEDULED → PROCESSING claim, one send per message
+- [x] Final already-ordered check at send time, anchored to the order the
+      prediction was built from
+- [x] Per-message conversion with signed prediction error
+- [x] Re-plan on every order: obsolete reminder cancelled, next one written
+- [x] Message statuses distinct from campaign statuses; TESTING and ARCHIVED
+      added to campaigns
+- [x] Grounding findings confirmable by a named reviewer, recorded in the
+      audit log, with prohibited claims still hard-blocking
+- [ ] **Approved promotions and coupon codes maintained in Brand settings**
+      so the engine can verify them itself rather than asking a reviewer
 - [ ] **A/B variants for reminder copy** — variants can be stored and
       attributed but not authored per Smart Reorder campaign
 - [ ] **Per-customer channel fallback order surfaced in the builder** — the

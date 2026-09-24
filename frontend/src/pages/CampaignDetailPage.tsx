@@ -69,6 +69,10 @@ export default function CampaignDetailPage() {
   // Held so a merge tag lands at the cursor rather than at the end of
   // whatever has been written so far.
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  // Which unverifiable claims this reviewer is taking responsibility for.
+  // Ticked per finding rather than one blanket override, because confirming
+  // the coupon code says nothing about the price.
+  const [confirmed, setConfirmed] = useState<string[]>([]);
 
   useEffect(() => {
     if (campaign) {
@@ -414,20 +418,42 @@ export default function CampaignDetailPage() {
                   className={`rounded-lg border px-4 py-3 ${
                     compliance.passed
                       ? 'border-emerald-200 bg-emerald-50'
-                      : 'border-red-200 bg-red-50'
+                      : (compliance.hard_blocking_count ?? compliance.blocking_count) > 0
+                        ? 'border-red-200 bg-red-50'
+                        : 'border-amber-200 bg-amber-50'
                   }`}
                 >
                   <p
                     className={`text-sm font-medium ${
-                      compliance.passed ? 'text-emerald-800' : 'text-red-800'
+                      compliance.passed
+                        ? 'text-emerald-800'
+                        : (compliance.hard_blocking_count ?? compliance.blocking_count) > 0
+                          ? 'text-red-800'
+                          : 'text-amber-900'
                     }`}
                   >
                     {compliance.passed
                       ? 'No blocking findings'
-                      : `${compliance.blocking_count} blocking finding${
-                          compliance.blocking_count === 1 ? '' : 's'
-                        } — sending is blocked`}
+                      : (compliance.hard_blocking_count ?? compliance.blocking_count) > 0
+                        ? `${compliance.hard_blocking_count} finding${
+                            compliance.hard_blocking_count === 1 ? '' : 's'
+                          } — sending is blocked`
+                        : `${compliance.blocking_count} finding${
+                            compliance.blocking_count === 1 ? '' : 's'
+                          } need your confirmation`}
                   </p>
+                  {/* "Sending is blocked" and "confirm these and you can send"
+                      are different messages, and showing the first when the
+                      second is true is what makes people give up on the
+                      compliance engine rather than use it. */}
+                  {!compliance.passed &&
+                    (compliance.hard_blocking_count ?? compliance.blocking_count) === 0 && (
+                      <p className="mt-1 text-xs text-amber-900">
+                        This engine holds no pricing, catalogue or promotions data, so it cannot
+                        check these claims itself. Tick each one you know is right, then approve —
+                        your name is recorded against them.
+                      </p>
+                    )}
                   {compliance.checked_at && (
                     <p className="mt-0.5 text-xs text-slate-600">
                       Checked {formatDateTime(compliance.checked_at)}
@@ -459,6 +485,37 @@ export default function CampaignDetailPage() {
                           {f.excerpt && (
                             <p className="mt-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-700">
                               “{f.excerpt}”
+                            </p>
+                          )}
+                          {/* This system holds no pricing data, no catalogue
+                              and no coupon list beyond Brand settings — so
+                              these are claims it cannot check, not claims it
+                              knows are wrong. The person who wrote the copy
+                              can say otherwise, on the record. */}
+                          {f.vouchable && f.blocks_send && (
+                            <label className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={confirmed.includes(f.code)}
+                                onChange={(e) =>
+                                  setConfirmed((current) =>
+                                    e.target.checked
+                                      ? [...current, f.code]
+                                      : current.filter((code) => code !== f.code),
+                                  )
+                                }
+                              />
+                              <span className="text-xs text-amber-900">
+                                I confirm this is correct. GIMME has no pricing or promotions
+                                data for this engine to check it against, so approving records
+                                that you vouched for it.
+                              </span>
+                            </label>
+                          )}
+                          {f.vouched_by && (
+                            <p className="mt-1 text-xs text-emerald-700">
+                              Confirmed by {f.vouched_by}.
                             </p>
                           )}
                         </div>

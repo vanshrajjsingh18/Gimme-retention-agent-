@@ -446,6 +446,34 @@ class SendTestRequest(BaseModel):
     customer_id: int | None = None
 
 
+class ApproveCampaignRequest(BaseModel):
+    """Approval, plus the claims the reviewer is standing behind.
+
+    ``confirm`` carries compliance rule codes, not free text: a reviewer
+    confirms "the coupon code in this message is real", and the report keeps
+    saying which finding that was and who said it.
+    """
+
+    confirm: list[str] = Field(default_factory=list, max_length=20)
+
+
+class RescheduleMessageRequest(BaseModel):
+    """A new send time for one customer's reminder.
+
+    Naive, and read as business local time — that is what somebody typing a
+    time into a scheduling field means, and the one place the two clocks meet
+    is the conversion on the way in.
+    """
+
+    scheduled_at: datetime
+
+
+class EditMessageRequest(BaseModel):
+    """Replacement copy for one recipient. The campaign template is untouched."""
+
+    body: str = Field(min_length=1, max_length=4000)
+
+
 class MessagePreviewRequest(BaseModel):
     """Copy as it is being typed, and who to preview it against.
 

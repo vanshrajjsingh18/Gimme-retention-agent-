@@ -109,9 +109,14 @@ PRICE_CLAIM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Coupon-code shaped tokens: 4+ chars, uppercase alphanumeric, at least one digit
-# or a known promo word. Avoids matching ordinary capitalised words.
-COUPON_PATTERN = re.compile(r"\b(?=[A-Z0-9]{4,20}\b)(?=.*\d)[A-Z][A-Z0-9]{3,19}\b")
+# Coupon-code shaped tokens: 4+ chars, uppercase alphanumeric, containing a
+# digit. Avoids matching ordinary capitalised words.
+#
+# The digit lookahead is bounded to the token — `(?=.*\d)` scans the whole rest
+# of the message, so "GIMME" matched whenever a digit appeared anywhere after
+# it. The company's own name was reported as an unverified coupon code in
+# every message that also mentioned a number, which is most of them.
+COUPON_PATTERN = re.compile(r"\b(?=[A-Z0-9]{4,20}\b)(?=[A-Z0-9]*\d)[A-Z][A-Z0-9]{3,19}\b")
 
 DELIVERY_CLAIM_PATTERN = re.compile(
     r"\b(?:deliver(?:y|ed|s|ing)?|arrives?|arrive|get\s+it|be\s+there|at\s+your\s+door|"
@@ -144,6 +149,33 @@ DEFAULT_QUIET_HOURS_START = time(19, 0)
 DEFAULT_QUIET_HOURS_END = time(9, 0)
 
 
+#: Findings that say "this system cannot verify this", not "this is wrong".
+#:
+#: The distinction matters more than it looks. A health claim is something the
+#: engine can read and judge; a coupon code is not. This system holds no
+#: pricing data, no catalogue and no promotions beyond the handful configured
+#: in Brand settings, so a figure or a code in hand-written copy is unverified
+#: *by us* — which is not the same as untrue. The person who typed "FIRST10"
+#: knows whether it is a real code, and blocking them substitutes the engine's
+#: ignorance for their knowledge.
+#:
+#: So these stop the LLM inventing offers, which is what they were built for,
+#: and a human reviewer can vouch for them instead of being vetoed by them.
+#: Everything not on this list still blocks: a prohibited claim, a message
+#: targeting inferred vulnerability, or an unfillable merge tag is not
+#: something a reviewer can make true by agreeing with it.
+VOUCHABLE_RULES: frozenset[str] = frozenset(
+    {
+        "UNVERIFIED_COUPON_CODE",
+        "UNVERIFIED_PROMOTION",
+        "UNVERIFIED_PRICE_CLAIM",
+        "UNVERIFIED_DELIVERY_CLAIM",
+        "UNVERIFIED_PRODUCT_CLAIM",
+        "MISSING_SMS_OPT_OUT",
+    }
+)
+
+
 @dataclass
 class ComplianceFinding:
     code: str
@@ -151,6 +183,13 @@ class ComplianceFinding:
     severity: ComplianceSeverity
     blocks_send: bool
     excerpt: str = ""
+    #: True once a named human has taken responsibility for this claim.
+    vouched_by: str = ""
+
+    @property
+    def vouchable(self) -> bool:
+        """Whether a human reviewer can take responsibility for this."""
+        return self.code in VOUCHABLE_RULES
 
     def as_dict(self) -> dict:
         return {
@@ -159,6 +198,8 @@ class ComplianceFinding:
             "severity": self.severity.value,
             "blocks_send": self.blocks_send,
             "excerpt": self.excerpt,
+            "vouchable": self.vouchable,
+            "vouched_by": self.vouched_by,
         }
 
 
@@ -176,10 +217,27 @@ class ComplianceReport:
     def blocking_findings(self) -> list[ComplianceFinding]:
         return [f for f in self.findings if f.blocks_send]
 
+    @property
+    def needs_vouching(self) -> list[ComplianceFinding]:
+        """Blocking findings a reviewer could take responsibility for.
+
+        The difference between "you cannot send this" and "confirm this is
+        right and you can" — which is the difference between a compliance
+        engine that helps and one people work around.
+        """
+        return [f for f in self.findings if f.blocks_send and f.vouchable]
+
+    @property
+    def hard_blocking(self) -> list[ComplianceFinding]:
+        """Findings no reviewer can sign away."""
+        return [f for f in self.findings if f.blocks_send and not f.vouchable]
+
     def as_dict(self) -> dict:
         return {
             "passed": self.passed,
             "blocking_count": len(self.blocking_findings),
+            "vouchable_codes": sorted({f.code for f in self.needs_vouching}),
+            "hard_blocking_count": len(self.hard_blocking),
             "findings": [f.as_dict() for f in self.findings],
             "checked_at": (self.checked_at or datetime.utcnow()).isoformat(),
         }
@@ -709,6 +767,7 @@ def check_campaign(
     config: ComplianceConfig,
     approved_by_human: bool = False,
     drafted: bool = False,
+    vouched_for: dict[str, str] | None = None,
 ) -> ComplianceReport:
     """Full campaign-level compliance report.
 
@@ -743,6 +802,17 @@ def check_campaign(
 
     findings.extend(check_content(combined, config, channel=channel))
     findings.extend(check_targeting(segment_rule=segment_rule, objective=objective, config=config))
+
+    # A named person has read this and taken responsibility for the claims the
+    # engine cannot check. The finding stays in the report at full severity —
+    # it is the record of what was vouched for and by whom — but it no longer
+    # stops the send, because the verification it was asking for has happened.
+    for finding in findings:
+        who = (vouched_for or {}).get(finding.code)
+        if who and finding.vouchable:
+            finding.blocks_send = False
+            finding.vouched_by = who
+            finding.message = f"{finding.message} Confirmed by {who}."
 
     if not approved_by_human:
         findings.append(

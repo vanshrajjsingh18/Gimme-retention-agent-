@@ -184,6 +184,12 @@ function CreateCampaignModal({
 }) {
   const navigate = useNavigate();
   const { data: segments } = useQuery<Segment[]>('/api/v1/segments');
+  // Two genuinely different things, so the choice comes first rather than
+  // being a setting inside one of them. A standard campaign sends one message
+  // to an audience; Smart Reorder produces a different message for each
+  // customer at their own predicted time, and almost none of the fields below
+  // mean the same thing for both.
+  const [kind, setKind] = useState<'STANDARD' | 'SMART_REORDER'>('STANDARD');
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -193,12 +199,27 @@ function CreateCampaignModal({
     attribution_window_hours: 72,
   });
 
-  const create = useMutation(async () =>
-    api.post<Campaign>('/api/v1/campaigns', {
+  const create = useMutation(async () => {
+    if (kind === 'SMART_REORDER') {
+      const automation = await api.post<{ id: number }>('/api/v1/automations', {
+        name: form.name,
+        description:
+          form.description ||
+          'Individual reorder reminders around each customer’s predicted next order.',
+        kind: 'NUDGE',
+        channel: form.channel,
+        objective: 'REORDER',
+        segment_id: form.segment_id ? Number(form.segment_id) : null,
+        attribution_window_hours: form.attribution_window_hours,
+      });
+      return { id: automation.id, path: `/automations/${automation.id}` };
+    }
+    const campaign = await api.post<Campaign>('/api/v1/campaigns', {
       ...form,
       segment_id: form.segment_id ? Number(form.segment_id) : null,
-    }),
-  );
+    });
+    return { id: campaign.id, path: `/campaigns/${campaign.id}` };
+  });
 
   return (
     <Modal
@@ -224,7 +245,7 @@ function CreateCampaignModal({
               const result = await create.run();
               if (result) {
                 notify('Campaign created as a draft.');
-                navigate(`/campaigns/${result.id}`);
+                navigate(result.path);
               }
             }}
           >
@@ -235,6 +256,61 @@ function CreateCampaignModal({
       }
     >
       <div className="space-y-4">
+        <fieldset>
+          <legend className="label">Campaign type</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {[
+              {
+                value: 'STANDARD' as const,
+                label: 'Standard campaign',
+                description:
+                  'One message to an audience, sent when you schedule it.',
+              },
+              {
+                value: 'SMART_REORDER' as const,
+                label: 'Smart Reorder Reminder',
+                description:
+                  'An individual reminder for each customer, around the time they usually order.',
+              },
+            ].map((option) => (
+              <label
+                key={option.value}
+                className={`flex cursor-pointer gap-2 rounded-lg border px-3 py-2.5 ${
+                  kind === option.value
+                    ? 'border-brand-400 bg-brand-50/60'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="campaign-kind"
+                  className="mt-0.5"
+                  checked={kind === option.value}
+                  onChange={() => setKind(option.value)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-slate-800">
+                    {option.label}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {option.description}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {/* Said here because it is the thing people get wrong about this
+              campaign type: there is no one send time to choose. */}
+          {kind === 'SMART_REORDER' && (
+            <p className="mt-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
+              Every customer gets their own send time, worked out from their own order
+              history — there is no single schedule to set. You will pick the reminder
+              timing and message next, then dry-run it to see each individual message
+              before anything sends.
+            </p>
+          )}
+        </fieldset>
+
         <div>
           <label className="label" htmlFor="campaign-name">
             Name

@@ -321,6 +321,79 @@ re-approved.
 
 ---
 
+## Smart Reorder — individual reminders
+
+| Method | Path                                             | Purpose                              |
+| ------ | ------------------------------------------------ | ------------------------------------ |
+| GET    | `/api/v1/smart-reorder/overview`                 | Eligible customers, accuracy, enrolled |
+| GET    | `/api/v1/smart-reorder/upcoming`                 | Customers entering their ordering window |
+| GET    | `/api/v1/smart-reorder/queue`                    | The individual messages waiting to send |
+| GET    | `/api/v1/smart-reorder/queue/{id}`               | One customer's reminder, with its reasoning |
+| POST   | `/api/v1/smart-reorder/queue/{id}/edit`          | Rewrite one customer's copy          |
+| POST   | `/api/v1/smart-reorder/queue/{id}/reschedule`    | Move one customer's send time        |
+| POST   | `/api/v1/smart-reorder/queue/{id}/cancel`        | Call off one reminder                |
+| POST   | `/api/v1/smart-reorder/{id}/dry-run`             | What would be scheduled, writing nothing |
+| POST   | `/api/v1/smart-reorder/{id}/build-queue`         | Write the messages down (`?limit=` to batch) |
+| GET    | `/api/v1/smart-reorder/{id}/dashboard`           | Sent, cancelled, converted, revenue  |
+
+The unit of scheduling is **one customer, one predicted order time, one
+message** — not a campaign with a global send time. A campaign is the rule;
+`scheduled_messages` holds what it produced:
+
+```
+CUSTOMER → ORDER HISTORY → ROUTINE → PREDICTED NEXT ORDER
+        → INDIVIDUAL REMINDER TIME → INDIVIDUAL MESSAGE (stored, rendered)
+        → FINAL ELIGIBILITY CHECK → SENT → ORDER → CONVERSION → RE-PLAN
+```
+
+A dry run before activation:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/smart-reorder/17/dry-run \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "customers_analysed": 8,
+  "messages_scheduled": 6,
+  "excluded_by_reason": { "LOW_CONFIDENCE": 1, "BEYOND_HORIZON": 1 },
+  "messages": [
+    { "customer_name": "Sam Rangi",
+      "predicted_order_at_local": "2026-09-30T19:40:00+13:00",
+      "scheduled_at_local": "2026-09-30T18:00:00+13:00",
+      "confidence": 100,
+      "message": "Hi Sam, ready for another Corona Extra 12pk? GIMME's ready when you are." }
+  ]
+}
+```
+
+Nothing is written by a dry run — it is the same code path with the writes
+turned off, so the counts are the rules executed rather than a second
+simulation of them.
+
+**Message statuses** are separate from the campaign's own: `DRAFT`,
+`SCHEDULED`, `PROCESSING`, `SENT`, `DELIVERED`, `FAILED`, `CANCELLED`,
+`SUPPRESSED`, `CONVERTED`, `EXPIRED`. A paused campaign still has thousands of
+scheduled messages; "the campaign is active" says nothing about whether any
+particular customer's message went out.
+
+Three behaviours worth knowing:
+
+* **The final check happens at send time, not at scheduling time.** A message
+  written on Monday is re-checked on Wednesday against orders placed in
+  between, then run through the same consent, suppression, frequency-cap and
+  quiet-hours pipeline every other automation uses.
+* **A customer who orders first is not messaged.** Their reminder is
+  `CANCELLED` with `CUSTOMER_ALREADY_ORDERED`, which is the feature working
+  rather than a failure, and is counted separately on the dashboard.
+* **An order re-plans the next reminder.** The pending message is cancelled
+  as `PREDICTION_SUPERSEDED` and a fresh one is written from the new history,
+  on the order itself rather than on a schedule — the gap between the two is
+  exactly the window in which the wrong message goes out.
+
+---
+
 ## Campaigns
 
 | Method | Path                                          | Purpose                               |

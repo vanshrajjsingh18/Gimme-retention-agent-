@@ -234,6 +234,10 @@ export interface ValidationFinding {
   severity: string;
   blocks_send: boolean;
   excerpt: string;
+  /** A claim the engine has no data to check, which a reviewer can confirm. */
+  vouchable?: boolean;
+  /** Who took responsibility for it, once somebody has. */
+  vouched_by?: string;
 }
 
 export interface Message {
@@ -405,6 +409,10 @@ export interface AudiencePreview {
 export interface ComplianceReport {
   passed: boolean;
   blocking_count: number;
+  /** Blocking findings a reviewer could clear by confirming them. */
+  vouchable_codes?: string[];
+  /** Blocking findings nobody can sign away. */
+  hard_blocking_count?: number;
   findings: ValidationFinding[];
   checked_at?: string;
 }

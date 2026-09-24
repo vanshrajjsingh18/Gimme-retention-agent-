@@ -270,7 +270,36 @@ def process_new_order(
     result["lifecycle_stage"] = intel.lifecycle.stage.value
     result["churn_score"] = intel.churn.score
     result["recommended_action"] = intel.recommendation.action.value
+
+    # Credit any Smart Reorder reminder this order answers, then re-plan the
+    # next one. Both halves belong here rather than in a scheduled job: the
+    # gap between the order landing and a job noticing is exactly the window
+    # in which a reminder goes out asking somebody to buy what they have just
+    # bought.
+    result["smart_reorder"] = _settle_smart_reorder(db, order)
     return result
+
+
+def _settle_smart_reorder(db: Session, order: Order) -> dict:
+    """Attribute the order to a reminder if one earned it, then re-plan.
+
+    Kept in one place because the two are the same event seen twice: the
+    reminder that prompted this order is finished, and this order is the
+    newest evidence about when the next one is due.
+    """
+    from app.services import smart_reorder_queue as queue
+
+    settled = {"converted": None}
+    try:
+        converted = queue.credit_conversion(db, order)
+        if converted is not None:
+            settled["converted"] = converted
+        settled.update(queue.refresh_for_customer(db, order.customer_id))
+    except Exception:  # pragma: no cover - never let this break an import
+        # An order must still land even if the reminder engine is unhappy.
+        # Losing a prediction is recoverable; losing the order is not.
+        logger.exception("Smart Reorder settlement failed for order %s", order.id)
+    return settled
 
 
 def backfill_attribution(db: Session, *, since: datetime | None = None) -> dict:

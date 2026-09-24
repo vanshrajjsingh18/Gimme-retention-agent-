@@ -131,6 +131,81 @@ def run_automations_job() -> None:
             _log(db, "ERROR", "automations", f"Automation run failed: {exc}")
 
 
+def dispatch_smart_reorder_job() -> None:
+    """Send the individual reminders whose minute has arrived.
+
+    Every minute, because the whole feature is that each customer is messaged
+    at *their* time: a five-minute tick would round thousands of individually
+    predicted moments onto a five-minute grid, which is most of the way back
+    to the one-global-send-time design this replaced.
+
+    Each message is claimed before it is sent, so running this twice — two
+    workers, an overlapping tick, a retry — produces one send and one no-op
+    rather than two messages to the same person.
+    """
+    from app.services.smart_reorder_queue import dispatch_due
+
+    try:
+        with session_scope() as db:
+            stats = dispatch_due(db)
+            if stats["sent"] or stats["failed"] or stats["cancelled"]:
+                _log(
+                    db,
+                    "INFO",
+                    "smart_reorder",
+                    f"Smart Reorder dispatch: {stats['sent']} sent, "
+                    f"{stats['cancelled']} cancelled, {stats['suppressed']} suppressed, "
+                    f"{stats['failed']} failed.",
+                    stats,
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Smart Reorder dispatch failed")
+        with session_scope() as db:
+            _log(db, "ERROR", "smart_reorder", f"Smart Reorder dispatch failed: {exc}")
+
+
+def build_smart_reorder_queue_job() -> None:
+    """Write down the next reminder for every eligible customer.
+
+    Separate from dispatch and far less frequent: materialising the queue
+    walks the whole audience, while dispatch only touches what is due. Keeping
+    them apart means a slow rebuild can never delay somebody's 7:07 PM.
+    """
+    from app.core.enums import AutomationKind
+    from app.models.entities import Automation
+    from app.services.smart_reorder_queue import SENDING_STATUSES, build_queue
+
+    try:
+        with session_scope() as db:
+            from sqlalchemy import select
+
+            automations = (
+                db.execute(
+                    select(Automation).where(
+                        Automation.kind == AutomationKind.NUDGE.value,
+                        Automation.status.in_(SENDING_STATUSES),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for automation in automations:
+                report = build_queue(db, automation)
+                if report.scheduled or report.refreshed or report.cancelled:
+                    _log(
+                        db,
+                        "INFO",
+                        "smart_reorder",
+                        f"Queued Smart Reorder for '{automation.name}': "
+                        f"{report.scheduled} new, {report.refreshed} updated.",
+                        report.as_dict(),
+                    )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Smart Reorder queue build failed")
+        with session_scope() as db:
+            _log(db, "ERROR", "smart_reorder", f"Smart Reorder queue build failed: {exc}")
+
+
 def refresh_order_patterns_job() -> None:
     """Recompute behavioural-nudge order patterns. Habits drift."""
     from app.automations.service import refresh_nudge_patterns
@@ -255,6 +330,22 @@ def start_scheduler() -> BackgroundScheduler | None:
         run_automations_job,
         IntervalTrigger(minutes=settings.AUTOMATION_TICK_MINUTES),
         id="run_automations",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        dispatch_smart_reorder_job,
+        # Every minute. Each customer has their own predicted minute, and a
+        # coarser tick would round them all onto a grid.
+        IntervalTrigger(minutes=1),
+        id="dispatch_smart_reorder",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        build_smart_reorder_queue_job,
+        IntervalTrigger(minutes=15),
+        id="build_smart_reorder_queue",
         replace_existing=True,
         max_instances=1,
     )

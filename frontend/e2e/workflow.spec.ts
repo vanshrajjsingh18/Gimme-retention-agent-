@@ -229,9 +229,32 @@ test.describe('Segments', () => {
  * have to ask for one that has a composer.
  */
 async function openEditableCampaign(page: Page) {
-  const draft = page.locator('tbody tr').filter({ hasText: /Draft|Awaiting Approval/ }).first();
+  // Campaigns this suite created are excluded: they are empty by design, and
+  // the tests using this one need a campaign with an audience and copy.
+  const draft = page
+    .locator('tbody tr')
+    .filter({ hasText: /Draft|Awaiting Approval/ })
+    .filter({ hasNotText: /^E2E / })
+    .first();
   await expect(draft).toBeVisible({ timeout: 15_000 });
   await draft.getByRole('link').first().click();
+}
+
+/**
+ * Create a campaign of this test's own and open it.
+ *
+ * Any test that *saves* a body needs one. Sharing "whichever draft is first"
+ * works only while every test is read-only, and the moment one wrote to it
+ * five others started failing on copy they had not written — so a test that
+ * edits brings its own.
+ */
+async function createDraftCampaign(page: Page, label: string, channel = 'SMS') {
+  await page.goto('/campaigns');
+  await page.getByRole('button', { name: /new campaign/i }).first().click();
+  await page.locator('#campaign-name').fill(`E2E ${label} ${Date.now()}`);
+  await page.locator('#campaign-channel').selectOption(channel);
+  await page.getByRole('button', { name: /create draft/i }).click();
+  await expect(page.locator('#campaign-body')).toBeVisible({ timeout: 15_000 });
 }
 
 test.describe('Campaigns', () => {
@@ -283,11 +306,9 @@ test.describe('Campaigns', () => {
     const { errors } = guard(page);
     await login(page);
 
-    await page.goto('/campaigns');
-    await openEditableCampaign(page);
+    await createDraftCampaign(page, 'Merge tag cursor');
 
     const body = page.locator('#campaign-body');
-    await expect(body).toBeVisible();
     await body.fill('Kia ora , the usual?');
 
     // Cursor placed mid-sentence. Appending to the end is the behaviour that
@@ -307,11 +328,9 @@ test.describe('Campaigns', () => {
     const { errors } = guard(page);
     await login(page);
 
-    await page.goto('/campaigns');
-    await openEditableCampaign(page);
+    await createDraftCampaign(page, 'Merge tag preview');
 
     const body = page.locator('#campaign-body');
-    await expect(body).toBeVisible();
     await body.fill('Hi #first_name#, fancy another #product#?');
 
     // One template, two people, two messages — the whole claim of the
@@ -334,21 +353,103 @@ test.describe('Campaigns', () => {
     expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
   });
 
+  test('an unverifiable claim is a reviewer call, not a wall', async ({ page }) => {
+    const { errors } = guard(page);
+    await login(page);
+
+    // SMS, because an email campaign carries its own mandatory statements and
+    // those are genuinely blocking — not the reviewer's to sign away.
+    await createDraftCampaign(page, 'Compliance vouching');
+
+    const body = page.locator('#campaign-body');
+    await body.fill(
+      "Hi #first_name#, GIMME's got $10 off with FIRST10. Please enjoy responsibly. Reply STOP to opt out.",
+    );
+    await page.getByRole('button', { name: /^save$/i }).click();
+    await page.getByRole('button', { name: /run check/i }).click();
+
+    // The engine holds no promotions or coupon data, so it says so — and
+    // offers the reviewer the tick rather than refusing outright.
+    await expect(page.getByText(/need your confirmation/i)).toBeVisible({ timeout: 15_000 });
+    const confirms = page.getByRole('checkbox');
+    expect(await confirms.count()).toBeGreaterThan(0);
+    await expect(page.getByText(/your name is recorded against them/i)).toBeVisible();
+
+    // And the company's own name is not reported as a coupon code.
+    await expect(page.getByText('\u201cGIMME\u201d')).toHaveCount(0);
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
+
   test('a merge tag that is not a field is refused before approval', async ({ page }) => {
     const { errors } = guard(page);
     await login(page);
 
-    await page.goto('/campaigns');
-    await openEditableCampaign(page);
+    await createDraftCampaign(page, 'Merge tag unknown');
 
     const body = page.locator('#campaign-body');
-    await expect(body).toBeVisible();
     await body.fill('Kia ora #first_name#, use #discont_code#. Reply STOP to opt out.');
 
     // Named, not just flagged: "a merge tag is wrong" in a 400-character body
     // is not something an operator can act on.
     await expect(page.getByText(/#discont_code#/).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/cannot be approved/i)).toBeVisible();
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
+});
+
+test.describe('Smart Reorder', () => {
+  test('Create Campaign offers an individual-reminder campaign type', async ({ page }) => {
+    const { errors } = guard(page);
+    await login(page);
+
+    await page.goto('/campaigns');
+    await page.getByRole('button', { name: /new campaign/i }).first().click();
+
+    // The choice comes first, because the two are genuinely different things
+    // and almost none of the fields below mean the same for both.
+    const smart = page.getByRole('radio', { name: /smart reorder reminder/i });
+    await expect(smart).toBeVisible();
+    await smart.check();
+
+    // And the page says the thing people get wrong about this type: there is
+    // no one send time to pick.
+    await expect(page.getByText(/every customer gets their own send time/i)).toBeVisible();
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
+
+  test('the upcoming queue shows one row per customer with its own time', async ({ page }) => {
+    const { errors } = guard(page);
+    await login(page);
+
+    await page.goto('/smart-reorder/queue');
+    await expect(
+      page.getByRole('heading', { level: 1, name: /upcoming smart reorder messages/i }),
+    ).toBeVisible();
+
+    // Wait for the fetch to land before branching: reading the row count
+    // immediately after navigation sees zero rows and an empty state that has
+    // not rendered yet, so the test takes the wrong branch and then fails.
+    const rows = page.locator('tbody tr');
+    const empty = page.getByText(/no messages are queued/i);
+    await expect(rows.first().or(empty)).toBeVisible({ timeout: 15_000 });
+
+    if (await rows.count()) {
+      // Each row is one customer, one predicted order, one send time.
+      await expect(rows.first()).toBeVisible();
+      await expect(page.getByRole('columnheader', { name: 'Predicted order' })).toBeVisible();
+      await expect(page.getByRole('columnheader', { name: 'Reminder' })).toBeVisible();
+
+      // Opening one shows that customer's own message, not a template.
+      await rows.first().getByRole('button', { name: 'Open' }).click();
+      await expect(page.getByLabel('Message')).toBeVisible();
+      const body = await page.getByLabel('Message').inputValue();
+      expect(body).not.toContain('#first_name#');
+    } else {
+      await expect(empty).toBeVisible();
+    }
 
     expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
   });

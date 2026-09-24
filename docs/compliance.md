@@ -13,6 +13,56 @@ deliberately does not attempt.
 
 ---
 
+
+## What a reviewer can sign off, and what they cannot
+
+Findings come in two kinds, and the difference is who is better placed to
+judge.
+
+**The engine's call.** A health claim, copy targeting inferred vulnerability,
+a merge tag that cannot be filled — these the engine can read and decide, and
+no approval makes them acceptable. They block, and they stay blocking.
+
+**The reviewer's call.** This system holds no pricing data, no catalogue and
+no promotions beyond the few in Brand settings. So when hand-written copy says
+"$10 off with FIRST10", the engine is not detecting a lie — it is reporting
+that it has nothing to check the claim against. That is a statement about our
+data, not about the message.
+
+| Finding | Reviewer can confirm |
+| --- | --- |
+| `UNVERIFIED_COUPON_CODE` | yes |
+| `UNVERIFIED_PROMOTION` | yes |
+| `UNVERIFIED_PRICE_CLAIM` | yes |
+| `UNVERIFIED_DELIVERY_CLAIM` | yes |
+| `MISSING_SMS_OPT_OUT` | yes — see the caveat below |
+| `HEALTH_CLAIM`, `EMOTIONAL_WELLBEING_CLAIM`, other prohibited claims | no |
+| `VULNERABILITY_TARGETING` | no |
+| `UNKNOWN_MERGE_TAG` | no |
+| `MISSING_RESPONSIBLE_DRINKING`, `MISSING_AGE_STATEMENT` | no |
+
+On the campaign's Compliance card each confirmable finding carries a tick box.
+Ticking it and approving records that a named person took responsibility: the
+finding stays in the report at full severity with `vouched_by` set, and an
+`COMPLIANCE_VOUCHED` entry goes to the audit log with the reviewer, the rule
+codes and the copy as it stood.
+
+Confirmation is per finding. Confirming the coupon code says nothing about the
+price, and approving with only some ticked still refuses.
+
+This applies to human-written copy. LLM-drafted messages are checked against
+the same rules at generation time and nobody reads each one, so the grounding
+checks are doing exactly the job they were built for there.
+
+**`MISSING_SMS_OPT_OUT` is the exception worth reading twice.** A commercial
+electronic message must carry an unsubscribe facility — that is law, not
+policy. It is confirmable here because GIMME sends via a TNZ short code that
+handles STOP at the carrier level, so a reviewer confirming the facility
+exists is saying something true. Keep "Reply STOP to opt out" in the copy
+anyway: the facility should be stated in the message, not merely available
+behind it.
+
+
 ## The two questions
 
 The engine separates two things that are easy to conflate:
