@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, require_write
 from app.core.database import get_db
 from app.core.enums import SegmentStatus, SegmentType
+from app.core.phone import export_phone
 from app.models.entities import AuditLog, CustomerSegment, Segment, User
 from app.schemas.common import OperationResult
 from app.schemas.models import (
@@ -27,6 +29,8 @@ from app.services.segments import (
     refresh_all_segments,
     refresh_segment_membership,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -280,29 +284,52 @@ def export_segment(
     views = evaluate_segment(db, segment)
     buffer = io.StringIO()
     writer = csv.writer(buffer)
+    # phone sits beside email because they are the two ways to reach somebody,
+    # and a column order that separates them makes the file harder to read
+    # than it needs to be. Everything else keeps its place: a downloaded file
+    # is somebody's spreadsheet, and reordering columns breaks their formulas.
     writer.writerow(
         [
-            "external_id", "first_name", "last_name", "email", "city", "lifecycle_stage",
-            "completed_orders", "lifetime_revenue", "days_since_last_order", "churn_score",
-            "churn_risk_band", "rfm_segment", "recommended_action", "marketing_consent",
+            "external_id", "first_name", "last_name", "email", "phone", "city",
+            "lifecycle_stage", "completed_orders", "lifetime_revenue",
+            "days_since_last_order", "churn_score", "churn_risk_band", "rfm_segment",
+            "recommended_action", "marketing_consent",
         ]
     )
+    unusable = 0
     for v in views:
+        phone = export_phone(v.get("phone"))
+        if v.get("phone") and not phone:
+            unusable += 1
         writer.writerow(
             [
                 v["external_id"], v["first_name"], v["last_name"], v.get("email", ""),
-                v.get("city", ""), v.get("lifecycle_stage", ""), v.get("completed_orders", 0),
-                v.get("lifetime_revenue", 0), v.get("days_since_last_order", ""),
-                v.get("churn_score", 0), v.get("churn_risk_band", ""),
-                v.get("rfm_segment", ""), v.get("recommended_action", ""),
-                v.get("marketing_consent", False),
+                phone, v.get("city", ""), v.get("lifecycle_stage", ""),
+                v.get("completed_orders", 0), v.get("lifetime_revenue", 0),
+                v.get("days_since_last_order", ""), v.get("churn_score", 0),
+                v.get("churn_risk_band", ""), v.get("rfm_segment", ""),
+                v.get("recommended_action", ""), v.get("marketing_consent", False),
             ]
+        )
+
+    if unusable:
+        # Counted, not named. That some numbers could not be resolved is worth
+        # knowing; which customers they belong to is not something to write
+        # into a log that is read far more often than it is needed.
+        logger.info(
+            "Segment %s export: %s of %s stored phone numbers could not be "
+            "resolved to an NZ mobile and were left blank.",
+            segment.id,
+            unusable,
+            len(views),
         )
 
     safe_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in segment.name).lower()
     return PlainTextResponse(
-        buffer.getvalue(),
-        media_type="text/csv",
+        # A BOM, so Excel opens the file as UTF-8 rather than guessing at a
+        # codepage and mangling names with macrons in them.
+        "\ufeff" + buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="segment-{safe_name}.csv"'},
     )
 

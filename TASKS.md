@@ -133,6 +133,14 @@ with the reason.
 - [ ] **Docker images built and run** — the `docker` CLI is present but no
       daemon is running in this environment
 
+## Exports
+
+- [x] Segment export includes a `phone` column in NZ international form
+- [x] Reuses the canonical `normalize_nz_phone`; no second implementation
+- [x] Blank rather than invented for unresolvable numbers; stored value untouched
+- [ ] **An .xlsx export** so a `+`-prefixed cell is explicitly typed as text
+      rather than relying on how a spreadsheet guesses (needs `openpyxl`)
+
 ## P3 — Optional improvements
 
 Not attempted; recorded so the gap is visible rather than implied.

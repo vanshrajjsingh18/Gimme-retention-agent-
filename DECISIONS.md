@@ -638,3 +638,34 @@ because GIMME sends via a TNZ short code that handles STOP at the carrier
 level, so a reviewer confirming "the facility exists" is saying something
 true. The recommendation remains that the copy says "Reply STOP to opt out",
 because the facility should be stated, not merely available.
+
+---
+
+## 2026-09-24 — The segment export writes phone numbers in international form
+
+**Decision:** `GET /segments/{id}/export.csv` gains a `phone` column beside
+`email`, written as `+642902076762` via the existing `normalize_nz_phone`. A
+number that cannot be resolved exports blank. The stored value is never
+touched.
+
+**Reason:** An exported list exists to be used somewhere else — uploaded to a
+provider, handed to an agency, dialled. `02902076762` is fine on a screen and
+wrong in most of those places.
+
+Blank rather than the original value for the unresolvable ones, because a
+column that is international for most rows and whatever-was-typed for the
+rest is worse than one with visible gaps: the gaps get chased, while a stray
+`09 555 1234` among the `+64`s looks like data somebody has checked.
+
+**Alternatives considered:** A second, more generous formatter that also
+accepts landlines, so no row exports blank. Rejected because it would mean two
+answers in this codebase to "is this a valid phone number" — and the one that
+drifts is the one that decides who gets texted. Against real data the question
+is moot: all 1,010 customers export cleanly.
+
+**Tradeoffs:** A customer whose only number is a landline exports blank. That
+is the cost of one canonical normaliser, and it is visible rather than silent.
+
+Excel may display a `+`-prefixed cell as a number. Fixing that inside a CSV
+means writing `="+64…"`, which breaks every non-spreadsheet reader including
+this system's own importer, so the file keeps the correct value.

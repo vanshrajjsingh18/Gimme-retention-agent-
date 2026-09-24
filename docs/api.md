@@ -321,6 +321,37 @@ re-approved.
 
 ---
 
+### Segment export
+
+`GET /api/v1/segments/{id}/export.csv` returns the segment's current members
+as CSV, in this column order:
+
+```
+external_id, first_name, last_name, email, phone, city, lifecycle_stage,
+completed_orders, lifetime_revenue, days_since_last_order, churn_score,
+churn_risk_band, rfm_segment, recommended_action, marketing_consent
+```
+
+`phone` is written in international form — `+642902076762`, not
+`02902076762` — using the same `normalize_nz_phone` the send path uses, so
+one idea of what a valid number is serves imports, sends and exports alike.
+A number already international is passed through rather than converted twice,
+and a number that cannot be resolved to an NZ mobile is left **blank** rather
+than guessed at: a fabricated digit in a phone column is a call to a stranger.
+The count of blanked numbers goes to the log; which customers they were does
+not.
+
+Exporting never rewrites the stored value. `02902076762` stays `02902076762`
+on the customer record — the international form is how the number is written
+down, not a correction to it.
+
+The file carries a UTF-8 BOM so Excel opens it as UTF-8 rather than guessing
+at a codepage. Note that Excel may still display a `+`-prefixed cell as a
+number; the value in the file is correct, and importing the column as Text
+(Data → From Text/CSV) preserves it on screen.
+
+---
+
 ## Smart Reorder — individual reminders
 
 | Method | Path                                             | Purpose                              |

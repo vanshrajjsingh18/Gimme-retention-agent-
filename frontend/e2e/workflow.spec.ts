@@ -257,6 +257,45 @@ async function createDraftCampaign(page: Page, label: string, channel = 'SMS') {
   await expect(page.locator('#campaign-body')).toBeVisible({ timeout: 15_000 });
 }
 
+test.describe('Segments', () => {
+  test('exporting a segment downloads a file with international phone numbers', async ({
+    page,
+  }) => {
+    const { errors } = guard(page);
+    await login(page);
+
+    await page.goto('/segments');
+    // The real button, and the real file it produces — the whole point of
+    // this column is what ends up in somebody's download.
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('tbody tr').first().getByRole('button', { name: 'Export' }).click(),
+    ]);
+
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    const text = Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, '');
+
+    const [header, ...rows] = text.trim().split('\n');
+    const columns = header.split(',');
+    expect(columns).toContain('phone');
+    // Beside email, where the brief asks for it.
+    expect(columns.indexOf('phone')).toBe(columns.indexOf('email') + 1);
+
+    const phoneAt = columns.indexOf('phone');
+    const phones = rows.map((row) => row.split(',')[phoneAt]).filter(Boolean);
+    expect(phones.length).toBeGreaterThan(0);
+    // One shape, all the way down: international or empty, never a raw 02…
+    for (const phone of phones) {
+      expect(phone).toMatch(/^\+\d{7,15}$/);
+    }
+    expect(phones.some((p) => p.startsWith('+64'))).toBe(true);
+
+    expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
+  });
+});
+
 test.describe('Campaigns', () => {
   test('shows the audience breakdown with consent and age exclusions', async ({ page }) => {
     const { errors } = guard(page);

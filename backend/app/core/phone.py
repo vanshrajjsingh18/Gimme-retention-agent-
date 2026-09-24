@@ -88,3 +88,21 @@ def normalize_nz_phone(value: str | None) -> str | None:
 def is_sendable(value: str | None) -> bool:
     """Whether an SMS to this number could actually be delivered."""
     return normalize_nz_phone(value) is not None
+
+
+def export_phone(value: str | None) -> str:
+    """A phone number as it should appear in a file somebody downloads.
+
+    The same canonicalisation the send path uses, differing only in what it
+    does with a refusal: :func:`normalize_nz_phone` returns ``None`` so a
+    caller can decide, and an export has already decided — a number it cannot
+    resolve becomes an empty cell.
+
+    Empty rather than the original value on purpose. A column that is
+    international for most rows and whatever-was-typed for the rest is worse
+    than one with gaps in it: the gaps are visible and can be chased, while a
+    stray "09 555 1234" sitting among the +64s looks like data that has been
+    checked. Never a guess — a fabricated digit in a phone column is a text
+    to a stranger.
+    """
+    return normalize_nz_phone(value) or ""
