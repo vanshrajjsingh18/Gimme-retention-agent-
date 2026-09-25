@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from app.campaigns.service import CampaignError, approve_campaign, run_compliance_check
-from app.compliance.engine import COUPON_PATTERN, VOUCHABLE_RULES
+from app.compliance.engine import COUPON_PATTERN, PRICE_CLAIM_PATTERN, VOUCHABLE_RULES
 from app.core.enums import CampaignCopyMode, CampaignStatus, Channel
 from app.models.base import utcnow
 from app.models.entities import AuditLog, Campaign
@@ -54,6 +54,51 @@ def test_the_company_name_is_not_a_coupon_code():
     # And a code that really is one is still caught.
     assert COUPON_PATTERN.findall("use FIRST10 today") == ["FIRST10"]
     assert COUPON_PATTERN.findall("use SUMMER24 today") == ["SUMMER24"]
+
+
+def test_a_discount_is_not_reported_as_a_price_half_its_size():
+    """The second false positive, and the worse of the two.
+
+    "$10 off" is a discount, and the price rule excludes it by refusing a
+    figure followed by "off". But the exclusion sat at the end of a greedy
+    match, so the engine backtracked out of it: "$10" failed the guard, "$1"
+    was tried next, passed, and the report named a price of $1 — a figure
+    nowhere in the message. A reviewer reading that finding cannot act on it,
+    because there is nothing in their copy to check or correct.
+    """
+    live_copy = (
+        "Hey #first_name#, we've missed seeing you on GIMME! I've got $10 off "
+        "your next 3 orders with code FIRST10. Your usual #product_name# can "
+        "be at your door in 45 mins. Reply STOP to opt out."
+    )
+    assert PRICE_CLAIM_PATTERN.findall(live_copy) == []
+
+    # The exclusion is for discounts only. A plain price is still a price.
+    assert PRICE_CLAIM_PATTERN.findall("$24.99 a bottle") == ["$24.99"]
+    assert PRICE_CLAIM_PATTERN.findall("Delivery from $1 tonight") == ["$1"]
+    assert PRICE_CLAIM_PATTERN.findall("NZ$45 delivered") == ["NZ$45"]
+    # And it holds for the decimal and "discount" spellings too.
+    assert PRICE_CLAIM_PATTERN.findall("$10.50 off") == []
+    assert PRICE_CLAIM_PATTERN.findall("$100 discount") == []
+    # A real price later in the same message is still found.
+    assert PRICE_CLAIM_PATTERN.findall("$5 off and $24.99 a bottle") == ["$24.99"]
+
+
+def test_the_reported_excerpt_is_text_that_is_really_in_the_message(db, bootstrapped):
+    """Whatever a finding quotes, the reviewer must be able to find it.
+
+    A quoted excerpt is how somebody decides whether to fix the copy or
+    confirm the claim. One that was assembled by the matcher rather than read
+    out of the message makes both impossible.
+    """
+    campaign = _campaign(db, REAL_OFFER)
+    report = run_compliance_check(db, campaign)
+
+    for finding in report.findings:
+        if finding.excerpt:
+            assert finding.excerpt in campaign.body, (
+                f"{finding.code} quotes {finding.excerpt!r}, which is not in the copy"
+            )
 
 
 def test_an_unverifiable_claim_is_flagged_but_a_reviewer_can_confirm_it(db, bootstrapped):

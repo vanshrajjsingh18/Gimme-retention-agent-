@@ -103,9 +103,19 @@ DISCOUNT_PATTERN = re.compile(
 # of this shape is one the copy invented. Offers are handled by
 # DISCOUNT_PATTERN above; this is the plain "$24.99 a bottle" case, which that
 # pattern does not match because there is no "off" or "discount" after it.
+#
+# `(?!\d)(?!\.\d)` is load-bearing, not tidiness. Without it the engine
+# backtracks out of the "off" guard: "$10 off" fails as a whole, so the number
+# is retried a digit shorter, "$1" passes the guard, and the report names a
+# price the copy never stated. Requiring the figure to be whole leaves the
+# match to fail as intended and the phrase to be judged as the discount it is.
+#
+# It rejects a digit or a decimal point followed by a digit — not any full
+# stop, because "Delivery from $1." ends a sentence and is a real price claim.
+_WHOLE_NUMBER = r"(?!\d)(?!\.\d)"
 PRICE_CLAIM_PATTERN = re.compile(
-    r"(?<![\w])(?:NZ)?\$\s*\d+(?:\.\d{1,2})?(?!\s*(?:off|discount))"
-    r"|\b\d+(?:\.\d{1,2})?\s*(?:dollars|bucks)\b",
+    rf"(?<![\w])(?:NZ)?\$\s*\d+(?:\.\d{{1,2}})?{_WHOLE_NUMBER}(?!\s*(?:off|discount))"
+    rf"|\b\d+(?:\.\d{{1,2}})?{_WHOLE_NUMBER}\s*(?:dollars|bucks)\b",
     re.IGNORECASE,
 )
 
