@@ -285,12 +285,84 @@ def run_compliance_check(
     return report
 
 
-def submit_for_approval(db: Session, campaign: Campaign) -> Campaign:
+def record_vouches(
+    db: Session,
+    campaign: Campaign,
+    vouch_for: list[str],
+    *,
+    user_id: int,
+    reviewer: str = "",
+) -> None:
+    """Record that a named person is standing behind some findings.
+
+    Kept apart from any one lifecycle step because a confirmation is a
+    statement about the copy, not about the button that was pressed. It has to
+    count wherever the reviewer makes it — otherwise the only place to confirm
+    a finding sits behind a gate that the confirmation was what opened.
+    """
+    if not vouch_for:
+        return
+    who = reviewer or f"user {user_id}"
+    unvouchable = sorted(set(vouch_for) - VOUCHABLE_RULES)
+    if unvouchable:
+        raise CampaignError(
+            "These findings cannot be signed off by a reviewer: "
+            + ", ".join(unvouchable)
+            + ". They are rules the engine can judge on its own."
+        )
+    campaign.compliance_vouched_for = {
+        **(campaign.compliance_vouched_for or {}),
+        **{code: who for code in vouch_for},
+    }
+    db.add(
+        AuditLog(
+            actor=str(user_id),
+            action="COMPLIANCE_VOUCHED",
+            entity_type="campaign",
+            entity_id=str(campaign.id),
+            detail={
+                "campaign": campaign.name,
+                "reviewer": who,
+                "codes": sorted(vouch_for),
+                "body": campaign.body,
+            },
+        )
+    )
+
+
+def submit_for_approval(
+    db: Session,
+    campaign: Campaign,
+    *,
+    user_id: int = 0,
+    vouch_for: list[str] | None = None,
+    reviewer: str = "",
+) -> Campaign:
+    """Send a campaign to whoever approves it.
+
+    Takes confirmations for the same reason approval does. The grounding
+    findings — a price, a coupon code, a delivery promise — are unverified
+    because this system holds no data to check them against, and the person
+    submitting the copy is usually the one who knows. Refusing their
+    confirmation here left the only way forward behind the approval step,
+    which you could not reach without passing the check they were confirming.
+    """
+    record_vouches(db, campaign, vouch_for or [], user_id=user_id, reviewer=reviewer)
     report = run_compliance_check(db, campaign)
     if not report.passed:
+        detail = "; ".join(f.message for f in report.blocking_findings)
+        codes = sorted({f.code for f in report.needs_vouching})
+        if codes:
+            detail += (
+                " — "
+                + ", ".join(codes)
+                + (" can be cleared by confirming it" if len(codes) == 1
+                   else " can be cleared by confirming them")
+                + ", if you know it is right."
+            )
         raise CampaignError(
-            "Campaign cannot be submitted for approval while compliance checks are failing: "
-            + "; ".join(f.message for f in report.blocking_findings)
+            "Campaign cannot be submitted for approval while compliance checks are "
+            "failing: " + detail
         )
     campaign.status = CampaignStatus.AWAITING_APPROVAL.value
     db.commit()
@@ -334,33 +406,7 @@ def approve_campaign(
     config = build_compliance_config(db)
     segment = db.get(Segment, campaign.segment_id) if campaign.segment_id else None
 
-    if vouch_for:
-        who = reviewer or f"user {user_id}"
-        unvouchable = sorted(set(vouch_for) - VOUCHABLE_RULES)
-        if unvouchable:
-            raise CampaignError(
-                "These findings cannot be signed off by a reviewer: "
-                + ", ".join(unvouchable)
-                + ". They are rules the engine can judge on its own."
-            )
-        campaign.compliance_vouched_for = {
-            **(campaign.compliance_vouched_for or {}),
-            **{code: who for code in vouch_for},
-        }
-        db.add(
-            AuditLog(
-                actor=str(user_id),
-                action="COMPLIANCE_VOUCHED",
-                entity_type="campaign",
-                entity_id=str(campaign.id),
-                detail={
-                    "campaign": campaign.name,
-                    "reviewer": who,
-                    "codes": sorted(vouch_for),
-                    "body": campaign.body,
-                },
-            )
-        )
+    record_vouches(db, campaign, vouch_for or [], user_id=user_id, reviewer=reviewer)
 
     report = check_campaign(
         subject=campaign.subject,

@@ -12,6 +12,8 @@ asserted here against the pipeline that would really run.
 """
 from __future__ import annotations
 
+import time
+
 from datetime import date, datetime, timedelta
 from itertools import count
 
@@ -49,7 +51,11 @@ SAM_ORDER_TIMES = ["19:32", "19:46", "19:39", "19:41", "19:35"]
 
 #: Only the customer id is fixed by the brief; the automation name is not,
 #: and this session does not roll back between tests.
-_RUN = count(1)
+#: Seeded from the clock rather than from 1. A counter that restarts every
+#: process is unique within one run and collides on the next, which is
+#: invisible on SQLite (a fresh file each time) and fails on a PostgreSQL test
+#: database that keeps what the last run wrote.
+_RUN = count(int(time.time() * 1000))
 
 #: A Wednesday, far enough back that the fifth order is still in the past.
 FIRST_ORDER_DATE = date(2026, 8, 5)

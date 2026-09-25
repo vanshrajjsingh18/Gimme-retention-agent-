@@ -16,6 +16,8 @@ send, conversion, re-plan.
 """
 from __future__ import annotations
 
+import time
+
 from datetime import date, datetime, timedelta
 from itertools import count
 
@@ -40,7 +42,11 @@ ORDER_TIMES = ["19:42", "19:18", "19:51", "19:36", "19:40"]
 FIRST_WEDNESDAY = date(2026, 8, 5)
 TEST_PRODUCT = "Example Test Product"
 
-_RUN = count(1)
+#: Seeded from the clock rather than from 1. A counter that restarts every
+#: process is unique within one run and collides on the next, which is
+#: invisible on SQLite (a fresh file each time) and fails on a PostgreSQL test
+#: database that keeps what the last run wrote.
+_RUN = count(int(time.time() * 1000))
 
 
 def _local(week: int, clock: str) -> datetime:

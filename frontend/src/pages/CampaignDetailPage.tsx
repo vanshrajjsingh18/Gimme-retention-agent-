@@ -69,6 +69,11 @@ export default function CampaignDetailPage() {
   // Held so a merge tag lands at the cursor rather than at the end of
   // whatever has been written so far.
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  // The two states the server accepts an approval from. Kept in step with
+  // `approve_campaign` deliberately: a button stricter than the endpoint
+  // behind it is a dead end nobody can see the shape of.
+  const canApprove =
+    campaign?.status === 'AWAITING_APPROVAL' || campaign?.status === 'COMPLIANCE_CHECKED';
   // Which unverifiable claims this reviewer is taking responsibility for.
   // Ticked per finding rather than one blanket override, because confirming
   // the coupon code says nothing about the price.
@@ -94,8 +99,12 @@ export default function CampaignDetailPage() {
   const check = useMutation(async () =>
     api.post<ComplianceReport>(`/api/v1/campaigns/${id}/compliance-check`),
   );
-  const submit = useMutation(async () => api.post<Campaign>(`/api/v1/campaigns/${id}/submit`));
-  const approve = useMutation(async () => api.post<Campaign>(`/api/v1/campaigns/${id}/approve`));
+  const submit = useMutation(async () =>
+    api.post<Campaign>(`/api/v1/campaigns/${id}/submit`, { confirm: confirmed }),
+  );
+  const approve = useMutation(async () =>
+    api.post<Campaign>(`/api/v1/campaigns/${id}/approve`, { confirm: confirmed }),
+  );
   const snapshot = useMutation(async () =>
     api.post<AudiencePreview>(`/api/v1/campaigns/${id}/audience/snapshot`),
   );
@@ -130,6 +139,21 @@ export default function CampaignDetailPage() {
   const compliancePassed = hasCompliance && compliance.passed;
   const isApproved = ['APPROVED', 'SCHEDULED', 'RUNNING', 'COMPLETED'].includes(campaign.status);
   const isSent = campaign.messages_sent > 0;
+
+  // Findings no reviewer can sign off — a prohibited claim stays blocked
+  // whoever agrees with it.
+  const hardBlocking = compliance.hard_blocking_count ?? compliance.blocking_count ?? 0;
+  // Claims the engine cannot check, still waiting on a tick. Anything already
+  // vouched for on the server counts as confirmed, so a reloaded page doesn't
+  // ask for the same signature twice.
+  const unconfirmed = (compliance.findings ?? []).filter(
+    (f) => f.blocks_send && f.vouchable && !f.vouched_by && !confirmed.includes(f.code),
+  );
+  // Submitting is allowed once nothing is left that a person could resolve by
+  // reading the copy. Greying the button out while the tick box beside it was
+  // the whole remedy left the campaign with no way forward at all.
+  const canSubmit =
+    hasCompliance && (compliancePassed || (hardBlocking === 0 && unconfirmed.length === 0));
 
   const stepState: Record<string, 'done' | 'current' | 'todo'> = {
     content: body.trim() ? 'done' : 'current',
@@ -439,8 +463,8 @@ export default function CampaignDetailPage() {
                             compliance.hard_blocking_count === 1 ? '' : 's'
                           } — sending is blocked`
                         : `${compliance.blocking_count} finding${
-                            compliance.blocking_count === 1 ? '' : 's'
-                          } need your confirmation`}
+                            compliance.blocking_count === 1 ? ' needs' : 's need'
+                          } your confirmation`}
                   </p>
                   {/* "Sending is blocked" and "confirm these and you can send"
                       are different messages, and showing the first when the
@@ -636,11 +660,17 @@ export default function CampaignDetailPage() {
                     refetch();
                   }
                 }}
-                disabled={submit.loading || !compliancePassed || isApproved}
+                disabled={submit.loading || !canSubmit || isApproved}
                 title={
-                  !compliancePassed
-                    ? 'Compliance checks must pass before submitting.'
-                    : undefined
+                  canSubmit
+                    ? undefined
+                    : !hasCompliance
+                      ? 'Run the compliance check first.'
+                      : hardBlocking > 0
+                        ? 'Some findings cannot be signed off. Edit the message.'
+                        : `Tick the ${unconfirmed.length} finding${
+                            unconfirmed.length === 1 ? '' : 's'
+                          } you know to be right, then submit.`
                 }
               >
                 {submit.loading && <Spinner className="h-4 w-4" />}
@@ -657,15 +687,11 @@ export default function CampaignDetailPage() {
                     refetch();
                   }
                 }}
-                disabled={
-                  approve.loading ||
-                  isApproved ||
-                  campaign.status !== 'AWAITING_APPROVAL'
-                }
+                disabled={approve.loading || isApproved || !canApprove}
                 title={
-                  campaign.status !== 'AWAITING_APPROVAL'
-                    ? 'Submit the campaign for approval first.'
-                    : undefined
+                  canApprove
+                    ? undefined
+                    : 'Run the compliance check first, then approve.'
                 }
               >
                 {approve.loading && <Spinner className="h-4 w-4 text-white" />}

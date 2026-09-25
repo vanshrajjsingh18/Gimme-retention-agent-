@@ -439,8 +439,8 @@ Three behaviours worth knowing:
 | GET    | `/api/v1/campaigns/{id}/recipients`           | Recipient list with exclusion reasons |
 | GET    | `/api/v1/campaigns/{id}/copy-preview`         | What real recipients would receive, with any unknown merge tags |
 | POST   | `/api/v1/campaigns/{id}/compliance-check`     | Run and store the compliance report   |
-| POST   | `/api/v1/campaigns/{id}/submit`               | Submit for approval                   |
-| POST   | `/api/v1/campaigns/{id}/approve`              | Human approval                        |
+| POST   | `/api/v1/campaigns/{id}/submit`               | Submit for approval — takes `confirm` |
+| POST   | `/api/v1/campaigns/{id}/approve`              | Human approval — takes `confirm`      |
 | POST   | `/api/v1/campaigns/{id}/schedule`             | Schedule a send                       |
 | POST   | `/api/v1/campaigns/{id}/send-test`            | Test send                             |
 | POST   | `/api/v1/campaigns/{id}/run`                  | Execute                               |

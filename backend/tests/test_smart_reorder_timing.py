@@ -13,6 +13,8 @@ paragraph nobody can run.
 """
 from __future__ import annotations
 
+import time
+
 from datetime import date, datetime, timedelta
 from itertools import count
 
@@ -31,7 +33,11 @@ from app.services.intelligence import load_local_order_facts
 ORDER_TIMES = ["19:32", "19:46", "19:39", "19:41", "19:35"]
 FIRST_ORDER_DATE = date(2026, 8, 5)  # a Wednesday
 
-_RUN = count(1)
+#: Seeded from the clock rather than from 1. A counter that restarts every
+#: process is unique within one run and collides on the next, which is
+#: invisible on SQLite (a fresh file each time) and fails on a PostgreSQL test
+#: database that keeps what the last run wrote.
+_RUN = count(int(time.time() * 1000))
 
 
 def _local(week: int, clock: str) -> datetime:
@@ -227,6 +233,15 @@ def test_the_dry_run_accounts_for_customers_who_never_became_candidates(
     difference. That is the one question a dry run exists to answer.
     """
     from app.automations.service import run_automation
+
+    # Cleared first, the way the `sam` fixture does: on SQLite the database is
+    # new each run, on PostgreSQL it is the one the last run left behind.
+    previous = db.execute(
+        select(Customer).where(Customer.external_id == "SAM-TIMING-THIN")
+    ).scalars().first()
+    if previous is not None:
+        db.delete(previous)
+        db.commit()
 
     thin = Customer(
         external_id="SAM-TIMING-THIN",

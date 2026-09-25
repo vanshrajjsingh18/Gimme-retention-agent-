@@ -42,13 +42,21 @@ data, not about the message.
 | `MISSING_RESPONSIBLE_DRINKING`, `MISSING_AGE_STATEMENT` | no |
 
 On the campaign's Compliance card each confirmable finding carries a tick box.
-Ticking it and approving records that a named person took responsibility: the
-finding stays in the report at full severity with `vouched_by` set, and an
+Ticking it records that a named person took responsibility: the finding stays
+in the report at full severity with `vouched_by` set, and a
 `COMPLIANCE_VOUCHED` entry goes to the audit log with the reviewer, the rule
 codes and the copy as it stood.
 
+Both **Submit for approval** and **Approve** carry the ticks (`confirm`, a list
+of rule codes). Submit has to, because the findings being confirmed are the
+ones blocking submission — taking confirmations only at approval left the
+campaign needing a state it could not reach. Approve accepts a campaign at
+`COMPLIANCE_CHECKED` as well as `AWAITING_APPROVAL`, so a small team can read
+the copy and sign it off without passing it to themselves first.
+
 Confirmation is per finding. Confirming the coupon code says nothing about the
-price, and approving with only some ticked still refuses.
+price, and submitting or approving with only some ticked still refuses, naming
+what is left.
 
 This applies to human-written copy. LLM-drafted messages are checked against
 the same rules at generation time and nobody reads each one, so the grounding

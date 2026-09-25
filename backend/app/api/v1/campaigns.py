@@ -322,11 +322,26 @@ def compliance_check(
 
 @router.post("/campaigns/{campaign_id}/submit", response_model=CampaignOut, tags=["campaigns"])
 def submit(
-    campaign_id: int, db: Session = Depends(get_db), user: User = Depends(require_write)
+    campaign_id: int,
+    payload: ApproveCampaignRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write),
 ) -> CampaignOut:
+    """Hand the campaign to an approver.
+
+    ``confirm`` is accepted here as well as on approve: the findings it clears
+    are the ones blocking submission, so requiring approval first would mean
+    needing the state that the confirmation is what gets you to.
+    """
     campaign = _get(db, campaign_id)
     try:
-        submit_for_approval(db, campaign)
+        submit_for_approval(
+            db,
+            campaign,
+            user_id=user.id,
+            vouch_for=(payload.confirm if payload else None),
+            reviewer=user.full_name or user.email,
+        )
     except CampaignError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.add(

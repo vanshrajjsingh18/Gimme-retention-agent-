@@ -197,3 +197,121 @@ def test_the_report_says_which_findings_a_reviewer_could_clear(db, bootstrapped)
     assert payload["vouchable_codes"]
     assert payload["hard_blocking_count"] == 0
     assert all(f["vouchable"] for f in payload["findings"] if f["code"] in payload["vouchable_codes"])
+
+
+# ==========================================================================
+# The route a person actually takes
+#
+# Every test above sets the campaign to AWAITING_APPROVAL by hand — which is
+# the one state a campaign with a blocking finding can never reach, because
+# submitting is what gets you there and the finding is what stops the submit.
+# So the tests all passed while the feature was unusable: the confirmation
+# existed, and there was nowhere to make it. These go through the endpoints
+# from where the campaign really sits.
+# ==========================================================================
+def test_a_checked_campaign_can_be_submitted_by_confirming_its_findings(
+    db, client, auth_headers, bootstrapped
+):
+    """The deadlock, as the operator met it.
+
+    A campaign sitting at COMPLIANCE_CHECKED with one unverifiable claim. The
+    only way forward is to say the claim is right — so saying it has to work
+    from here, not from a state this campaign cannot get to.
+    """
+    campaign = _campaign(db, REAL_OFFER, status=CampaignStatus.COMPLIANCE_CHECKED)
+    report = run_compliance_check(db, campaign)
+    codes = sorted({f.code for f in report.needs_vouching})
+    assert codes, "this fixture is meant to have something to confirm"
+
+    refused = client.post(
+        f"/api/v1/campaigns/{campaign.id}/submit", headers=auth_headers, json={"confirm": []}
+    )
+    assert refused.status_code == 400
+    assert "can be cleared by confirming" in refused.json()["detail"]
+
+    accepted = client.post(
+        f"/api/v1/campaigns/{campaign.id}/submit",
+        headers=auth_headers,
+        json={"confirm": codes},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == CampaignStatus.AWAITING_APPROVAL.value
+
+
+def test_confirming_at_submit_is_recorded_and_not_asked_for_again(
+    db, client, auth_headers, bootstrapped
+):
+    """A signature given once stands for the rest of the campaign's life.
+
+    The approver should see who vouched for what, not an empty tick box
+    waiting on a decision somebody already made.
+    """
+    campaign = _campaign(db, REAL_OFFER, status=CampaignStatus.COMPLIANCE_CHECKED)
+    codes = sorted({f.code for f in run_compliance_check(db, campaign).needs_vouching})
+
+    client.post(
+        f"/api/v1/campaigns/{campaign.id}/submit",
+        headers=auth_headers,
+        json={"confirm": codes},
+    )
+    db.expire_all()
+    campaign = db.get(Campaign, campaign.id)
+    assert set(campaign.compliance_vouched_for) == set(codes)
+
+    entry = db.execute(
+        select(AuditLog)
+        .where(AuditLog.action == "COMPLIANCE_VOUCHED", AuditLog.entity_id == str(campaign.id))
+    ).scalars().first()
+    assert entry is not None, "submitting recorded no trace of who vouched"
+
+    # And approving now needs nothing further.
+    approved = client.post(f"/api/v1/campaigns/{campaign.id}/approve", headers=auth_headers)
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == CampaignStatus.APPROVED.value
+
+
+def test_a_checked_campaign_can_be_approved_without_submitting_first(
+    db, client, auth_headers, bootstrapped
+):
+    """The other half of the same fix.
+
+    Approve accepts a campaign at COMPLIANCE_CHECKED, so a small team can read
+    the copy and sign it off in one step rather than passing it to themselves.
+    """
+    campaign = _campaign(db, REAL_OFFER, status=CampaignStatus.COMPLIANCE_CHECKED)
+    codes = sorted({f.code for f in run_compliance_check(db, campaign).needs_vouching})
+
+    response = client.post(
+        f"/api/v1/campaigns/{campaign.id}/approve",
+        headers=auth_headers,
+        json={"confirm": codes},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == CampaignStatus.APPROVED.value
+
+
+def test_confirming_cannot_push_a_prohibited_claim_through_submit(
+    db, client, auth_headers, bootstrapped
+):
+    """The new door is not a way around the engine.
+
+    Submit takes confirmations for exactly the findings approve takes them
+    for, and a health claim is not one of them.
+    """
+    campaign = _campaign(
+        db,
+        "Hi #first_name#, a beer a day is good for your heart. Reply STOP to opt out.",
+        status=CampaignStatus.COMPLIANCE_CHECKED,
+    )
+    run_compliance_check(db, campaign)
+
+    response = client.post(
+        f"/api/v1/campaigns/{campaign.id}/submit",
+        headers=auth_headers,
+        json={"confirm": ["HEALTH_CLAIM"]},
+    )
+    assert response.status_code == 400
+    assert "cannot be signed off" in response.json()["detail"]
+
+    db.expire_all()
+    assert db.get(Campaign, campaign.id).status == CampaignStatus.COMPLIANCE_CHECKED.value

@@ -409,13 +409,37 @@ test.describe('Campaigns', () => {
 
     // The engine holds no promotions or coupon data, so it says so — and
     // offers the reviewer the tick rather than refusing outright.
-    await expect(page.getByText(/need your confirmation/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/your confirmation/i)).toBeVisible({ timeout: 15_000 });
     const confirms = page.getByRole('checkbox');
-    expect(await confirms.count()).toBeGreaterThan(0);
+    const claims = await confirms.count();
+    expect(claims).toBeGreaterThan(0);
     await expect(page.getByText(/your name is recorded against them/i)).toBeVisible();
 
     // And the company's own name is not reported as a coupon code.
     await expect(page.getByText('\u201cGIMME\u201d')).toHaveCount(0);
+
+    // Until the claims are confirmed there is nothing to submit \u2014 but the
+    // remedy is the tick box on screen, not an edit to the copy.
+    const submit = page.getByRole('button', { name: /submit for approval/i });
+    await expect(submit).toBeDisabled();
+
+    // This is the part that was missing, and it is the whole feature: the
+    // boxes rendered and ticking them did nothing, because the confirmation
+    // never left the browser and the only endpoint that would have taken it
+    // sat behind the very step it was meant to unblock.
+    for (let index = 0; index < claims; index += 1) {
+      await confirms.nth(index).check();
+    }
+    await expect(submit).toBeEnabled();
+
+    await submit.click();
+    await expect(page.getByText(/submitted for approval/i)).toBeVisible({ timeout: 15_000 });
+
+    // The sign-off is on the record, by name, against each claim it covers.
+    await expect(page.getByText(/confirmed by/i).first()).toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByText(/campaign approved/i)).toBeVisible({ timeout: 15_000 });
 
     expect(errors, `console errors: ${errors.join(' | ')}`).toEqual([]);
   });
