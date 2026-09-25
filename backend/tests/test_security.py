@@ -719,6 +719,48 @@ def test_no_dashboard_is_mounted_when_the_frontend_has_not_been_built(tmp_path):
     assert mount_dashboard(FastAPI(), tmp_path / "never-built") is False
 
 
+def test_index_html_is_never_cached_so_a_deploy_reaches_the_browser(tmp_path):
+    """The header that decides whether shipping a fix means anything.
+
+    Every bundle Vite emits carries a content hash, so index.html is the only
+    file that says which build to load. Served with no Cache-Control — which
+    is what a bare FileResponse does — a browser may decide for itself how
+    long it stays fresh, and Safari decides in hours. The device then holds
+    the old bundle through every subsequent deploy: the operator reloads,
+    sees the same bug, and reports it as unfixed. That happened, on a real
+    campaign somebody was trying to send.
+    """
+    dashboard = _dashboard_client(tmp_path)
+
+    for path in ("/", "/campaigns/42"):
+        page = dashboard.get(path)
+        assert page.status_code == 200
+        cache = page.headers.get("cache-control", "")
+        assert "no-store" in cache, f"{path} may be cached: {cache!r}"
+
+
+def test_a_hashed_asset_is_cached_hard_because_its_name_changes_with_it(tmp_path):
+    """The other half: not caching anything would be its own bug.
+
+    A content-hashed filename is a promise that the bytes never change, so
+    the browser can keep it forever and a new build simply asks for a
+    different URL. Anything unhashed at the root keeps its name across builds
+    and so has to be revalidated.
+    """
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-abc123.js").write_text("console.log(1)")
+    (tmp_path / "favicon.svg").write_text("<svg/>")
+    dashboard = _dashboard_client(tmp_path)
+
+    hashed = dashboard.get("/assets/index-abc123.js")
+    assert hashed.status_code == 200
+    assert "immutable" in hashed.headers["cache-control"]
+
+    unhashed = dashboard.get("/favicon.svg")
+    assert unhashed.status_code == 200
+    assert "no-store" in unhashed.headers["cache-control"]
+
+
 # ==========================================================================
 # Production configuration guards
 # ==========================================================================

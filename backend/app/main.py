@@ -142,6 +142,32 @@ for router in (
 #: as JSON with no clue why.
 API_PATHS = ("api/", "health", "docs", "redoc", "openapi.json")
 
+#: index.html must never be cached, and this is not a tuning decision.
+#:
+#: Vite gives every bundle a content hash, so index.html is the only file that
+#: says which build the browser should load. Served with no Cache-Control at
+#: all — the previous behaviour — a browser is entitled to guess how long it
+#: stays fresh, and Safari guesses in hours. A stale index.html pins that
+#: device to the old bundle no matter how many times we deploy: the operator
+#: reloads, sees yesterday's app, and reports the bug as unfixed. A shipped
+#: fix that cannot reach the person who needs it has not shipped.
+NEVER_CACHE = {"Cache-Control": "no-store, must-revalidate"}
+
+#: Hashed assets are the opposite case: the name changes whenever the content
+#: does, so they can be cached hard and forever. A new build is a new URL.
+FOREVER = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
+def _cache_headers(path: str) -> dict[str, str]:
+    """How long a served file may be reused.
+
+    Split on whether the filename carries a content hash, which is the only
+    thing that makes caching safe. Vite puts those under assets/; everything
+    else at the root (favicon, manifest, an unhashed image) keeps its name
+    across builds, so it is revalidated rather than assumed good.
+    """
+    return FOREVER if path.startswith("assets/") else NEVER_CACHE
+
 
 def mount_dashboard(target: FastAPI, dist: Path) -> bool:
     """Serve the built dashboard from `dist`, if it has been built.
@@ -178,8 +204,8 @@ def mount_dashboard(target: FastAPI, dist: Path) -> bool:
             )
         candidate = (dist / full_path).resolve()
         if full_path and candidate.is_file() and dist.resolve() in candidate.parents:
-            return FileResponse(candidate)
-        return FileResponse(dist / "index.html")
+            return FileResponse(candidate, headers=_cache_headers(full_path))
+        return FileResponse(dist / "index.html", headers=NEVER_CACHE)
 
     logger.info("Serving the dashboard from %s", dist)
     return True
