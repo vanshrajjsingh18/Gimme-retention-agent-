@@ -829,3 +829,67 @@ def touchpoint_performance(
 
     automation = _get(db, automation_id)
     return get_touchpoint_performance(db, automation_id)
+
+
+@router.get("/automations/{automation_id}/stop-conditions", tags=["automations"])
+def get_stop_conditions(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get stop conditions configuration for an automation.
+
+    Shows which conditions trigger journey termination (stop_on_order,
+    max_sends, campaign_end_date).
+    """
+    from app.services.stop_conditions import get_stop_conditions_config
+
+    automation = _get(db, automation_id)
+    return get_stop_conditions_config(automation)
+
+
+@router.put("/automations/{automation_id}/stop-conditions", tags=["automations"])
+def update_stop_conditions(
+    automation_id: int,
+    stop_on_order: bool | None = None,
+    max_sends: int | None = None,
+    campaign_end_date: str | None = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_write),
+) -> dict:
+    """Update stop conditions configuration for an automation.
+
+    Configure when to stop sending to customers.
+    """
+    from app.services.stop_conditions import update_stop_conditions_config
+
+    automation = _get(db, automation_id)
+
+    update_stop_conditions_config(
+        automation,
+        stop_on_order=stop_on_order,
+        max_sends=max_sends,
+        campaign_end_date=campaign_end_date,
+    )
+
+    db.commit()
+    db.refresh(automation)
+
+    return get_stop_conditions(automation_id, db, _)
+
+
+@router.get("/automations/{automation_id}/lifecycle-stats", tags=["automations"])
+def lifecycle_stats(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get lifecycle statistics for an automation.
+
+    Shows how many journeys are active, completed, or stopped,
+    and the reasons for stopping.
+    """
+    from app.services.stop_conditions import get_lifecycle_stats
+
+    automation = _get(db, automation_id)
+    return get_lifecycle_stats(db, automation_id)
