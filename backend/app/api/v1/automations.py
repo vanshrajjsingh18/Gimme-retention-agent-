@@ -893,3 +893,47 @@ def lifecycle_stats(
 
     automation = _get(db, automation_id)
     return get_lifecycle_stats(db, automation_id)
+
+
+@router.get("/automations/{automation_id}/ab-test-summary", tags=["automations"])
+def ab_test_summary(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get A/B testing summary and performance comparison.
+
+    Shows coupon variant performance, message variant performance,
+    holdout group configuration, and recommended winner.
+    """
+    from app.services.ab_testing import get_ab_test_summary
+
+    automation = _get(db, automation_id)
+    return get_ab_test_summary(db, automation_id)
+
+
+@router.post("/automations/{automation_id}/setup-holdout", tags=["automations"])
+def setup_holdout(
+    automation_id: int,
+    holdout_percentage: int = 10,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_write),
+) -> dict:
+    """Setup a control/holdout group for measuring campaign lift.
+
+    Customers in the holdout group will not receive messages, allowing
+    measurement of campaign impact.
+    """
+    from app.services.ab_testing import setup_holdout_group
+
+    automation = _get(db, automation_id)
+    setup_holdout_group(automation, holdout_percentage)
+
+    db.commit()
+    db.refresh(automation)
+
+    return {
+        "automation_id": automation_id,
+        "holdout_enabled": True,
+        "holdout_percentage": holdout_percentage,
+    }
