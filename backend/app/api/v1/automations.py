@@ -672,3 +672,20 @@ def delete_coupon_variant(
     db.commit()
 
     return {"deleted": True, "variant_id": variant_id}
+
+
+@router.get("/automations/{automation_id}/coupon-analytics", tags=["automations"])
+def coupon_analytics(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get performance analytics for coupon variants.
+
+    Shows coupon assignment counts, message sends, conversions, and revenue
+    to help evaluate which coupons drive orders.
+    """
+    from app.services.coupon_analytics import get_coupon_performance
+
+    automation = _get(db, automation_id)
+    return get_coupon_performance(db, automation_id)
