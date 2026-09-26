@@ -535,6 +535,26 @@ def enroll_now(
 
 
 # --------------------------------------------------------------------------
+# Smart Reorder Campaign Extension: Audience Preview
+# --------------------------------------------------------------------------
+@router.get("/automations/{automation_id}/audience-preview", tags=["automations"])
+def preview_audience(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Show detailed breakdown of eligible audience for this automation.
+
+    Returns counts at each filtering step to help campaign creators understand
+    who will receive messages and why some customers are excluded.
+    """
+    from app.services.audience_preview import preview_audience
+
+    automation = _get(db, automation_id)
+    return preview_audience(db, automation)
+
+
+# --------------------------------------------------------------------------
 # Smart Reorder Campaign Extension: Coupon Variants
 # --------------------------------------------------------------------------
 @router.get("/automations/{automation_id}/coupon-variants", tags=["automations"])
