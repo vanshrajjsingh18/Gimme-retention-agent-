@@ -937,3 +937,75 @@ def setup_holdout(
         "holdout_enabled": True,
         "holdout_percentage": holdout_percentage,
     }
+
+
+@router.get("/personalization/tokens", tags=["automations"])
+def personalization_tokens() -> dict:
+    """Get list of available merge tokens for template personalization.
+
+    Shows all customer attributes that can be used in message templates.
+    """
+    from app.services.personalization import get_personalization_tokens
+
+    tokens = get_personalization_tokens()
+    return {
+        "tokens": tokens,
+        "token_count": len(tokens),
+        "example_usage": "Hi {first_name}, your {preferred_category} is waiting...",
+    }
+
+
+@router.post("/personalization/preview", tags=["automations"])
+def preview_personalization(
+    customer_id: int,
+    template: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Preview how a template will render for a specific customer.
+
+    Useful for testing personalization before sending to audience.
+    """
+    from app.services.personalization import get_personalization_preview
+
+    return get_personalization_preview(db, template, customer_id)
+
+
+@router.get("/personalization/customer-attributes/{customer_id}", tags=["automations"])
+def customer_attributes(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get all personalization attributes for a customer.
+
+    Shows all data available for template rendering and personalization decisions.
+    """
+    from app.services.personalization import get_customer_attributes
+
+    attributes = get_customer_attributes(db, customer_id)
+    if not attributes:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    return attributes
+
+
+@router.get("/personalization/recommendations/{customer_id}", tags=["automations"])
+def customer_recommendations(
+    customer_id: int,
+    count: int = 3,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get personalized product recommendations for a customer.
+
+    Based on purchase history and preferences.
+    """
+    from app.services.personalization import get_product_recommendations
+
+    recommendations = get_product_recommendations(db, customer_id, count)
+    return {
+        "customer_id": customer_id,
+        "recommendations": recommendations,
+        "count": len(recommendations),
+    }
