@@ -1009,3 +1009,101 @@ def customer_recommendations(
         "recommendations": recommendations,
         "count": len(recommendations),
     }
+
+
+@router.get("/segmentation/lifecycle-segments", tags=["automations"])
+def lifecycle_segments(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get all customers segmented by lifecycle stage.
+
+    Shows which stage each customer is in: new, active, loyal, at_risk, churned, dormant.
+    """
+    from app.services.advanced_segmentation import segment_by_lifecycle
+
+    segments = segment_by_lifecycle(db)
+    return {
+        "segments": segments,
+        "counts": {k: len(v) for k, v in segments.items()},
+    }
+
+
+@router.get("/segmentation/analysis", tags=["automations"])
+def segmentation_analysis(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get comprehensive segmentation analysis of customer base.
+
+    Shows lifecycle distribution, RFM quartiles, average customer value.
+    """
+    from app.services.advanced_segmentation import get_segmentation_analysis
+
+    return get_segmentation_analysis(db)
+
+
+@router.get("/segmentation/high-value-customers", tags=["automations"])
+def high_value_customers(
+    min_lifetime_value: float = 200.0,
+    min_order_count: int = 3,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get list of high-value customers for targeting or lookalike modeling.
+
+    Can be used as base for lookalike audience creation.
+    """
+    from app.services.advanced_segmentation import get_high_value_customers
+
+    customers = get_high_value_customers(db, min_lifetime_value, min_order_count)
+    return {
+        "customer_ids": customers,
+        "count": len(customers),
+        "criteria": {
+            "min_lifetime_value": min_lifetime_value,
+            "min_order_count": min_order_count,
+        },
+    }
+
+
+@router.post("/segmentation/lookalike-audience", tags=["automations"])
+def lookalike_audience(
+    base_customer_ids: list[int],
+    pool_size: int = 100,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Generate lookalike audience similar to high-value base customers.
+
+    Uses RFM similarity to find customers with similar characteristics.
+    """
+    from app.services.advanced_segmentation import find_lookalike_customers
+
+    lookalikes = find_lookalike_customers(db, base_customer_ids, pool_size)
+    return {
+        "base_customers": base_customer_ids,
+        "lookalike_count": len(lookalikes),
+        "lookalikes": lookalikes,
+    }
+
+
+@router.post("/segmentation/apply-rules", tags=["automations"])
+def apply_targeting_rules(
+    rules: list[dict],
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Apply custom targeting rules to segment audience.
+
+    Rules support: rfm_score_min, days_since_order_max, order_count_min,
+    lifetime_value_min with operators: >=, <=, ==.
+    """
+    from app.services.advanced_segmentation import apply_targeting_rules as apply_rules
+
+    matching = apply_rules(db, rules)
+    return {
+        "rules": rules,
+        "matching_customers": matching,
+        "count": len(matching),
+    }
