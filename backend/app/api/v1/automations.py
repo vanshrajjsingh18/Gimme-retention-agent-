@@ -763,3 +763,69 @@ def journey_stats(
 
     automation = _get(db, automation_id)
     return get_journey_stats(db, automation_id)
+
+
+@router.get("/automations/{automation_id}/performance", tags=["automations"])
+def campaign_performance(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get campaign performance summary with key metrics.
+
+    Shows messages sent/delivered, orders, conversion rates, revenue metrics.
+    """
+    from app.services.campaign_analytics import get_campaign_performance_summary
+
+    automation = _get(db, automation_id)
+    return get_campaign_performance_summary(db, automation_id)
+
+
+@router.get("/automations/{automation_id}/funnel", tags=["automations"])
+def conversion_funnel(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get conversion funnel from audience through to orders.
+
+    Shows drop-off at each stage: assigned → contacted → delivered → ordered.
+    """
+    from app.services.campaign_analytics import get_conversion_funnel
+
+    automation = _get(db, automation_id)
+    return get_conversion_funnel(db, automation_id)
+
+
+@router.get("/automations/{automation_id}/customer-journey/{customer_id}", tags=["automations"])
+def customer_journey(
+    automation_id: int,
+    customer_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get detailed journey tracking for a specific customer.
+
+    Shows all messages sent, delivery status, orders placed after first message,
+    time to conversion, and total revenue attributed.
+    """
+    from app.services.campaign_analytics import get_customer_journey_details
+
+    automation = _get(db, automation_id)
+    return get_customer_journey_details(db, automation_id, customer_id)
+
+
+@router.get("/automations/{automation_id}/touchpoint-performance", tags=["automations"])
+def touchpoint_performance(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get performance metrics for each touchpoint in a multi-touch campaign.
+
+    Shows message delivery and engagement metrics per touchpoint position.
+    """
+    from app.services.campaign_analytics import get_touchpoint_performance
+
+    automation = _get(db, automation_id)
+    return get_touchpoint_performance(db, automation_id)
