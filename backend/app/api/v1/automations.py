@@ -532,3 +532,123 @@ def enroll_now(
         status_code=400,
         detail="Cohort campaigns resolve their audience at send time and have no enrollments.",
     )
+
+
+# --------------------------------------------------------------------------
+# Smart Reorder Campaign Extension: Coupon Variants
+# --------------------------------------------------------------------------
+@router.get("/automations/{automation_id}/coupon-variants", tags=["automations"])
+def list_coupon_variants(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """List all coupon variants for an automation."""
+    from app.models.entities import CouponVariant
+
+    automation = _get(db, automation_id)
+    variants = db.execute(
+        select(CouponVariant)
+        .where(CouponVariant.automation_id == automation_id)
+        .order_by(CouponVariant.position)
+    ).scalars().all()
+
+    return {
+        "automation_id": automation_id,
+        "variants": [
+            {
+                "id": v.id,
+                "position": v.position,
+                "coupon_code": v.coupon_code,
+                "allocation_percentage": v.allocation_percentage,
+                "enabled": v.enabled,
+                "created_at": v.created_at.isoformat(),
+            }
+            for v in variants
+        ],
+    }
+
+
+@router.post("/automations/{automation_id}/coupon-variants", tags=["automations"])
+def create_coupon_variant(
+    automation_id: int,
+    coupon_code: str = Query(...),
+    allocation_percentage: float = Query(...),
+    enabled: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write),
+) -> dict:
+    """Add a new coupon variant to an automation."""
+    from app.models.entities import CouponVariant
+
+    automation = _get(db, automation_id)
+
+    # Get next position
+    max_position = db.execute(
+        select(func.max(CouponVariant.position)).where(
+            CouponVariant.automation_id == automation_id
+        )
+    ).scalar() or -1
+
+    variant = CouponVariant(
+        automation_id=automation_id,
+        position=max_position + 1,
+        coupon_code=coupon_code,
+        allocation_percentage=allocation_percentage,
+        enabled=enabled,
+    )
+    db.add(variant)
+    db.commit()
+
+    db.add(
+        AuditLog(
+            actor=user.email,
+            action="COUPON_VARIANT_CREATED",
+            entity_type="automation",
+            entity_id=str(automation_id),
+            detail={
+                "coupon_code": coupon_code,
+                "allocation_percentage": allocation_percentage,
+            },
+        )
+    )
+    db.commit()
+
+    return {
+        "id": variant.id,
+        "coupon_code": variant.coupon_code,
+        "allocation_percentage": variant.allocation_percentage,
+        "enabled": variant.enabled,
+    }
+
+
+@router.delete("/automations/{automation_id}/coupon-variants/{variant_id}", tags=["automations"])
+def delete_coupon_variant(
+    automation_id: int,
+    variant_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_write),
+) -> dict:
+    """Remove a coupon variant from an automation."""
+    from app.models.entities import CouponVariant
+
+    automation = _get(db, automation_id)
+    variant = db.get(CouponVariant, variant_id)
+
+    if not variant or variant.automation_id != automation_id:
+        raise HTTPException(status_code=404, detail="Variant not found.")
+
+    coupon_code = variant.coupon_code
+    db.delete(variant)
+    db.add(
+        AuditLog(
+            actor=user.email,
+            action="COUPON_VARIANT_DELETED",
+            entity_type="automation",
+            entity_id=str(automation_id),
+            detail={"coupon_code": coupon_code},
+        )
+    )
+    db.commit()
+
+    return {"deleted": True, "variant_id": variant_id}

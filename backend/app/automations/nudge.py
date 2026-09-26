@@ -355,13 +355,22 @@ def render_nudge(
     *,
     now: datetime,
 ) -> tuple[str, OfferDecision]:
+    from app.services.coupon_assignment import get_or_assign_coupon
+
     offer = offer_for(db, customer.id)
     brand = get_brand(db)
+
+    # Check for assigned coupon from new Smart Reorder campaign system
+    assigned_coupon = get_or_assign_coupon(db, customer.id, automation.id)
+
+    # Use assigned coupon if available, otherwise fall back to offer system
+    coupon_code = assigned_coupon or offer.coupon_code or ""
+
     offer_line = ""
     if offer.include_discount and offer.promotion:
         offer_line = f"{offer.promotion}"
-        if offer.coupon_code:
-            offer_line += f" with code {offer.coupon_code}"
+        if coupon_code:
+            offer_line += f" with code {coupon_code}"
         offer_line += ". "
 
     template = automation.message_template or DEFAULT_NUDGE_TEMPLATE
@@ -373,7 +382,7 @@ def render_nudge(
             "usual_category": favourite_category(db, customer.id),
             "offer_line": offer_line,
             "promotion": offer.promotion or "",
-            "coupon_code": offer.coupon_code or "",
+            "coupon_code": coupon_code,
         },
         now=now,
     )
@@ -504,6 +513,8 @@ def build_candidates(
         .all()
     }
 
+    from app.services.frequency_gating import should_send_message
+
     candidates: list[Candidate] = []
     by_customer: dict[int, AutomationEnrollment] = {}
     for enrollment in due:
@@ -527,6 +538,28 @@ def build_candidates(
                         "source": "nudge",
                         "suppressed": reason.value,
                         "detail": detail,
+                    },
+                )
+            )
+            by_customer[customer.id] = enrollment
+            continue
+
+        # Check frequency gating and other frequency-based rules
+        can_send, blocked_reason = should_send_message(
+            db, customer.id, automation.id, now=now
+        )
+        if not can_send:
+            # Recorded as a skipped candidate
+            candidates.append(
+                Candidate(
+                    customer_id=customer.id,
+                    scheduled_for=enrollment.next_due_at or now,
+                    body="",
+                    enrollment_id=enrollment.id,
+                    context={
+                        "source": "nudge",
+                        "suppressed": blocked_reason or "FREQUENCY_GATED",
+                        "detail": f"Blocked by frequency rule: {blocked_reason}",
                     },
                 )
             )

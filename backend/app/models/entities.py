@@ -1280,3 +1280,77 @@ class OrderPredictionRecord(Base, TimestampMixin):
     #: between reminded and un-reminded customers.
     reminder_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+# =============================================================================
+# Smart Reorder Campaign Extension: Coupon Variants & Allocation
+# =============================================================================
+class CouponVariant(Base, TimestampMixin):
+    """A coupon code option within a Smart Reorder automation.
+
+    Multiple variants allow A/B testing of different coupon codes. Each variant
+    has an allocation percentage determining what proportion of customers receive
+    it. A customer is assigned exactly one coupon per automation and it persists
+    for the entire campaign.
+    """
+
+    __tablename__ = "coupon_variants"
+    __table_args__ = (
+        UniqueConstraint("automation_id", "coupon_code", name="uq_variant_code"),
+        Index("ix_variant_automation", "automation_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )  # Order for display
+    coupon_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    allocation_percentage: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0
+    )  # 0-100
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    automation: Mapped["Automation"] = relationship()
+
+
+class CustomerCouponAssignment(Base):
+    """Track which coupon variant each customer receives for a campaign.
+
+    This is the source of truth for coupon assignment. Once a customer is
+    assigned a coupon for an automation, that assignment persists for the
+    entire campaign duration. This allows:
+    - Deterministic assignment (same customer always gets same coupon)
+    - Accurate performance tracking (we know which coupon was sent)
+    - Persistence across multiple scheduled messages
+    """
+
+    __tablename__ = "customer_coupon_assignments"
+    __table_args__ = (
+        UniqueConstraint(
+            "customer_id", "automation_id", name="uq_customer_automation_coupon"
+        ),
+        Index("ix_coupon_customer", "customer_id"),
+        Index("ix_coupon_automation", "automation_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    automation_id: Mapped[int] = mapped_column(
+        ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    coupon_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    variant_id: Mapped[int] = mapped_column(
+        ForeignKey("coupon_variants.id", ondelete="SET NULL"), nullable=True
+    )
+    assigned_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, index=True
+    )
+
+    customer: Mapped["Customer"] = relationship()
+    automation: Mapped["Automation"] = relationship()
+    variant: Mapped["CouponVariant"] = relationship()
