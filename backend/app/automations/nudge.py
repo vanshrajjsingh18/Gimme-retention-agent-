@@ -60,6 +60,7 @@ from app.models.base import utcnow
 from app.models.entities import (
     Automation,
     AutomationEnrollment,
+    AutomationSend,
     Customer,
     CustomerMetrics,
     Order,
@@ -354,6 +355,7 @@ def render_nudge(
     routine: OrderPrediction,
     *,
     now: datetime,
+    touchpoint: dict | None = None,
 ) -> tuple[str, OfferDecision]:
     from app.services.coupon_assignment import get_or_assign_coupon
 
@@ -373,7 +375,12 @@ def render_nudge(
             offer_line += f" with code {coupon_code}"
         offer_line += ". "
 
-    template = automation.message_template or DEFAULT_NUDGE_TEMPLATE
+    # Use touchpoint-specific template if provided, otherwise automation template
+    if touchpoint and "message_template" in touchpoint:
+        template = touchpoint["message_template"]
+    else:
+        template = automation.message_template or DEFAULT_NUDGE_TEMPLATE
+
     context = build_context(
         customer,
         brand,
@@ -482,7 +489,18 @@ def build_candidates(
     due right now, but an operator previewing the automation wants to see the
     whole standing audience and each customer's scheduled slot, not just the
     handful whose slot happens to fall in this minute.
+
+    Supports both single-message (traditional nudge) and multi-touch workflows.
+    If automation.config contains "touchpoints", uses multi-touch logic.
     """
+    from app.services.frequency_gating import should_send_message
+    from app.services.multi_touch_orchestration import (
+        calculate_touchpoint_send_time,
+        get_current_touchpoint,
+        get_touchpoints_config,
+        should_send_touchpoint,
+    )
+
     cfg = config_of(automation)
     enrollments = enrollments if enrollments is not None else _active(db, automation)
     due = [
@@ -513,7 +531,8 @@ def build_candidates(
         .all()
     }
 
-    from app.services.frequency_gating import should_send_message
+    # Check if multi-touch is configured
+    touchpoints = get_touchpoints_config(automation)
 
     candidates: list[Candidate] = []
     by_customer: dict[int, AutomationEnrollment] = {}
@@ -566,28 +585,118 @@ def build_candidates(
             by_customer[customer.id] = enrollment
             continue
 
-        body, offer = render_nudge(db, automation, customer, routine, now=now)
-        candidates.append(
-            Candidate(
-                customer_id=customer.id,
-                scheduled_for=enrollment.next_due_at or now,
-                body=body,
-                enrollment_id=enrollment.id,
-                context={
-                    "source": "nudge",
-                    "usual_day": routine.preferred_weekday_name,
-                    "usual_time": routine.preferred_time_label,
-                    "predicted_order_at": (
-                        routine.predicted_next_order_at.isoformat()
-                        if routine.predicted_next_order_at
-                        else None
-                    ),
-                    "pattern_confidence": routine.overall_confidence,
-                    "offer": offer.as_dict(),
-                },
+        # Handle multi-touch or single-message mode
+        if touchpoints:
+            # Multi-touch mode
+            current_position, current_touchpoint = get_current_touchpoint(
+                db, customer.id, automation.id, touchpoints
             )
-        )
-        by_customer[customer.id] = enrollment
+
+            if current_position is None or current_touchpoint is None:
+                # Journey completed or stopped, skip this customer
+                candidates.append(
+                    Candidate(
+                        customer_id=customer.id,
+                        scheduled_for=enrollment.next_due_at or now,
+                        body="",
+                        enrollment_id=enrollment.id,
+                        context={
+                            "source": "nudge",
+                            "suppressed": "JOURNEY_COMPLETED",
+                            "detail": "Customer has completed or stopped the multi-touch journey",
+                        },
+                    )
+                )
+                by_customer[customer.id] = enrollment
+                continue
+
+            # Check touchpoint-specific conditions
+            last_send = db.execute(
+                select(AutomationSend)
+                .where(
+                    AutomationSend.customer_id == customer.id,
+                    AutomationSend.automation_id == automation.id,
+                )
+                .order_by(AutomationSend.scheduled_for.desc())
+                .limit(1)
+            ).scalar()
+
+            should_send, condition_block = should_send_touchpoint(
+                db, customer.id, automation.id, current_touchpoint, last_send.scheduled_for if last_send else None
+            )
+            if not should_send:
+                candidates.append(
+                    Candidate(
+                        customer_id=customer.id,
+                        scheduled_for=enrollment.next_due_at or now,
+                        body="",
+                        enrollment_id=enrollment.id,
+                        context={
+                            "source": "nudge",
+                            "suppressed": condition_block or "CONDITION_NOT_MET",
+                            "detail": f"Touchpoint {current_position} condition not met: {condition_block}",
+                        },
+                    )
+                )
+                by_customer[customer.id] = enrollment
+                continue
+
+            # Calculate send time for this touchpoint
+            base_time = enrollment.next_due_at or now
+            scheduled_for = calculate_touchpoint_send_time(base_time, current_touchpoint)
+
+            # Render message with touchpoint-specific template
+            body, offer = render_nudge(
+                db, automation, customer, routine, now=now, touchpoint=current_touchpoint
+            )
+            candidates.append(
+                Candidate(
+                    customer_id=customer.id,
+                    scheduled_for=scheduled_for,
+                    body=body,
+                    enrollment_id=enrollment.id,
+                    context={
+                        "source": "nudge",
+                        "touchpoint_position": current_position,
+                        "touchpoint_total": len(touchpoints),
+                        "usual_day": routine.preferred_weekday_name,
+                        "usual_time": routine.preferred_time_label,
+                        "predicted_order_at": (
+                            routine.predicted_next_order_at.isoformat()
+                            if routine.predicted_next_order_at
+                            else None
+                        ),
+                        "pattern_confidence": routine.overall_confidence,
+                        "offer": offer.as_dict(),
+                    },
+                )
+            )
+            by_customer[customer.id] = enrollment
+        else:
+            # Single-message mode (traditional nudge)
+            body, offer = render_nudge(db, automation, customer, routine, now=now)
+            candidates.append(
+                Candidate(
+                    customer_id=customer.id,
+                    scheduled_for=enrollment.next_due_at or now,
+                    body=body,
+                    enrollment_id=enrollment.id,
+                    context={
+                        "source": "nudge",
+                        "usual_day": routine.preferred_weekday_name,
+                        "usual_time": routine.preferred_time_label,
+                        "predicted_order_at": (
+                            routine.predicted_next_order_at.isoformat()
+                            if routine.predicted_next_order_at
+                            else None
+                        ),
+                        "pattern_confidence": routine.overall_confidence,
+                        "offer": offer.as_dict(),
+                    },
+                )
+            )
+            by_customer[customer.id] = enrollment
+
     return candidates, by_customer
 
 

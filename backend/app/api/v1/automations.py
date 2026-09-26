@@ -689,3 +689,77 @@ def coupon_analytics(
 
     automation = _get(db, automation_id)
     return get_coupon_performance(db, automation_id)
+
+
+@router.get("/automations/{automation_id}/touchpoint-config", tags=["automations"])
+def get_touchpoint_config(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get multi-touch touchpoint configuration for an automation.
+
+    Returns the touchpoint array from automation.config if configured,
+    or empty list if automation uses single-message mode.
+    """
+    from app.services.multi_touch_orchestration import get_touchpoints_config
+
+    automation = _get(db, automation_id)
+    touchpoints = get_touchpoints_config(automation)
+    return {
+        "automation_id": automation_id,
+        "touchpoints": touchpoints,
+        "mode": "multi_touch" if touchpoints else "single_message",
+    }
+
+
+@router.put("/automations/{automation_id}/touchpoint-config", tags=["automations"])
+def update_touchpoint_config(
+    automation_id: int,
+    touchpoints: list[dict],
+    db: Session = Depends(get_db),
+    _: User = Depends(require_write),
+) -> dict:
+    """Update multi-touch touchpoint configuration for an automation.
+
+    Replaces the touchpoints array in automation.config.
+    """
+    from app.services.automation_config_validation import validate_touchpoint_rules
+
+    automation = _get(db, automation_id)
+
+    # Validate touchpoints
+    errors = validate_touchpoint_rules(automation)
+    if errors:
+        raise HTTPException(status_code=422, detail={"validation_errors": errors})
+
+    # Update config
+    config = automation.config or {}
+    config["touchpoints"] = touchpoints
+    automation.config = config
+
+    db.commit()
+    db.refresh(automation)
+
+    return {
+        "automation_id": automation_id,
+        "touchpoints": touchpoints,
+        "mode": "multi_touch" if touchpoints else "single_message",
+    }
+
+
+@router.get("/automations/{automation_id}/journey-stats", tags=["automations"])
+def journey_stats(
+    automation_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Get statistics on multi-touch journey progress.
+
+    Shows how many customers are at each touchpoint position,
+    useful for understanding campaign flow and engagement.
+    """
+    from app.services.multi_touch_orchestration import get_journey_stats
+
+    automation = _get(db, automation_id)
+    return get_journey_stats(db, automation_id)
