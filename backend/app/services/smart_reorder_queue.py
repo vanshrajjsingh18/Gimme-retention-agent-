@@ -322,7 +322,9 @@ def build_queue(
             continue
 
         existing = open_message_for(db, automation_id=automation.id, customer_id=customer.id)
-        body, context = _render(db, automation, customer, plan, now=now)
+        body, context = _render(
+            db, automation, customer, plan, now=now, persist_coupon=not dry_run
+        )
         context["test_mode"] = test_only
 
         if dry_run:
@@ -413,10 +415,21 @@ def _matches(message: ScheduledMessage, plan, body: str) -> bool:
 
 
 def _render(
-    db: Session, automation: Automation, customer: Customer, plan, *, now: datetime
+    db: Session,
+    automation: Automation,
+    customer: Customer,
+    plan,
+    *,
+    now: datetime,
+    persist_coupon: bool = True,
 ) -> tuple[str, dict]:
     """This customer's message, and the reasoning the queue displays beside it."""
-    body, offer = nudge.render_nudge(db, automation, customer, plan.prediction, now=now)
+    from app.services.coupon_assignment import get_or_assign_coupon
+
+    body, offer = nudge.render_nudge(
+        db, automation, customer, plan.prediction, now=now, persist_coupon=persist_coupon
+    )
+    coupon = get_or_assign_coupon(db, customer.id, automation.id, persist=False)
     metrics = customer.metrics
     return body, {
         "source": "smart_reorder",
@@ -429,6 +442,7 @@ def _render(
         "confidence": plan.prediction.overall_confidence,
         "aimed_at": plan.reminder_local.isoformat() if plan.reminder_local else None,
         "offer": offer.as_dict(),
+        "coupon_code": coupon,
     }
 
 
@@ -451,6 +465,7 @@ def _preview(customer: Customer, plan, automation: Automation, body: str, contex
         "usual_day": context.get("usual_day"),
         "usual_time": context.get("usual_time"),
         "product": context.get("product"),
+        "coupon_code": context.get("coupon_code"),
         "status": "WOULD_SCHEDULE",
     }
 

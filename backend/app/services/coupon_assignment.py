@@ -28,8 +28,14 @@ def get_or_assign_coupon(
     db: Session,
     customer_id: int,
     automation_id: int,
+    *,
+    persist: bool = True,
 ) -> str | None:
     """Get existing coupon assignment or assign a new one.
+
+    ``persist=False`` is for previews and dry runs: the code that would be
+    assigned is returned, but nothing is written, so looking at a campaign
+    cannot change which coupon a customer later receives.
 
     Returns the coupon code assigned to this customer for this automation,
     or None if no variants are configured or customer is not eligible.
@@ -76,7 +82,9 @@ def get_or_assign_coupon(
         )
         return None
 
-    # Store assignment
+    if not persist:
+        return selected_variant.coupon_code
+
     assignment = CustomerCouponAssignment(
         customer_id=customer_id,
         automation_id=automation_id,

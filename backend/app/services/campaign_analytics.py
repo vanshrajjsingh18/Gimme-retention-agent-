@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Literal
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.enums import SendStatus
@@ -71,7 +71,7 @@ def get_campaign_performance_summary(
         select(
             func.count(AutomationSend.id),
             func.sum(
-                func.case(
+                case(
                     (AutomationSend.status == SendStatus.DELIVERED.value, 1),
                     else_=0,
                 )
@@ -191,10 +191,9 @@ def get_customer_journey_details(
         if first_send_time is None:
             first_send_time = send.scheduled_for
 
-        touchpoint_pos = send.context.get("touchpoint_position", 1) if send.context else 1
         messages_data.append({
             "send_id": send.id,
-            "position": touchpoint_pos,
+            "position": len(messages_data) + 1,
             "scheduled_for": send.scheduled_for.isoformat(),
             "sent_at": send.sent_at.isoformat() if send.sent_at else None,
             "status": send.status,
@@ -240,7 +239,7 @@ def get_customer_journey_details(
         "automation_id": automation_id,
         "customer_info": {
             "email": customer.email,
-            "phone": customer.phone_number,
+            "phone": customer.phone,
             "first_name": customer.first_name,
         },
         "journey_status": "active" if len(sends) < 3 else "completed_or_stopped",
@@ -389,40 +388,38 @@ def get_touchpoint_performance(
         ],
     }
     """
-    # Get performance data grouped by touchpoint position
-    touchpoint_stats = db.execute(
-        select(
-            func.cast(
-                func.json_extract(AutomationSend.context, "$.touchpoint_position"),
-                type_=int,
-            ).label("position"),
-            func.count(AutomationSend.id).label("total_sent"),
-            func.sum(
-                func.case(
-                    (AutomationSend.status == SendStatus.DELIVERED.value, 1),
-                    else_=0,
-                )
-            ).label("delivered"),
-            func.count(func.distinct(AutomationSend.customer_id)).label("customers"),
+    # The n-th real message a customer received is touchpoint n.
+    sends = db.execute(
+        select(AutomationSend.customer_id, AutomationSend.status)
+        .where(
+            AutomationSend.automation_id == automation_id,
+            AutomationSend.is_dry_run.is_(False),
+            AutomationSend.status.in_([SendStatus.SENT.value, SendStatus.DELIVERED.value]),
         )
-        .where(AutomationSend.automation_id == automation_id)
-        .group_by("position")
-        .order_by("position")
+        .order_by(AutomationSend.customer_id, AutomationSend.scheduled_for)
     ).all()
 
-    touchpoints = []
-    for position, sent, delivered, customers in touchpoint_stats or []:
-        delivered = delivered or 0
-        delivery_rate = round(delivered / sent, 4) if sent > 0 else 0.0
+    seen: dict[int, int] = {}
+    by_position: dict[int, dict] = {}
+    for customer_id, status in sends:
+        seen[customer_id] = seen.get(customer_id, 0) + 1
+        row = by_position.setdefault(
+            seen[customer_id], {"sent": 0, "delivered": 0, "customers": set()}
+        )
+        row["sent"] += 1
+        row["delivered"] += int(status == SendStatus.DELIVERED.value)
+        row["customers"].add(customer_id)
 
-        touchpoints.append({
-            "position": position or 1,
-            "messages_sent": sent or 0,
-            "messages_delivered": delivered,
-            "delivery_rate": delivery_rate,
-            "customers_reached": customers or 0,
-            "note": "Order tracking per touchpoint requires additional data structure",
-        })
+    touchpoints = [
+        {
+            "position": position,
+            "messages_sent": row["sent"],
+            "messages_delivered": row["delivered"],
+            "delivery_rate": round(row["delivered"] / row["sent"], 4) if row["sent"] else 0.0,
+            "customers_reached": len(row["customers"]),
+        }
+        for position, row in sorted(by_position.items())
+    ]
 
     return {
         "automation_id": automation_id,

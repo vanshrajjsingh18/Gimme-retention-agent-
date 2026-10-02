@@ -206,7 +206,7 @@ def update_stop_conditions_config(
         max_sends: Maximum number of sends per customer
         campaign_end_date: ISO format date when campaign ends
     """
-    config = automation.config or {}
+    config = dict(automation.config or {})
 
     if stop_on_order is not None:
         config["stop_on_order"] = stop_on_order

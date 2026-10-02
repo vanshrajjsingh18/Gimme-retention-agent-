@@ -272,7 +272,7 @@ def setup_holdout_group(
     if not (1 <= holdout_percentage <= 50):
         raise ValueError("Holdout percentage must be between 1 and 50")
 
-    config = automation.config or {}
+    config = dict(automation.config or {})
     config["holdout_percentage"] = holdout_percentage
     config["holdout_enabled"] = True
     automation.config = config

@@ -76,7 +76,7 @@ def preview_audience(
     exclusions = {
         "no_marketing_consent": 0,
         "suppressed": 0,
-        "no_phone_number": 0,
+        "no_phone": 0,
         "insufficient_order_history": 0,
         "low_confidence": 0,
         "already_enrolled": 0,
@@ -103,8 +103,8 @@ def preview_audience(
             exclusions["suppressed"] += 1
             continue
 
-        if not customer.phone_number:
-            exclusions["no_phone_number"] += 1
+        if not customer.phone:
+            exclusions["no_phone"] += 1
             continue
 
         # Check order history and confidence

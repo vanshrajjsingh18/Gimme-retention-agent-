@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.enums import SendStatus
@@ -82,7 +82,7 @@ def get_coupon_performance(
             CustomerCouponAssignment.coupon_code,
             func.count(AutomationSend.id).label("send_count"),
             func.sum(
-                func.case(
+                case(
                     (AutomationSend.status == SendStatus.DELIVERED.value, 1),
                     else_=0,
                 )
@@ -112,26 +112,29 @@ def get_coupon_performance(
     # Get orders by coupon (track which coupon was used)
     # For now, we'll count orders from customers who were sent a specific coupon
     # More sophisticated tracking would require recording which coupon was actually used in the order
-    order_stats = db.execute(
-        select(
-            CustomerCouponAssignment.coupon_code,
-            func.count(Order.id).label("order_count"),
-            func.sum(Order.total_amount).label("total_revenue"),
+    first_assigned = db.execute(
+        select(func.min(CustomerCouponAssignment.assigned_at)).where(
+            CustomerCouponAssignment.automation_id == automation_id
         )
-        .join(
-            CustomerCouponAssignment,
-            and_(
-                CustomerCouponAssignment.customer_id == Order.customer_id,
-                CustomerCouponAssignment.automation_id == automation_id,
-            ),
-        )
-        .where(Order.created_at >= db.execute(
-            select(func.min(CustomerCouponAssignment.assigned_at))
-            .where(CustomerCouponAssignment.automation_id == automation_id)
-        ).scalar()
-        )
-        .group_by(CustomerCouponAssignment.coupon_code)
-    ).all()
+    ).scalar()
+    order_stats = []
+    if first_assigned is not None:
+        order_stats = db.execute(
+            select(
+                CustomerCouponAssignment.coupon_code,
+                func.count(Order.id).label("order_count"),
+                func.sum(Order.total_amount).label("total_revenue"),
+            )
+            .join(
+                CustomerCouponAssignment,
+                and_(
+                    CustomerCouponAssignment.customer_id == Order.customer_id,
+                    CustomerCouponAssignment.automation_id == automation_id,
+                ),
+            )
+            .where(Order.ordered_at >= CustomerCouponAssignment.assigned_at)
+            .group_by(CustomerCouponAssignment.coupon_code)
+        ).all()
 
     for coupon_code, order_count, total_revenue in order_stats:
         if coupon_code in coupon_stats:

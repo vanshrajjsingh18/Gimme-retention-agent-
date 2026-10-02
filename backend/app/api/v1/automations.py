@@ -718,7 +718,7 @@ def update_touchpoint_config(
     automation_id: int,
     touchpoints: list[dict],
     db: Session = Depends(get_db),
-    _: User = Depends(require_write),
+    user: User = Depends(require_write),
 ) -> dict:
     """Update multi-touch touchpoint configuration for an automation.
 
@@ -728,17 +728,15 @@ def update_touchpoint_config(
 
     automation = _get(db, automation_id)
 
-    # Validate touchpoints
-    errors = validate_touchpoint_rules(automation)
+    # Validated as submitted, before anything is written.
+    errors = validate_touchpoint_rules(Automation(config={"touchpoints": touchpoints}))
     if errors:
         raise HTTPException(status_code=422, detail={"validation_errors": errors})
 
-    # Update config
-    config = automation.config or {}
+    config = dict(automation.config or {})
     config["touchpoints"] = touchpoints
-    automation.config = config
-
-    db.commit()
+    # Through apply_update so a change to what would be sent withdraws approval.
+    apply_update(db, automation, {"config": config}, actor=user.email)
     db.refresh(automation)
 
     return {
@@ -940,7 +938,7 @@ def setup_holdout(
 
 
 @router.get("/personalization/tokens", tags=["automations"])
-def personalization_tokens() -> dict:
+def personalization_tokens(_: User = Depends(get_current_user)) -> dict:
     """Get list of available merge tokens for template personalization.
 
     Shows all customer attributes that can be used in message templates.

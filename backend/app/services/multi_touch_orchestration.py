@@ -63,25 +63,33 @@ def get_current_touchpoint(
     if not touchpoints:
         return None, None
 
-    # Get the last sent message for this customer in this automation
-    last_send = db.execute(
-        select(AutomationSend)
-        .where(
-            AutomationSend.customer_id == customer_id,
-            AutomationSend.automation_id == automation_id,
+    # Only messages that actually went out count as a touch. A skip or a
+    # preview is not a step in the journey, and counting one would advance
+    # the customer past a message they never received.
+    sends = (
+        db.execute(
+            select(AutomationSend)
+            .where(
+                AutomationSend.customer_id == customer_id,
+                AutomationSend.automation_id == automation_id,
+                AutomationSend.is_dry_run.is_(False),
+                AutomationSend.status.in_(
+                    [SendStatus.SENT.value, SendStatus.DELIVERED.value]
+                ),
+            )
+            .order_by(AutomationSend.scheduled_for)
         )
-        .order_by(AutomationSend.scheduled_for.desc())
-        .limit(1)
-    ).scalar()
+        .scalars()
+        .all()
+    )
 
-    # If no messages sent yet, start with position 1
-    if last_send is None:
+    if not sends:
         return touchpoints[0]["position"], touchpoints[0]
 
-    # Get the position from the last send's context
-    last_position = 1
-    if last_send.context:
-        last_position = last_send.context.get("touchpoint_position", 1)
+    last_send = sends[-1]
+    # Touchpoints are sent in position order, so the n-th real send was the
+    # n-th touchpoint.
+    last_position = touchpoints[min(len(sends), len(touchpoints)) - 1].get("position", 1)
 
     # Check if customer ordered since the last message
     customer_ordered_since = has_customer_ordered_since(
@@ -249,23 +257,20 @@ def get_journey_stats(
         )
     ).scalar() or 0
 
-    # Get distribution by touchpoint position
-    positions = db.execute(
-        select(
-            func.cast(
-                func.json_extract(AutomationSend.context, "$.touchpoint_position"),
-                type_=int,
-            ),
-            func.count(AutomationSend.id),
+    # A customer's position is how many real messages they have received.
+    per_customer = db.execute(
+        select(AutomationSend.customer_id, func.count(AutomationSend.id))
+        .where(
+            AutomationSend.automation_id == automation_id,
+            AutomationSend.is_dry_run.is_(False),
+            AutomationSend.status.in_([SendStatus.SENT.value, SendStatus.DELIVERED.value]),
         )
-        .where(AutomationSend.automation_id == automation_id)
-        .group_by(
-            func.cast(
-                func.json_extract(AutomationSend.context, "$.touchpoint_position"),
-                type_=int,
-            )
-        )
+        .group_by(AutomationSend.customer_id)
     ).all()
+    positions: dict[int, int] = {}
+    for _, sent in per_customer:
+        positions[sent] = positions.get(sent, 0) + 1
+    positions = list(positions.items())
 
     position_counts = {int(pos): count for pos, count in positions}
 

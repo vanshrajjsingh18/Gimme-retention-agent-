@@ -101,7 +101,9 @@ def _in_quiet_hours(
         return False
 
     # Convert now to customer's local time
-    local_now = to_local(now, customer.timezone or "UTC")
+    # Customers carry no timezone of their own; the business clock is the
+    # one every other send-window rule in this system uses.
+    local_now = to_local(now)
     current_time = local_now.time()
 
     start_str = quiet_hours["start"]

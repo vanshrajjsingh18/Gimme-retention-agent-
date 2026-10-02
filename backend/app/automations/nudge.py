@@ -356,6 +356,7 @@ def render_nudge(
     *,
     now: datetime,
     touchpoint: dict | None = None,
+    persist_coupon: bool = True,
 ) -> tuple[str, OfferDecision]:
     from app.services.coupon_assignment import get_or_assign_coupon
 
@@ -363,7 +364,9 @@ def render_nudge(
     brand = get_brand(db)
 
     # Check for assigned coupon from new Smart Reorder campaign system
-    assigned_coupon = get_or_assign_coupon(db, customer.id, automation.id)
+    assigned_coupon = get_or_assign_coupon(
+        db, customer.id, automation.id, persist=persist_coupon
+    )
 
     # Use assigned coupon if available, otherwise fall back to offer system
     coupon_code = assigned_coupon or offer.coupon_code or ""
@@ -482,6 +485,7 @@ def build_candidates(
     now: datetime,
     enrollments: list[AutomationEnrollment] | None = None,
     ignore_due_time: bool = False,
+    persist_coupons: bool = True,
 ) -> tuple[list[Candidate], dict[int, AutomationEnrollment]]:
     """Build the nudges that have come due.
 
@@ -647,7 +651,13 @@ def build_candidates(
 
             # Render message with touchpoint-specific template
             body, offer = render_nudge(
-                db, automation, customer, routine, now=now, touchpoint=current_touchpoint
+                db,
+                automation,
+                customer,
+                routine,
+                now=now,
+                touchpoint=current_touchpoint,
+                persist_coupon=persist_coupons,
             )
             candidates.append(
                 Candidate(
@@ -674,7 +684,9 @@ def build_candidates(
             by_customer[customer.id] = enrollment
         else:
             # Single-message mode (traditional nudge)
-            body, offer = render_nudge(db, automation, customer, routine, now=now)
+            body, offer = render_nudge(
+                db, automation, customer, routine, now=now, persist_coupon=persist_coupons
+            )
             candidates.append(
                 Candidate(
                     customer_id=customer.id,
@@ -826,7 +838,12 @@ def run(
         enrollments = _active(db, automation)
 
     candidates, by_customer = build_candidates(
-        db, automation, now=now, enrollments=enrollments, ignore_due_time=dry_run
+        db,
+        automation,
+        now=now,
+        enrollments=enrollments,
+        ignore_due_time=dry_run,
+        persist_coupons=not dry_run,
     )
 
     # Suppressed candidates carry no body; short-circuit them here so they

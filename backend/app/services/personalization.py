@@ -11,91 +11,63 @@ from datetime import datetime
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.core.enums import LifecycleStage, OrderStatus
+from app.models.base import utcnow
 from app.models.entities import (
+    ChurnScore,
     Customer,
     CustomerMetrics,
     Order,
-    Product,
+    OrderItem,
 )
 
 logger = logging.getLogger(__name__)
 
 
 def get_customer_attributes(db: Session, customer_id: int) -> dict:
-    """Get comprehensive customer attribute dictionary for template rendering.
+    """Customer attributes for template previews, read from stored intelligence.
 
-    Returns:
-    {
-        "id": int,
-        "email": str,
-        "phone": str,
-        "first_name": str,
-        "last_name": str,
-        "city": str,
-        "total_orders": int,
-        "total_spent": float,
-        "avg_order_value": float,
-        "lifetime_value": float,
-        "last_order_date": str | None,
-        "days_since_last_order": int | None,
-        "preferred_category": str | None,
-        "preferred_time": str | None,
-        "preferred_day": str | None,
-        "customer_segment": str | None,
-        "is_vip": bool,
-        "is_at_risk": bool,
-        "churn_risk_score": float | None,
-    }
+    Values come from ``CustomerMetrics`` (refreshed by the intelligence job)
+    rather than being recomputed here, so this agrees with Customer 360.
     """
-    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar()
-
+    customer = db.get(Customer, customer_id)
     if not customer:
         return {}
 
-    # Get metrics
     metrics = db.execute(
         select(CustomerMetrics).where(CustomerMetrics.customer_id == customer_id)
-    ).scalar()
+    ).scalar_one_or_none()
+    churn = db.execute(
+        select(ChurnScore).where(ChurnScore.customer_id == customer_id)
+    ).scalar_one_or_none()
 
-    # Get order history
-    orders = db.execute(
-        select(Order)
-        .where(Order.customer_id == customer_id)
-        .order_by(Order.ordered_at.desc())
-    ).scalars().all()
-
-    total_orders = len(orders)
-    total_spent = sum(o.total_amount for o in orders)
-    avg_order_value = total_spent / total_orders if total_orders > 0 else 0.0
-
-    last_order = orders[0] if orders else None
-    last_order_date = None
-    days_since_last = None
-
-    if last_order:
-        last_order_date = last_order.ordered_at.isoformat()
-        days_since_last = (datetime.utcnow() - last_order.ordered_at).days
-
+    last_order_at = metrics.last_order_at if metrics else None
     return {
         "id": customer.id,
         "email": customer.email,
-        "phone": customer.phone_number,
+        "phone": customer.phone,
         "first_name": customer.first_name or "there",
         "last_name": customer.last_name or "",
         "city": customer.city or "",
-        "total_orders": total_orders,
-        "total_spent": float(total_spent),
-        "avg_order_value": float(avg_order_value),
-        "lifetime_value": float(total_spent),
-        "last_order_date": last_order_date,
-        "days_since_last_order": days_since_last,
-        "preferred_category": metrics.preferred_category if metrics else None,
-        "preferred_time": metrics.preferred_time if metrics else None,
-        "preferred_day": metrics.preferred_day if metrics else None,
-        "customer_segment": customer.segment or None,
-        "is_vip": (total_spent > 500) if total_spent else False,
-        "is_at_risk": days_since_last is not None and days_since_last > 60,
-        "churn_risk_score": metrics.churn_risk_score if metrics else None,
+        "total_orders": metrics.total_orders if metrics else 0,
+        "total_spent": float(metrics.lifetime_revenue) if metrics else 0.0,
+        "avg_order_value": float(metrics.average_order_value) if metrics else 0.0,
+        "lifetime_value": float(metrics.lifetime_revenue) if metrics else 0.0,
+        "last_order_date": last_order_at.isoformat() if last_order_at else None,
+        "days_since_last_order": metrics.days_since_last_order if metrics else None,
+        "preferred_category": (
+            (metrics.preferred_categories or [None])[0] if metrics else None
+        ),
+        "preferred_time": (
+            f"{metrics.typical_order_hour:02d}:{(metrics.typical_order_minute or 0):02d}"
+            if metrics and metrics.typical_order_hour is not None
+            else None
+        ),
+        "preferred_day": metrics.typical_order_weekday if metrics else None,
+        "customer_segment": customer.lifecycle_stage,
+        "is_vip": customer.lifecycle_stage == LifecycleStage.VIP.value,
+        "is_at_risk": customer.lifecycle_stage == LifecycleStage.AT_RISK.value,
+        "churn_risk_score": churn.score if churn else None,
     }
 
 
@@ -104,41 +76,38 @@ def get_product_recommendations(
     customer_id: int,
     count: int = 3,
 ) -> list[dict]:
-    """Get personalized product recommendations for a customer.
+    """The best-selling products in the category this customer buys most.
 
-    Based on purchase history and category preferences.
-
-    Returns list of product dicts with name, description, price.
+    Ranked by units sold across completed orders. Products they already buy
+    are included: for a reorder business, "your usual" is a recommendation.
     """
-    # Get customer's most purchased category
     top_category = db.execute(
-        select(Product.category)
-        .join(Order, Order.id == Product.order_id)
-        .where(Order.customer_id == customer_id)
-        .group_by(Product.category)
-        .order_by(func.count(Product.id).desc())
+        select(OrderItem.category)
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(Order.customer_id == customer_id, Order.status == OrderStatus.COMPLETED.value)
+        .group_by(OrderItem.category)
+        .order_by(func.count(OrderItem.id).desc())
         .limit(1)
     ).scalar()
-
     if not top_category:
         return []
 
-    # Get popular products from that category
-    products = db.execute(
-        select(Product)
-        .where(Product.category == top_category)
-        .order_by(Product.popularity_score.desc())
+    rows = db.execute(
+        select(
+            OrderItem.product_name,
+            OrderItem.brand,
+            OrderItem.category,
+            func.sum(OrderItem.quantity).label("units"),
+        )
+        .join(Order, Order.id == OrderItem.order_id)
+        .where(OrderItem.category == top_category, Order.status == OrderStatus.COMPLETED.value)
+        .group_by(OrderItem.product_name, OrderItem.brand, OrderItem.category)
+        .order_by(func.sum(OrderItem.quantity).desc())
         .limit(count)
-    ).scalars().all()
-
+    ).all()
     return [
-        {
-            "name": p.name,
-            "description": p.description or "",
-            "price": float(p.price),
-            "category": p.category,
-        }
-        for p in products
+        {"name": name, "brand": brand, "category": category, "units_sold": int(units or 0)}
+        for name, brand, category, units in rows
     ]
 
 
