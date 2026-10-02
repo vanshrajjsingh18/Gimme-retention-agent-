@@ -244,7 +244,14 @@ class Planner:
         return -int(m.group(1)) if m.group(2) == "after" else int(m.group(1))
 
     def coupon_codes(self) -> list[str]:
-        return [c for c in dict.fromkeys(COUPON_TOKEN.findall(self.raw)) if c not in ("SMS",)]
+        """Codes named after the word coupon/code, never ones that are part of a campaign name."""
+        m = re.search(r"\b(?:coupons?|codes?)\b(.*?)(?:[.;!?](?:\s|$)|$)", self.raw, re.IGNORECASE | re.DOTALL)
+        if not m:
+            return []
+        name = re.search(r"(?:called|named)\s+[\"“]?(.+?)(?=[\"”]|\s+(?:for|targeting|that|which|to|with|using|from)\b|[.,]|$)",
+                         self.raw, re.IGNORECASE)
+        excluded = set(COUPON_TOKEN.findall(name.group(1))) if name else set()
+        return [c for c in dict.fromkeys(COUPON_TOKEN.findall(m.group(1))) if c not in excluded and c != "SMS"]
 
     def percentages(self) -> list[float]:
         found = re.findall(r"(\d{1,3}(?:\.\d+)?)\s*%", self.t)
@@ -530,7 +537,9 @@ class Planner:
         excluded = "\n".join(f"- {k}: {v}" for k, v in d["excluded"].items()) or "- none"
         coupons = "\n".join(f"- {k}: {v}" for k, v in d["coupon_allocation"].items()) or "- no coupon codes"
         sample = "\n".join(
-            f"| {s['customer']} | {s['send_at_local']} | {s['minutes_before']} min before | {s.get('coupon_code') or '–'} | {s.get('product') or '–'} |"
+            f"| {s['customer']} | {s['send_at_local']} | "
+            f"{'moved into send window' if s.get('moved_for_send_window') else str(s['minutes_before']) + ' min before'} | "
+            f"{s.get('coupon_code') or '–'} | {s.get('product') or '–'} |"
             for s in d["schedule_sample"]
         )
         check = d["message_check"]
@@ -607,7 +616,18 @@ class Planner:
         preview = data["preview"]
         parts = [intro] if intro else []
         if preview.get("dry_run"):
-            parts.append(self.render_dry_run(preview["dry_run"], "PREVIEW"))
+            d = preview["dry_run"]
+            top = ", ".join(f"{k.lower()} ({v})" for k, v in list(d["excluded"].items())[:3]) or "none"
+            split = ", ".join(f"{k} {v}" for k, v in d["coupon_allocation"].items())
+            check = d["message_check"]
+            parts.append(
+                f"Engine preview: **{d['final_audience']}** customers would get a reminder in the next "
+                f"{d['horizon_days']} days (of {d['analysed']} analysed) — **{d['messages_today']}** {d['today_label']}. "
+                f"Main exclusions: {top}."
+                + (f" Coupons: {split}." if split else "")
+                + (" The copy passes compliance." if check["sendable_without_review"]
+                   else " Compliance: " + "; ".join(check["blocking"] + check["needs_confirmation"]) + ".")
+            )
         after = preview.get("after") or {}
         before = preview.get("before") or {}
         if before and after:

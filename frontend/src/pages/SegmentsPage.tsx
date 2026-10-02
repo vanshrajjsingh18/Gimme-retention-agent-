@@ -97,7 +97,7 @@ export default function SegmentsPage() {
                       )}
                       {segment.segment_type === 'MANUAL' && (
                         <Badge className="bg-indigo-50 text-indigo-700 ring-indigo-200">
-                          Manual
+                          {'cohort_query' in (segment.rule_definition ?? {}) ? 'Cohort' : 'Manual'}
                         </Badge>
                       )}
                     </div>
@@ -174,11 +174,13 @@ function SegmentEditor({
 }) {
   const [name, setName] = useState(segment?.name ?? '');
   const [description, setDescription] = useState(segment?.description ?? '');
-  const [rule, setRule] = useState<RuleNode>(segment?.rule_definition ?? emptyGroup());
+  // Purchase cohorts are defined by an order-history query, not a rule tree.
+  const isCohort = Boolean(segment && 'cohort_query' in (segment.rule_definition ?? {}));
+  const [rule, setRule] = useState<RuleNode>(isCohort ? emptyGroup() : (segment?.rule_definition ?? emptyGroup()));
   const [preview, setPreview] = useState<SegmentPreview | null>(null);
 
   const { data: fieldData } = useQuery<{ fields: FieldDefinition[] }>('/api/v1/segments/fields');
-  const readOnly = Boolean(segment?.is_system);
+  const readOnly = Boolean(segment?.is_system) || isCohort;
 
   const runPreview = useMutation(async (candidate: RuleNode) => {
     const result = await api.post<SegmentPreview>('/api/v1/segments/preview', {
@@ -211,6 +213,7 @@ function SegmentEditor({
 
   // Preview the rule the editor opens with, so the count is never stale.
   useEffect(() => {
+    if (isCohort) return;
     runPreview.run(rule);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -220,9 +223,11 @@ function SegmentEditor({
       open
       title={segment ? segment.name : 'New segment'}
       description={
-        readOnly
-          ? 'Built-in segments have fixed rules. Duplicate it to create an editable copy.'
-          : 'Build a rule, preview who it matches, then save.'
+        isCohort
+          ? 'A purchase cohort: membership comes from order history and is refreshed with the other segments. Change it through the AI Copilot.'
+          : readOnly
+            ? 'Built-in segments have fixed rules. Duplicate it to create an editable copy.'
+            : 'Build a rule, preview who it matches, then save.'
       }
       onClose={onClose}
       size="xl"

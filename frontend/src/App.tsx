@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { LoadingState, ToastHost } from './components/ui';
 import { useAuth } from './hooks/useAuth';
 import AppLayout from './layouts/AppLayout';
+import AiCopilotPage from './pages/AiCopilotPage';
 import AutomationDetailPage from './pages/AutomationDetailPage';
 import AutomationsPage from './pages/AutomationsPage';
 import SmartReorderPage from './pages/SmartReorderPage';
@@ -55,6 +56,7 @@ export default function App() {
               <Route path="analytics/churn" element={<ChurnAnalyticsPage />} />
               <Route path="analytics/campaigns" element={<CampaignAnalyticsPage />} />
               <Route path="analytics/cohorts" element={<CohortsPage />} />
+              <Route path="ai-copilot" element={<AiCopilotPage />} />
               <Route path="customers" element={<CustomersPage />} />
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="segments" element={<SegmentsPage />} />

@@ -311,6 +311,7 @@ def dry_run_summary(ctx: ToolContext, automation: Automation, *, samples: int = 
         "coupons_configured": snapshot["coupons"],
         "schedule_sample": [
             {
+                "moved_for_send_window": _moved(r, (snapshot.get("timing") or {}).get("minutes_before_predicted_order")),
                 "customer_id": r["customer_id"],
                 "customer": r["customer_name"],
                 "send_at_local": local_label(datetime.fromisoformat(r["scheduled_at"])),
@@ -335,6 +336,14 @@ def dry_run_summary(ctx: ToolContext, automation: Automation, *, samples: int = 
         },
         "_customer_ids": [r["customer_id"] for r in final],
     }
+
+
+def _moved(row: dict, minutes_before: int | None) -> bool:
+    """Whether the send window moved this reminder off "N minutes before"."""
+    if minutes_before is None or not row.get("predicted_order_at"):
+        return False
+    gap = datetime.fromisoformat(row["predicted_order_at"]) - datetime.fromisoformat(row["scheduled_at"])
+    return abs(gap.total_seconds() / 60 - minutes_before) > 1
 
 
 def _preview_after(ctx: ToolContext, args: dict, result: ToolResult) -> dict:

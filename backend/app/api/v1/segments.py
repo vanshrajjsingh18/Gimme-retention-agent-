@@ -36,8 +36,14 @@ router = APIRouter()
 
 
 def _out(segment: Segment) -> SegmentOut:
+    from app.services.purchase_cohorts import CohortCriteria, is_cohort_segment
+
     data = SegmentOut.model_validate(segment)
-    data.rule_description = describe_rule(segment.rule_definition or {})
+    if is_cohort_segment(segment):
+        # A purchase cohort carries a query, not a rule tree.
+        data.rule_description = CohortCriteria.from_dict(segment.rule_definition["cohort_query"]).describe()
+    else:
+        data.rule_description = describe_rule(segment.rule_definition or {})
     return data
 
 

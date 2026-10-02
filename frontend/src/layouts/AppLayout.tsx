@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import CopilotConsole from '../features/copilot/CopilotConsole';
 import { useQuery } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import type { SystemStatus } from '../types';
 import { Badge } from '../components/ui';
 
 const NAV_SECTIONS: { heading: string; items: { to: string; label: string; icon: string }[] }[] = [
+  {
+    heading: 'Command',
+    items: [
+      {
+        to: '/ai-copilot',
+        label: 'AI Copilot',
+        icon: 'M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3zm6 12l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9L18 15z',
+      },
+    ],
+  },
   {
     heading: 'Analyse',
     items: [
@@ -102,6 +113,8 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const onCopilotPage = location.pathname.startsWith('/ai-copilot');
   const { data: status } = useQuery<SystemStatus>('/api/v1/system/status');
 
   // Close the mobile drawer whenever the route changes.
@@ -209,6 +222,19 @@ export default function AppLayout() {
           </button>
 
           <div className="flex flex-1 items-center justify-end gap-3">
+            {!onCopilotPage && (
+              <button
+                type="button"
+                className="btn-primary px-3 py-1.5 text-sm"
+                onClick={() => setCopilotOpen(true)}
+                aria-haspopup="dialog"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                  <path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z" />
+                </svg>
+                AI Copilot
+              </button>
+            )}
             {status && (
               <>
                 <Badge
@@ -229,6 +255,37 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      {copilotOpen && !onCopilotPage && (
+        <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="AI Copilot">
+          <button
+            type="button"
+            aria-label="Close AI Copilot"
+            className="absolute inset-0 bg-slate-900/30"
+            onClick={() => setCopilotOpen(false)}
+          />
+          <div className="relative flex h-full w-full max-w-xl flex-col bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-900">AI Copilot</p>
+              <div className="flex items-center gap-2">
+                <NavLink
+                  to="/ai-copilot"
+                  className="text-xs font-medium text-brand-700 hover:underline"
+                  onClick={() => setCopilotOpen(false)}
+                >
+                  Open full console
+                </NavLink>
+                <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => setCopilotOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1">
+              <CopilotConsole compact />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -671,3 +671,23 @@ def test_oversized_tool_results_stay_valid_json_for_the_model():
     parsed = json.loads(text)
     assert parsed["metadata"]["count"] == 5000
     assert any("more not shown" in str(row) for row in parsed["data"])
+
+
+def test_planner_reads_coupon_codes_only_where_codes_are_named():
+    from app.copilot.mock import Planner
+
+    text = acceptance_request("E2E Beer Lapsed 42")
+    assert Planner(text, {}, []).coupon_codes() == ["FIRST7", "LUCKY7", "COMEAGAIN7"]
+    assert Planner("Change the coupon to FIRST10", {}, []).coupon_codes() == ["FIRST10"]
+    assert Planner("Create a campaign called X9 for VIP", {}, []).coupon_codes() == []
+
+
+def test_segment_api_lists_and_describes_cohort_segments(client, auth_headers, db, seeded):
+    from app.services.purchase_cohorts import CohortCriteria, create_cohort_segment
+
+    name = f"Cohort listing {next(_RUN)}"
+    create_cohort_segment(db, name=name, criteria=CohortCriteria(categories=["Beer"], min_matching_orders=2))
+    response = client.get("/api/v1/segments", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    row = next(s for s in response.json() if s["name"] == name)
+    assert row["rule_description"] == "Customers who ordered Beer at least twice"
