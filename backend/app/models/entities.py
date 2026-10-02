@@ -1354,3 +1354,112 @@ class CustomerCouponAssignment(Base):
     customer: Mapped["Customer"] = relationship()
     automation: Mapped["Automation"] = relationship()
     variant: Mapped["CouponVariant"] = relationship()
+
+
+# --------------------------------------------------------------------------
+# AI Copilot
+# --------------------------------------------------------------------------
+class CopilotConversation(Base, TimestampMixin):
+    """One operator's conversation with the Copilot, and what it is working on.
+
+    The structured working state lives here rather than being re-derived from
+    the transcript: "change the coupon to FIRST10" has to resolve to the
+    campaign being edited even when that campaign was named forty messages ago.
+    """
+
+    __tablename__ = "copilot_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="New conversation")
+    active_entity_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    active_entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Small structured memory: the last result set, the last dry run, notes.
+    working_state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    pending_action_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    messages: Mapped[list["CopilotMessage"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="CopilotMessage.id",
+    )
+
+
+class CopilotMessage(Base):
+    __tablename__ = "copilot_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("copilot_conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    #: user | assistant | tool | event
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tool_calls: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    #: For role=tool: {"tool_call_id", "name", "risk", "result"}.
+    tool_results: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    action_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Provider, model, latency, token usage, and the provider's raw assistant
+    #: content where it must be replayed verbatim.
+    meta: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    conversation: Mapped["CopilotConversation"] = relationship(back_populates="messages")
+
+
+class CopilotAction(Base, TimestampMixin):
+    """A write the Copilot has planned and is waiting for a person to confirm.
+
+    Confirmation is bound to this row's id: approving one card can never
+    execute a different plan, and "yes" typed into the chat approves nothing.
+    """
+
+    __tablename__ = "copilot_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    tool_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    #: WRITE | HIGH_RISK_WRITE
+    risk: Mapped[str] = mapped_column(String(24), nullable=False)
+    arguments: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    summary: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    preview: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    #: PENDING | EXECUTING | EXECUTED | FAILED | CANCELLED | EXPIRED | SUPERSEDED | BLOCKED
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING", index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    execution_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CopilotExecution(Base):
+    """Receipt for one write the Copilot carried out. Never deleted.
+
+    Kept apart from the conversation (no foreign key) so clearing a chat does
+    not erase the record of what it changed.
+    """
+
+    __tablename__ = "copilot_executions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    action_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    tool_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    target_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    target_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    arguments: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    before_state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    after_state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    confirmation_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    confirmation_received: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, index=True)

@@ -67,6 +67,16 @@ def refresh_segment_membership(
     db: Session, segment: Segment, *, views: list[dict] | None = None, commit: bool = True
 ) -> int:
     """Recompute a dynamic segment's membership table. Returns member count."""
+    from app.services.purchase_cohorts import is_cohort_segment, refresh_cohort_members
+
+    if is_cohort_segment(segment):
+        # A purchase cohort is stored as a manual list, but it is defined by a
+        # query, so a refresh re-runs it rather than recounting a snapshot.
+        count = refresh_cohort_members(db, segment)
+        if commit:
+            db.commit()
+        return count
+
     if segment.segment_type == SegmentType.MANUAL.value:
         count = db.execute(
             select(CustomerSegment.customer_id).where(CustomerSegment.segment_id == segment.id)

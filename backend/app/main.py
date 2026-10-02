@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 
 from app.api.v1 import (
+    ai,
     analytics,
     auth,
     automations,
@@ -123,6 +124,7 @@ for router in (
     journeys.router,
     smart_reorder.router,
     system.router,
+    ai.router,
 ):
     app.include_router(router, prefix=API_PREFIX)
 

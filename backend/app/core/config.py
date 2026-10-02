@@ -49,6 +49,19 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TIMEOUT_SECONDS: int = 45
 
+    # AI Copilot (tool-calling). Empty values fall back to the LLM_* settings
+    # above when LLM_PROVIDER is openai; with no key at all the Copilot runs on
+    # its deterministic mock planner.
+    AI_PROVIDER: str = ""  # mock | openai | anthropic
+    AI_MODEL: str = ""
+    AI_API_KEY: str = ""
+    AI_BASE_URL: str = ""
+    AI_EFFORT: str = "medium"  # anthropic output_config.effort
+    AI_ANTHROPIC_FALLBACKS: bool = True  # server-side refusal fallbacks
+    AI_MAX_TOOL_STEPS: int = 8
+    AI_TIMEOUT_SECONDS: int = 120
+    AI_ACTION_TTL_MINUTES: int = 30
+
     # Messaging providers: "mock" or "live"
     EMAIL_PROVIDER_MODE: str = "mock"
     SMS_PROVIDER_MODE: str = "mock"
