@@ -669,3 +669,100 @@ is the cost of one canonical normaliser, and it is visible rather than silent.
 Excel may display a `+`-prefixed cell as a number. Fixing that inside a CSV
 means writing `="+64…"`, which breaks every non-spreadsheet reader including
 this system's own importer, so the file keeps the correct value.
+
+---
+
+## 2026-10-02 — The AI Copilot controls the engine only through declared tools
+
+**Decision:** The Copilot is a command layer. The model chooses among 63
+registered tools (`backend/app/copilot/tools/`), each wrapping an existing
+service and declaring `READ`, `WRITE` or `HIGH_RISK_WRITE`. No SQL, code or
+shell is ever generated or run.
+
+**Reason:** Business logic must stay deterministic and testable in the
+services; the model's job is sequencing, not deciding who is eligible or when
+a reminder goes out. A tool list is also an auditable surface: what the AI can
+do is exactly what is registered.
+
+**Alternatives considered:** Text-to-SQL for analytics (unbounded, unsafe, and
+duplicates definitions that already exist); letting the model call the REST
+API (no risk metadata, and the UI's auth model is per-user, not per-action).
+
+**Tradeoffs:** A question no tool answers gets "I don't have that" rather than
+an improvised query. That is the intended behaviour.
+
+---
+
+## 2026-10-02 — Writes are previewed by running them, then rolled back
+
+**Decision:** A write tool's preview runs the real handler inside a
+transaction opened with `join_transaction_mode="rollback_only"` and always
+rolled back (`copilot/sandbox.py`). Read tools run there too.
+
+**Reason:** A separate "what would happen" simulation drifts from what does
+happen. Running the actual service — create the campaign, then the engine's
+own dry run against it — makes the confirmation card the rules executed.
+Running reads in the same sandbox makes "read tools cannot write" structural
+rather than a convention.
+
+**Tradeoffs:** A handler must have no effects outside the database (no sends,
+no HTTP). Tools are written to that rule and none sends a message. On SQLite
+the sandbox holds a write lock for the length of a preview, which is short.
+
+---
+
+## 2026-10-02 — Confirmation is bound to an action id, never to chat text
+
+**Decision:** Only `POST /api/v1/ai/confirm {action_id}` executes a write. The
+model is told typed approvals do nothing, and the engine has no code path that
+would act on them. One pending action per conversation; a new plan supersedes
+the old; plans expire after 30 minutes.
+
+**Reason:** "Go ahead" is ambiguous about *what*; an id is not. Expiry stops a
+preview computed an hour ago from authorising a change on data that has moved.
+
+---
+
+## 2026-10-02 — Purchase cohorts are an engine service stored as manual segments
+
+**Decision:** "Ordered beer at least twice, no order in 14 days" is evaluated
+by `services/purchase_cohorts.py` over order lines and stored as a MANUAL
+segment whose `rule_definition` carries `cohort_query`. Segment refresh
+re-runs the query.
+
+**Reason:** The rule engine evaluates one flat view per customer and cannot
+count orders by category. Putting the query in a service keeps it out of the
+AI layer, and storing it as a segment means campaigns, automations, exports
+and the segment pages work with it unchanged.
+
+**Tradeoffs:** Anything that reads `rule_definition` must recognise the cohort
+shape (the segment list did not, at first — see `ERROR_LOG.md`).
+
+---
+
+## 2026-10-02 — A deterministic offline planner instead of a mocked LLM reply
+
+**Decision:** With no key, the Copilot runs `copilot/mock.py`, which plays the
+model's part in the same loop: it maps known command shapes to tool calls and
+composes answers only from tool results.
+
+**Reason:** The whole pipeline — tools, previews, confirmation, receipts — has
+to run and be tested without an external API, and a canned reply would test
+none of it.
+
+**Tradeoffs:** It is pattern-based. It handles one request per message and
+says so when it does not recognise one; open-ended language needs a live model.
+
+---
+
+## 2026-10-02 — Anthropic provider uses the official SDK with refusal fallbacks
+
+**Decision:** `AI_PROVIDER=anthropic` uses the `anthropic` SDK, default model
+`claude-opus-5-5`, explicit `output_config.effort` (default `medium`) and
+server-side refusal fallbacks (`fallbacks: "default"`, opt-out with
+`AI_ANTHROPIC_FALLBACKS=false`). The per-turn operational context is attached
+to each user message once and replayed unchanged, and assistant content
+blocks are stored and replayed verbatim.
+
+**Reason:** The append-only transcript is required for reasoning continuity on
+current models, and it keeps the static system prompt and tool list cacheable.

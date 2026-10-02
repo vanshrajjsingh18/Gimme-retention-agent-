@@ -6,8 +6,8 @@ Status of every requirement, and how each was verified.
 `TESTED` covered by automated tests; `IMPLEMENTED` code exists but is not
 exercised end to end; `BLOCKED` needs something unavailable.
 
-Last full run: 771 backend tests, 65 frontend tests, 17 browser tests — all
-passing from a clean install.
+Last full run (2026-10-02): 931 backend tests, 83 frontend tests, 25 browser
+tests — all passing.
 
 ---
 
@@ -198,6 +198,31 @@ checked by running the system.
 
 ---
 
+## AI Copilot
+
+| Requirement | Status | How verified |
+| --- | --- | --- |
+| Accessible inside the app | VERIFIED | Header button opens the slide-out; `/ai-copilot` page; `e2e/copilot.spec.ts` |
+| Chat works locally | VERIFIED | Chromium against the local 1,010-customer database |
+| Inspects real engine data | TESTED | Prediction counts and revenue figures asserted equal to direct queries |
+| Calls registered tools only | TESTED | Unknown tool → failure result; arguments validated against the schema |
+| Creates campaign drafts | VERIFIED | Acceptance flow; `test_campaign_creation_is_planned_then_created_as_draft_only_on_confirm` |
+| Modifies campaigns | TESTED | Coupon split, timing, confidence, channel, audience, copy |
+| Previews audiences / dry runs | VERIFIED | Card shows analysed, exclusions, final audience, schedule, coupons; nothing written (counts asserted) |
+| Generates / modifies messages | TESTED | Offline planner copy validated; unsafe copy and unknown tags refused |
+| Merge tags | TESTED | `#discont_code#` flagged; `#frist_name#` refused; UI renders tags intact |
+| Smart Reorder | VERIFIED | Engine dry run inside the preview sandbox |
+| Analytics | TESTED | Revenue for last week equals a direct sum; period named |
+| Customer-level debugging | TESTED | Recorded `CUSTOMER_ALREADY_ORDERED` cancellation reported with its detail |
+| Confirmation before writes | TESTED | Nothing changes before Confirm; viewer cannot plan or confirm |
+| Activation needs explicit confirmation | VERIFIED | High-risk card; typed "yes go ahead" executes nothing |
+| Every write audited | TESTED | `CopilotExecution` receipt + `AuditLog` row; receipts survive deleting the chat |
+| Idempotency | TESTED | Repeated request reuses the pending action; repeated create → `ALREADY_DONE`; double confirm runs once |
+| Errors surfaced honestly | TESTED | Tool exceptions, provider outages and failed executions reported, with Retry |
+| Existing functionality | TESTED | Full backend suite and the existing 24 browser tests pass |
+| Live model provider | BLOCKED | No API key here; OpenAI-compatible and Anthropic providers unit-tested only |
+| Streaming | NOT BUILT | Replies arrive per turn with tool-step indicators |
+
 ## Requirements not fully met
 
 Stated plainly rather than marked green:
@@ -243,4 +268,8 @@ caught by a check rather than by reading code.
 | Section 4 of the brief | The importer read headers verbatim, so an export using "First Name" or "Item Name" loaded every customer with a blank name and no product — reporting every row accepted | Headers canonicalised once in `parse_csv`, with the mapping shown in the preview |
 | Browser suite, run at 19:20 | The campaign copy preview drew from the eligible audience, so after 7pm quiet hours emptied it and an operator could not read their own copy | Samples fall back to the customers quiet hours is holding; the eligible count stays honest |
 | Postgres run | The older merge tags (`{name}`, `{favourite_brand}`) stopped falling back when the campaign sender moved to the shared resolver — a second fallback table it never consulted. SQLite passed only because its audience happened to start with a customer who had every value | One fallback table, shared |
+| Calling the Phase 5–10 services | A non-existent `Product` import, `customer.timezone`, `customer.phone_number`, `func.case` and an `AutomationSend.context` column that was never added — quiet hours crashed the live nudge path when configured | Fixed; every service now executed by `test_campaign_config_services.py` |
+| Full suite, Copilot | A large diagnosis result was cut mid-JSON for the model, so it read nothing | Results shortened structurally, always valid JSON |
+| Browser e2e | Cohort segments broke `GET /segments` (500), which surfaced as CORS errors on four pages | Segment API describes cohorts; editor read-only for them |
+| Browser e2e | The offline planner read "E2E" in a campaign name as a coupon code | Codes read only where coupons/codes are named |
 | Seed review | Seeded SMS campaign excluded 100% of recipients — seed timestamps inherited the current wall-clock time, landing inside quiet hours | Historical campaigns send at a plausible mid-morning hour |

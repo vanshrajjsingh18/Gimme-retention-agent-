@@ -94,6 +94,25 @@ with the reason.
 - [x] Analytics computed from database data
 - [x] End-to-end workflow (24-step automated test)
 
+## AI Copilot
+
+- [x] Provider-agnostic AI service (OpenAI-compatible, Anthropic SDK, offline planner), keys server-side only
+- [x] Tool registry with READ / WRITE / HIGH_RISK_WRITE on every tool (63 tools)
+- [x] Plan → validate → sandbox preview → confirm → execute → verify, confirmation bound to the action id
+- [x] Typed approval never executes; activation always needs its own confirmation
+- [x] Persistent conversations with structured working state (focus, last result set, pending action)
+- [x] Execution receipts with before/after state, audit log entries, idempotency keys
+- [x] Smart Reorder: predictions, dry run, create as draft, re-time, confidence, channel, coupons, activate
+- [x] Customer delivery diagnosis from recorded facts
+- [x] Analytics answers that name their period; products from order history, never stock
+- [x] Bulk actions listing every affected campaign before confirmation
+- [x] Copy validated against merge tags and the compliance engine; invented coupon codes refused
+- [x] Header slide-out and `/ai-copilot` console with context panel, action cards, history
+- [x] Backend, frontend and browser tests; acceptance flow passes over HTTP and in Chromium
+- [ ] Streaming responses — not built; replies arrive when the turn completes
+- [ ] A live model call — no API key in this environment; providers are unit-tested only
+- [ ] Multi-message requests on the offline planner ("Create an Oktoberfest campaign" → details in the next message) — needs a live model
+
 ## P1 — Required product features
 
 - [x] LLM provider abstraction supporting OpenAI-compatible endpoints

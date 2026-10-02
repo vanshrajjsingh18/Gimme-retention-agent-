@@ -1,6 +1,6 @@
 # PROJECT STATUS — GIMME Retention Engine
 
-**Last updated:** 2026-09-24
+**Last updated:** 2026-10-02
 **State:** MVP and campaign automations complete and verified from a clean
 install, plus deployment, the live TNZ path, Smart Reorder, GIMME data import,
 and campaign copy that is personalised and chosen rather than assumed.
@@ -67,6 +67,24 @@ Since then, and in commit order:
   and `#product#`. Each tag names the column it reads, and a test holds the
   two lists together: a column in the upload format either has a tag or has a
   recorded reason for not having one.
+
+- **AI Copilot** (2026-10-02, `AI_COPILOT.md`) — a natural-language command
+  layer over the engine: 63 registered tools wrapping the existing services,
+  each declared READ, WRITE or HIGH_RISK_WRITE. Reads run in a transaction
+  that is always rolled back; writes are previewed by running the real handler
+  against the engine in that sandbox (a Smart Reorder plan shows the engine's
+  own dry run) and execute only when the operator confirms that action id.
+  Receipts, audit entries, idempotency, conversation working state, a header
+  slide-out and a full `/ai-copilot` console. Providers: OpenAI-compatible,
+  Anthropic (official SDK) and a deterministic offline planner, which is what
+  runs without a key. Purchase-history cohorts ("ordered beer at least twice")
+  were added to the engine as a service so the Copilot did not have to own
+  that logic.
+- **Campaign-configuration services repaired** — the coupon, frequency,
+  analytics, A/B, personalisation and multi-touch services added on
+  2026-09-26 had been compiled but never executed; calling them exposed a
+  failed import and references to fields the models do not have, including on
+  the live quiet-hours path. Fixed and covered (`ERROR_LOG.md`, 2026-10-02).
 
 ## Completed features
 
@@ -160,10 +178,10 @@ and who would not with the reason in plain English.
 
 | Suite | Count | Command |
 | --- | --- | --- |
-| Backend | 771 | `make test-backend` |
-| Frontend | 65 | `make test-frontend` |
-| Browser (Playwright) | 17 | `make test-e2e` |
-| **Total** | **853** | `make test` |
+| Backend | 931 | `make test-backend` |
+| Frontend | 83 | `make test-frontend` |
+| Browser (Playwright) | 25 | `make test-e2e` |
+| **Total** | **1,039** | `make test` |
 
 ## Known bugs
 
@@ -197,15 +215,25 @@ the template it replaced.
 
 Each has working code that could not be exercised here:
 
-- **No LLM API key** — the OpenAI-compatible adapter is written and
-  unit-tested, but no live call was made. Mock mode is the default and is
-  fully functional.
+- **No LLM API key** — the OpenAI-compatible adapter and the Copilot's
+  OpenAI-compatible and Anthropic providers are written and unit-tested (the
+  Anthropic transcript shape included), but no live model call was made. The
+  Copilot was verified end to end on its offline planner, which is what runs
+  without a key.
 - **No Microsoft Graph, TNZ or WhatsApp credentials** — all three live
   adapters are implemented; only the mock counterparts were exercised.
 - **No Docker daemon** — `docker compose config` validates and every build
   path was checked, but the images were never built.
 
 ## Last successful verification
+
+2026-10-02, AI Copilot on the local 1,010-customer database, in Chromium: the
+acceptance request planned a Smart Reorder campaign whose card showed 730
+analysed, 549 in the final audience, 39 messages today, exclusions by reason,
+a 162/181/206 coupon split and each sampled customer's send time; confirming
+created it as a DRAFT; the coupon re-split, the "Kiwi and dry" copy and a dry
+run followed; "Activate it" produced a high-risk card, and typing "yes go
+ahead" executed nothing. 931 backend, 83 frontend and 25 Playwright tests green.
 
 2026-09-21, Smart Reorder end to end on seeded data: the campaign dry-run
 reported 27 evaluated / 12 eligible with every exclusion named, activation

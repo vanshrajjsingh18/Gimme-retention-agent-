@@ -1,5 +1,15 @@
 # Smart Reorder Campaign Configuration System - Implementation Summary
 
+> **Correction, 2026-10-02.** This summary overstated the state of the work.
+> The services it lists had been compiled but never executed; several failed
+> on first call (a missing `Product` model, fields the models do not have, a
+> crash on the live quiet-hours path), and multi-touch tracking read a column
+> that does not exist. They were fixed and are now executed by
+> `backend/tests/test_campaign_config_services.py` — see `ERROR_LOG.md`.
+> Claims below such as "production-ready", "handles 100k+ customers" and the
+> line counts were never measured.
+
+
 ## Overview
 
 This document summarizes the complete implementation of Phases 1-10 of the Smart Reorder campaign configuration system, which extends the existing Smart Reorder automation engine with comprehensive campaign management capabilities.

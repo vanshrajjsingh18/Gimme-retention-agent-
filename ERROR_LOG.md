@@ -1342,3 +1342,100 @@ The lesson is about lookaheads rather than about coupons: `(?=.*\d)` inside a
 token pattern reads as "this token contains a digit" and means "a digit occurs
 somewhere later in the subject". The two are the same only in a test string
 that ends at the token.
+
+---
+
+## 2026-10-02 — Campaign-configuration services had never been executed
+
+**Found by:** Calling each of the services added on 2026-09-26 before building
+the Copilot on them.
+
+**Failure:** They had been checked with `py_compile` only. `personalization`
+failed to import (`Product` does not exist). Others read
+`customer.phone_number`, `customer.timezone`, `metrics.preferred_category`,
+`AutomationSend.context` — none of which exist — and used `func.case` instead of
+`case`. `frequency_gating` is on the live nudge path and crashed whenever quiet
+hours were configured. The coupon analytics query compared a column to `None`
+when no coupon had been assigned. Smart Reorder dry runs persisted coupon
+assignments through `flush()`. One new endpoint had no authentication, which
+`test_every_route_requires_authentication` was already failing on.
+
+**Fix:** Each reference corrected against the models; dry runs pass
+`persist=False`; JSON config edits copy the dict so the change is tracked;
+touchpoint updates validate the submitted list and go through `apply_update`.
+
+**Preventive action:** `tests/test_campaign_config_services.py` executes every
+one of these services against the seeded database. Compiling is not running.
+
+---
+
+## 2026-10-02 — A read tool moved the focus mid-turn and the planner changed its mind
+
+**Found by:** Smoke-testing "Actually exclude customers who bought in the last
+7 days".
+
+**Failure:** The offline planner re-routes on every step from the live
+context. `get_segment` moved the conversation's focus to the segment, so on
+the next step the request was routed as a customer search and its formatter
+read the segment result as a list of customers.
+
+**Fix:** The context is captured once when the operator speaks and passed
+unchanged through the turn; the campaign snapshot carries its cohort query so
+audience edits need no extra read.
+
+---
+
+## 2026-10-02 — An oversized tool result reached the model as broken JSON
+
+**Found by:** The full backend suite, where many campaigns exist: the delivery
+diagnosis walked all of them and its result exceeded the 14,000-character cap.
+
+**Failure:** The cap was applied by slicing the JSON text, so the model got an
+unterminated string and the planner reported "unreadable tool result".
+
+**Fix:** `compact_for_model` shortens lists structurally ("N more not shown")
+and always returns valid JSON; diagnosis now considers only campaigns that
+touched the customer plus live ones.
+
+---
+
+## 2026-10-02 — Cohort segments broke the segment list
+
+**Found by:** The existing browser suite after the Copilot work: four pages
+showed CORS errors.
+
+**Failure:** A CORS error was a 500 without CORS headers. `GET /segments` calls
+`describe_rule(rule_definition)`, and a cohort's `rule_definition` is
+`{"cohort_query": …}`, not a rule tree — `KeyError: 'field'`. The Copilot's own
+tests passed because none listed segments after creating a cohort.
+
+**Fix:** The segment API describes cohorts from their criteria; the segment
+editor opens them read-only instead of loading the query into the rule builder.
+
+**Preventive action:** `test_segment_api_lists_and_describes_cohort_segments`.
+Run the whole browser suite, not only the new spec.
+
+---
+
+## 2026-10-02 — "E2E" in a campaign name became a coupon code
+
+**Found by:** `e2e/copilot.spec.ts`, whose campaign name began with "E2E".
+
+**Failure:** The offline planner took every uppercase token containing a digit
+anywhere in the message as a coupon code. The provenance check allowed it —
+the operator had typed it — so the campaign got a fourth code.
+
+**Fix:** Codes are read only from the clause that names coupons or codes, and
+never from the campaign name.
+
+---
+
+## 2026-10-02 — `NeedTool.args` silently became a tuple
+
+**Found by:** The first smoke run: every tool call was rejected as "arguments
+must be a JSON object".
+
+**Failure:** The planner's control-flow exception stored its arguments in
+`self.args`, which `BaseException` reserves and coerces to a tuple.
+
+**Fix:** Renamed to `arguments`.
