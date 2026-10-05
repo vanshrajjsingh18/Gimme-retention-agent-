@@ -1,0 +1,4590 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GIMME Voice API",
+    "version": "1.0.0",
+    "description": "Platform-neutral voice commerce API. Apple, Google and agent adapters call this; it maps onto the same service as the GIMME MCP tools. Amounts are decimal NZD. Every error body has error_code, message, recoverable and suggested_action."
+  },
+  "servers": [
+    {
+      "url": "https://voice.gimme.example",
+      "description": "Production (placeholder)"
+    },
+    {
+      "url": "http://localhost:8787",
+      "description": "Sandbox"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "oauth2": {
+        "type": "oauth2",
+        "description": "Tokens are issued by GIMME's authorization server (account linking). This API is a resource server only.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://auth.gimme.example/authorize",
+            "tokenUrl": "https://auth.gimme.example/token",
+            "scopes": {
+              "gimme.customer.read": "Read your first name, saved address labels, payment method labels and order preferences",
+              "gimme.products.read": "Search GIMME's catalogue",
+              "gimme.inventory.read": "Check stock and delivery availability",
+              "gimme.cart.create": "Price a basket and prepare an order for your confirmation",
+              "gimme.order.create": "Place an order you have confirmed",
+              "gimme.order.read": "Read your order status and receipts",
+              "gimme.order.cancel": "Cancel an order, where GIMME allows it",
+              "gimme.payment.authorize": "Authorize payment for an order you have confirmed, using a saved payment method",
+              "gimme.order.confirm": "Record your purchase confirmation (GIMME's own apps only)"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error_code": {
+            "type": "string",
+            "enum": [
+              "AUTHENTICATION_REQUIRED",
+              "AUTHORIZATION_REQUIRED",
+              "INSUFFICIENT_SCOPE",
+              "SESSION_INVALID",
+              "CUSTOMER_NOT_FOUND",
+              "AGE_VERIFICATION_REQUIRED",
+              "IDENTITY_VERIFICATION_REQUIRED",
+              "ACCOUNT_RESTRICTED",
+              "PRODUCT_NOT_FOUND",
+              "PRODUCT_AMBIGUOUS",
+              "PRODUCT_UNAVAILABLE",
+              "INVENTORY_CHANGED",
+              "PRICE_CHANGED",
+              "DELIVERY_UNAVAILABLE",
+              "STORE_CLOSED",
+              "OUTSIDE_SERVICE_AREA",
+              "ADDRESS_NOT_FOUND",
+              "PAYMENT_REQUIRED",
+              "PAYMENT_FAILED",
+              "PAYMENT_DECLINED",
+              "PAYMENT_TIMEOUT",
+              "CONFIRMATION_MISMATCH",
+              "CONFIRMATION_DECLINED",
+              "ORDER_INTENT_NOT_FOUND",
+              "ORDER_INTENT_INVALID_STATE",
+              "ORDER_EXPIRED",
+              "ORDER_ALREADY_CREATED",
+              "ORDER_NOT_FOUND",
+              "ORDER_CANNOT_BE_CANCELLED",
+              "IDEMPOTENCY_CONFLICT",
+              "PLATFORM_NOT_SUPPORTED",
+              "COMPLIANCE_FAILURE",
+              "INVALID_REQUEST",
+              "UNKNOWN_ERROR"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Customer-safe, short enough to speak."
+          },
+          "recoverable": {
+            "type": "boolean"
+          },
+          "suggested_action": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "AUTHENTICATE",
+              "LINK_ACCOUNT",
+              "START_NEW_SESSION",
+              "VERIFY_AGE_IN_APP",
+              "VERIFY_IDENTITY_IN_APP",
+              "CONTACT_SUPPORT",
+              "ASK_CUSTOMER_TO_CLARIFY",
+              "SHOW_ALTERNATIVES",
+              "RECONFIRM_PRICE",
+              "RECONFIRM_ORDER",
+              "CHOOSE_ANOTHER_ADDRESS",
+              "TRY_LATER",
+              "ADD_PAYMENT_METHOD_IN_APP",
+              "CHOOSE_ANOTHER_PAYMENT_METHOD",
+              "CONFIRM_ON_DEVICE",
+              "CREATE_NEW_ORDER_INTENT",
+              "CHECK_ORDER_STATUS",
+              "RETRY"
+            ]
+          },
+          "details": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "error_code",
+          "message",
+          "recoverable",
+          "suggested_action"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "paths": {
+    "/v1/voice/sessions": {
+      "post": {
+        "summary": "Open a voice session (handshake, identify_customer)",
+        "operationId": "postV1VoiceSessions",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.customer.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "APPLE",
+                      "GOOGLE",
+                      "MCP_AGENT",
+                      "WEB_AGENT",
+                      "SANDBOX"
+                    ]
+                  },
+                  "platform_user_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "description": "The assistant platform's stable id for this user (must be linked to the GIMME account)."
+                  },
+                  "platform_session_id": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "conversation_id": {
+                    "description": "Platform conversation id; part of the idempotency key for mutations.",
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "platform",
+                  "platform_user_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "customer_id": {
+                      "type": "string"
+                    },
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "customer_name": {
+                      "type": "string",
+                      "description": "First name only."
+                    },
+                    "default_address": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "summary": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "summary"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "eligible_to_order": {
+                      "type": "boolean"
+                    },
+                    "eligibility": {
+                      "type": "string",
+                      "enum": [
+                        "ELIGIBLE",
+                        "AGE_VERIFICATION_REQUIRED",
+                        "IDENTITY_VERIFICATION_REQUIRED",
+                        "ACCOUNT_RESTRICTED",
+                        "ORDER_NOT_PERMITTED"
+                      ]
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "handshake": {
+                      "type": "object",
+                      "properties": {
+                        "protocol_version": {
+                          "type": "string"
+                        },
+                        "mcp_version": {
+                          "type": "string"
+                        },
+                        "voice_api_version": {
+                          "type": "string"
+                        },
+                        "capability_version": {
+                          "type": "string"
+                        },
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "APPLE",
+                            "GOOGLE",
+                            "MCP_AGENT",
+                            "WEB_AGENT",
+                            "SANDBOX"
+                          ]
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "customer_id": {
+                          "type": "string"
+                        },
+                        "client_id": {
+                          "type": "string"
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "request_id": {
+                          "type": "string"
+                        },
+                        "conversation_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "protocol_version",
+                        "mcp_version",
+                        "voice_api_version",
+                        "capability_version",
+                        "platform",
+                        "session_id",
+                        "customer_id",
+                        "client_id",
+                        "scopes",
+                        "request_id"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "session_id",
+                    "customer_id",
+                    "authenticated",
+                    "customer_name",
+                    "default_address",
+                    "eligible_to_order",
+                    "eligibility",
+                    "expires_at",
+                    "handshake"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/sessions/{id}": {
+      "get": {
+        "summary": "Read a voice session",
+        "operationId": "getV1VoiceSessionsId",
+        "security": [
+          {
+            "oauth2": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "customer_id": {
+                      "type": "string"
+                    },
+                    "platform": {
+                      "type": "string",
+                      "enum": [
+                        "APPLE",
+                        "GOOGLE",
+                        "MCP_AGENT",
+                        "WEB_AGENT",
+                        "SANDBOX"
+                      ]
+                    },
+                    "platform_session_id": {
+                      "type": "string"
+                    },
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "stage": {
+                      "type": "string",
+                      "enum": [
+                        "DISCOVERY",
+                        "CUSTOMER_IDENTIFICATION",
+                        "PRODUCT_RESOLUTION",
+                        "INVENTORY_VALIDATION",
+                        "DELIVERY_VALIDATION",
+                        "COMPLIANCE_VALIDATION",
+                        "PRICE_CALCULATION",
+                        "ORDER_INTENT_CREATED",
+                        "CUSTOMER_CONFIRMATION",
+                        "PAYMENT_AUTHORIZATION",
+                        "FINAL_VALIDATION",
+                        "ORDER_CREATION",
+                        "ORDER_CONFIRMED",
+                        "DELIVERY_TRACKING"
+                      ]
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "session_id",
+                    "customer_id",
+                    "platform",
+                    "authenticated",
+                    "stage",
+                    "created_at",
+                    "expires_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/resolve": {
+      "post": {
+        "summary": "Resolve spoken items, usual order or last order to SKUs",
+        "operationId": "postV1VoiceResolve",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.products.read",
+              "gimme.customer.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+                  },
+                  "request": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "USUAL"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "LAST_ORDER"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "ITEMS"
+                          },
+                          "items": {
+                            "minItems": 1,
+                            "maxItems": 10,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "query": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "sku": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                                  "description": "GIMME product SKU."
+                                },
+                                "quantity": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 96
+                                },
+                                "unit": {
+                                  "description": "UNIT when the customer counted bottles/cans (\"a dozen Heinekens\" = 12 UNIT).",
+                                  "type": "string",
+                                  "enum": [
+                                    "PACK",
+                                    "UNIT"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "items"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "request"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "RESOLVED",
+                        "NEEDS_CLARIFICATION",
+                        "NOT_FOUND"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sku": {
+                            "type": "string"
+                          },
+                          "quantity": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sku",
+                          "quantity",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "clarification": {
+                      "type": "object",
+                      "properties": {
+                        "query": {
+                          "type": "string"
+                        },
+                        "question": {
+                          "type": "string"
+                        },
+                        "options": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sku": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "pack_size": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "price": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              }
+                            },
+                            "required": [
+                              "sku",
+                              "name",
+                              "pack_size",
+                              "price"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "query",
+                        "question",
+                        "options"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "not_found": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "speech": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/products/search": {
+      "post": {
+        "summary": "Search products",
+        "operationId": "postV1VoiceProductsSearch",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.products.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+                  },
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Natural-language product query, e.g. \"Heineken\" or \"German beers\"."
+                  },
+                  "limit": {
+                    "default": 5,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "products": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sku": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "brand": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "country": {
+                            "type": "string"
+                          },
+                          "pack_size": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "alcoholic": {
+                            "type": "boolean"
+                          },
+                          "price": {
+                            "type": "number",
+                            "description": "Decimal amount in the given currency, two decimal places."
+                          },
+                          "currency": {
+                            "type": "string",
+                            "const": "NZD"
+                          },
+                          "available": {
+                            "type": "boolean",
+                            "description": "In stock for delivery to the session's default address right now."
+                          }
+                        },
+                        "required": [
+                          "sku",
+                          "name",
+                          "brand",
+                          "category",
+                          "pack_size",
+                          "alcoholic",
+                          "price",
+                          "currency",
+                          "available"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "products"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/preferences": {
+      "get": {
+        "summary": "Customer preferences",
+        "operationId": "getV1VoicePreferences",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.customer.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:\\-]+$",
+              "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "usual_order": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sku": {
+                            "type": "string"
+                          },
+                          "quantity": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "sku",
+                          "quantity",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "recent_orders": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "order_id": {
+                            "type": "string"
+                          },
+                          "placed_at": {
+                            "type": "string"
+                          },
+                          "total": {
+                            "type": "number",
+                            "description": "Decimal amount in the given currency, two decimal places."
+                          },
+                          "item_count": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "order_id",
+                          "placed_at",
+                          "total",
+                          "item_count"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "addresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "is_default": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "summary",
+                          "is_default"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "payment_methods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string",
+                            "description": "Display label only, e.g. \"Visa ending 4242\". Never a card number."
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "CARD_TOKEN",
+                              "APPLE_PAY",
+                              "GOOGLE_PAY",
+                              "ACCOUNT_CREDIT"
+                            ]
+                          },
+                          "is_default": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "label",
+                          "kind",
+                          "is_default"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "preferred_address_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "preferred_payment_method_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "usual_order",
+                    "recent_orders",
+                    "addresses",
+                    "payment_methods",
+                    "preferred_address_id",
+                    "preferred_payment_method_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/inventory/check": {
+      "post": {
+        "summary": "Check live stock",
+        "operationId": "postV1VoiceInventoryCheck",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.inventory.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+                  },
+                  "items": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sku": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                          "description": "GIMME product SKU."
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 48,
+                          "description": "Number of packs/items (not individual units)."
+                        }
+                      },
+                      "required": [
+                        "sku",
+                        "quantity"
+                      ]
+                    }
+                  },
+                  "address_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Saved address id; defaults to the customer's default address."
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "const": "OUT_OF_STOCK"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sku": {
+                            "type": "string"
+                          },
+                          "requested": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "available": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "sku",
+                          "requested",
+                          "available"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "alternatives": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "for_sku": {
+                            "type": "string"
+                          },
+                          "sku": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": "number",
+                            "description": "Decimal amount in the given currency, two decimal places."
+                          },
+                          "requires_customer_approval": {
+                            "type": "boolean",
+                            "const": true,
+                            "description": "Never substitute without the customer explicitly choosing this."
+                          }
+                        },
+                        "required": [
+                          "for_sku",
+                          "sku",
+                          "name",
+                          "price",
+                          "requires_customer_approval"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "available",
+                    "items",
+                    "alternatives"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/delivery/validate": {
+      "post": {
+        "summary": "Check delivery eligibility",
+        "operationId": "postV1VoiceDeliveryValidate",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.inventory.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+                  },
+                  "address_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Saved address id; defaults to the customer's default address."
+                  },
+                  "items": {
+                    "description": "Basket, so alcohol-delivery rules can be applied.",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sku": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                          "description": "GIMME product SKU."
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 48,
+                          "description": "Number of packs/items (not individual units)."
+                        }
+                      },
+                      "required": [
+                        "sku",
+                        "quantity"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "session_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "eligible": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "OUTSIDE_SERVICE_AREA",
+                        "STORE_CLOSED",
+                        "DELIVERY_UNAVAILABLE"
+                      ]
+                    },
+                    "address_id": {
+                      "type": "string"
+                    },
+                    "estimated_delivery_minutes": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "delivery_window": {
+                      "type": "string"
+                    },
+                    "requirements": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "eligible",
+                    "address_id",
+                    "requirements"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/customer/validate": {
+      "post": {
+        "summary": "Check purchase eligibility",
+        "operationId": "postV1VoiceCustomerValidate",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.customer.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+                  },
+                  "items": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sku": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                          "description": "GIMME product SKU."
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 48,
+                          "description": "Number of packs/items (not individual units)."
+                        }
+                      },
+                      "required": [
+                        "sku",
+                        "quantity"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "session_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ELIGIBLE",
+                        "AGE_VERIFICATION_REQUIRED",
+                        "IDENTITY_VERIFICATION_REQUIRED",
+                        "ACCOUNT_RESTRICTED",
+                        "ORDER_NOT_PERMITTED"
+                      ]
+                    },
+                    "can_order": {
+                      "type": "boolean",
+                      "description": "Whether this customer may place this basket (or, with no basket, any alcohol order)."
+                    },
+                    "restrictions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "can_order",
+                    "restrictions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/cart/calculate": {
+      "post": {
+        "summary": "Price a basket (informational quote)",
+        "operationId": "postV1VoiceCartCalculate",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.cart.create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+                  },
+                  "items": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sku": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                          "description": "GIMME product SKU."
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 48,
+                          "description": "Number of packs/items (not individual units)."
+                        }
+                      },
+                      "required": [
+                        "sku",
+                        "quantity"
+                      ]
+                    }
+                  },
+                  "address_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Saved address id; defaults to the customer's default address."
+                  },
+                  "promotion_code": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "quote_id": {
+                      "type": "string"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sku": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                            "description": "GIMME product SKU."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "quantity": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "unit_price": {
+                            "type": "number",
+                            "description": "Decimal amount in the given currency, two decimal places."
+                          },
+                          "line_total": {
+                            "type": "number",
+                            "description": "Decimal amount in the given currency, two decimal places."
+                          },
+                          "alcoholic": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "sku",
+                          "name",
+                          "quantity",
+                          "unit_price",
+                          "line_total",
+                          "alcoholic"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "subtotal": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "delivery_fee": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "service_fee": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "packaging_fee": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "discount": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "promotion_code": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "currency": {
+                      "type": "string",
+                      "const": "NZD"
+                    },
+                    "estimated_delivery_minutes": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "A quote is informational. Only an order intent can be confirmed."
+                    }
+                  },
+                  "required": [
+                    "quote_id",
+                    "items",
+                    "subtotal",
+                    "delivery_fee",
+                    "service_fee",
+                    "packaging_fee",
+                    "discount",
+                    "total",
+                    "currency",
+                    "estimated_delivery_minutes",
+                    "note"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/order-intents": {
+      "post": {
+        "summary": "Create an order intent awaiting confirmation",
+        "operationId": "postV1VoiceOrderIntents",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.cart.create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+                  },
+                  "items": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sku": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                          "description": "GIMME product SKU."
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 48,
+                          "description": "Number of packs/items (not individual units)."
+                        }
+                      },
+                      "required": [
+                        "sku",
+                        "quantity"
+                      ]
+                    }
+                  },
+                  "address_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Saved address id; defaults to the customer's default address."
+                  },
+                  "payment_method_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Saved payment method id; defaults to the customer's default."
+                  },
+                  "wallet": {
+                    "description": "Pay with a platform wallet token at authorization time instead of a saved method.",
+                    "type": "string",
+                    "enum": [
+                      "APPLE_PAY",
+                      "GOOGLE_PAY"
+                    ]
+                  },
+                  "promotion_code": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  "source": {
+                    "default": "BASKET",
+                    "type": "string",
+                    "enum": [
+                      "BASKET",
+                      "USUAL",
+                      "REORDER"
+                    ]
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_intent": {
+                      "type": "object",
+                      "properties": {
+                        "order_intent_id": {
+                          "type": "string"
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "AWAITING_CONFIRMATION",
+                            "CONFIRMED",
+                            "PAYMENT_AUTHORIZED",
+                            "ORDER_PLACED",
+                            "EXPIRED",
+                            "CANCELLED",
+                            "SUPERSEDED",
+                            "FAILED"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "BASKET",
+                            "USUAL",
+                            "REORDER"
+                          ]
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sku": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                                "description": "GIMME product SKU."
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "unit_price": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              },
+                              "line_total": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              },
+                              "alcoholic": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "sku",
+                              "name",
+                              "quantity",
+                              "unit_price",
+                              "line_total",
+                              "alcoholic"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "delivery_address": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "summary": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label",
+                            "summary"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "payment_method": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "subtotal": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "fees": {
+                          "type": "object",
+                          "properties": {
+                            "delivery_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            },
+                            "service_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            },
+                            "packaging_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            }
+                          },
+                          "required": [
+                            "delivery_fee",
+                            "service_fee",
+                            "packaging_fee"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "discount": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "promotion_code": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "currency": {
+                          "type": "string",
+                          "const": "NZD"
+                        },
+                        "estimated_delivery_minutes": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "delivery_requirements": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "authorization_status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "AUTHORIZED",
+                            "DECLINED"
+                          ]
+                        },
+                        "payment_status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "AUTHORIZED",
+                            "CAPTURED",
+                            "VOIDED",
+                            "FAILED"
+                          ]
+                        },
+                        "order_id": {
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "order_intent_id",
+                        "session_id",
+                        "status",
+                        "source",
+                        "items",
+                        "delivery_address",
+                        "payment_method",
+                        "subtotal",
+                        "fees",
+                        "discount",
+                        "total",
+                        "currency",
+                        "estimated_delivery_minutes",
+                        "delivery_requirements",
+                        "authorization_status",
+                        "payment_status",
+                        "created_at",
+                        "expires_at"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "confirmation": {
+                      "type": "object",
+                      "properties": {
+                        "requires_user_confirmation": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "confirmation_type": {
+                          "type": "string",
+                          "const": "PURCHASE"
+                        },
+                        "merchant": {
+                          "type": "string",
+                          "const": "GIMME"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "currency": {
+                          "type": "string",
+                          "const": "NZD"
+                        },
+                        "summary": {
+                          "type": "string",
+                          "description": "One-line spoken/visual summary of exactly what will be charged."
+                        },
+                        "requires_device_authentication": {
+                          "type": "boolean"
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "requires_user_confirmation",
+                        "confirmation_type",
+                        "merchant",
+                        "amount",
+                        "currency",
+                        "summary",
+                        "requires_device_authentication",
+                        "expires_at"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Hand to the platform's native purchase confirmation UI (§25)."
+                    },
+                    "speech": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_intent",
+                    "confirmation",
+                    "speech"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/order-intents/{id}": {
+      "get": {
+        "summary": "Read an order intent",
+        "operationId": "getV1VoiceOrderIntentsId",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.cart.create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_intent": {
+                      "type": "object",
+                      "properties": {
+                        "order_intent_id": {
+                          "type": "string"
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "AWAITING_CONFIRMATION",
+                            "CONFIRMED",
+                            "PAYMENT_AUTHORIZED",
+                            "ORDER_PLACED",
+                            "EXPIRED",
+                            "CANCELLED",
+                            "SUPERSEDED",
+                            "FAILED"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "BASKET",
+                            "USUAL",
+                            "REORDER"
+                          ]
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sku": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                                "description": "GIMME product SKU."
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "unit_price": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              },
+                              "line_total": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              },
+                              "alcoholic": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "sku",
+                              "name",
+                              "quantity",
+                              "unit_price",
+                              "line_total",
+                              "alcoholic"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "delivery_address": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "summary": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label",
+                            "summary"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "payment_method": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "subtotal": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "fees": {
+                          "type": "object",
+                          "properties": {
+                            "delivery_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            },
+                            "service_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            },
+                            "packaging_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            }
+                          },
+                          "required": [
+                            "delivery_fee",
+                            "service_fee",
+                            "packaging_fee"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "discount": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "promotion_code": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "currency": {
+                          "type": "string",
+                          "const": "NZD"
+                        },
+                        "estimated_delivery_minutes": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "delivery_requirements": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "authorization_status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "AUTHORIZED",
+                            "DECLINED"
+                          ]
+                        },
+                        "payment_status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "AUTHORIZED",
+                            "CAPTURED",
+                            "VOIDED",
+                            "FAILED"
+                          ]
+                        },
+                        "order_id": {
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "order_intent_id",
+                        "session_id",
+                        "status",
+                        "source",
+                        "items",
+                        "delivery_address",
+                        "payment_method",
+                        "subtotal",
+                        "fees",
+                        "discount",
+                        "total",
+                        "currency",
+                        "estimated_delivery_minutes",
+                        "delivery_requirements",
+                        "authorization_status",
+                        "payment_status",
+                        "created_at",
+                        "expires_at"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "order_intent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/order-intents/{id}/confirmation-request": {
+      "post": {
+        "summary": "Start customer confirmation; returns a single-use GIMME-hosted confirmation link",
+        "operationId": "postV1VoiceOrderIntentsIdConfirmationRequest",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.cart.create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_intent": {
+                      "type": "object",
+                      "properties": {
+                        "order_intent_id": {
+                          "type": "string"
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "AWAITING_CONFIRMATION",
+                            "CONFIRMED",
+                            "PAYMENT_AUTHORIZED",
+                            "ORDER_PLACED",
+                            "EXPIRED",
+                            "CANCELLED",
+                            "SUPERSEDED",
+                            "FAILED"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "BASKET",
+                            "USUAL",
+                            "REORDER"
+                          ]
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sku": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                                "description": "GIMME product SKU."
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "unit_price": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              },
+                              "line_total": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              },
+                              "alcoholic": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "sku",
+                              "name",
+                              "quantity",
+                              "unit_price",
+                              "line_total",
+                              "alcoholic"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "delivery_address": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "summary": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label",
+                            "summary"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "payment_method": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "subtotal": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "fees": {
+                          "type": "object",
+                          "properties": {
+                            "delivery_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            },
+                            "service_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            },
+                            "packaging_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            }
+                          },
+                          "required": [
+                            "delivery_fee",
+                            "service_fee",
+                            "packaging_fee"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "discount": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "promotion_code": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "currency": {
+                          "type": "string",
+                          "const": "NZD"
+                        },
+                        "estimated_delivery_minutes": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "delivery_requirements": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "authorization_status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "AUTHORIZED",
+                            "DECLINED"
+                          ]
+                        },
+                        "payment_status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "AUTHORIZED",
+                            "CAPTURED",
+                            "VOIDED",
+                            "FAILED"
+                          ]
+                        },
+                        "order_id": {
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "order_intent_id",
+                        "session_id",
+                        "status",
+                        "source",
+                        "items",
+                        "delivery_address",
+                        "payment_method",
+                        "subtotal",
+                        "fees",
+                        "discount",
+                        "total",
+                        "currency",
+                        "estimated_delivery_minutes",
+                        "delivery_requirements",
+                        "authorization_status",
+                        "payment_status",
+                        "created_at",
+                        "expires_at"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "confirmation_url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_intent",
+                    "confirmation_url"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/order-intents/{id}/confirm": {
+      "post": {
+        "summary": "Record the customer's confirmation (first-party clients only)",
+        "description": "Called by GIMME's own apps after the platform's native purchase confirmation. confirmed_total must equal the intent total exactly; device_authenticated must be true on platforms that require it.",
+        "operationId": "postV1VoiceOrderIntentsIdConfirm",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.order.confirm"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "CONFIRM",
+                      "DECLINE"
+                    ]
+                  },
+                  "confirmed_total": {
+                    "type": "number",
+                    "description": "The total the customer was shown and agreed to. Must equal the intent total exactly."
+                  },
+                  "confirmed_currency": {
+                    "type": "string",
+                    "const": "NZD"
+                  },
+                  "evidence": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "description": "e.g. APPLE_APP_INTENT_CONFIRMATION, ANDROID_APP_CONFIRMATION"
+                      },
+                      "device_authenticated": {
+                        "type": "boolean",
+                        "description": "The platform authenticated the device owner (unlock / biometric) for this confirmation."
+                      },
+                      "platform_confirmation_id": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "device_authenticated"
+                    ]
+                  }
+                },
+                "required": [
+                  "decision",
+                  "confirmed_total",
+                  "confirmed_currency",
+                  "evidence"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "AUTHORIZED",
+                        "DECLINED",
+                        "PENDING_CUSTOMER_CONFIRMATION"
+                      ]
+                    },
+                    "order_intent_id": {
+                      "type": "string"
+                    },
+                    "authorization_id": {
+                      "type": "string"
+                    },
+                    "authorization_token": {
+                      "description": "Single-use, short-lived, bound to this exact order. Pass to authorize_payment.",
+                      "type": "string"
+                    },
+                    "authorization_expires_at": {
+                      "type": "string"
+                    },
+                    "confirmation_url": {
+                      "description": "When PENDING: where the customer confirms (GIMME-hosted).",
+                      "type": "string"
+                    },
+                    "confirmation": {
+                      "type": "object",
+                      "properties": {
+                        "requires_user_confirmation": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "confirmation_type": {
+                          "type": "string",
+                          "const": "PURCHASE"
+                        },
+                        "merchant": {
+                          "type": "string",
+                          "const": "GIMME"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "currency": {
+                          "type": "string",
+                          "const": "NZD"
+                        },
+                        "summary": {
+                          "type": "string",
+                          "description": "One-line spoken/visual summary of exactly what will be charged."
+                        },
+                        "requires_device_authentication": {
+                          "type": "boolean"
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "requires_user_confirmation",
+                        "confirmation_type",
+                        "merchant",
+                        "amount",
+                        "currency",
+                        "summary",
+                        "requires_device_authentication",
+                        "expires_at"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Hand to the platform's native purchase confirmation UI (§25)."
+                    },
+                    "speech": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "order_intent_id",
+                    "confirmation",
+                    "speech"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/order-intents/{id}/authorize-payment": {
+      "post": {
+        "summary": "Authorize payment for a confirmed intent",
+        "operationId": "postV1VoiceOrderIntentsIdAuthorizePayment",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.payment.authorize"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "authorization_token": {
+                    "description": "From request_authorization / confirm. Omit only when the customer confirmed out-of-band (hosted confirmation page); the server then uses the authorization it recorded for this intent.",
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 4096
+                  },
+                  "wallet_token": {
+                    "description": "Single-use Apple Pay / Google Pay payment token, when the intent was created with a wallet. Never a card number.",
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 8192
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorized": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "payment_authorization_id": {
+                      "type": "string"
+                    },
+                    "payment_reference": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "currency": {
+                      "type": "string",
+                      "const": "NZD"
+                    }
+                  },
+                  "required": [
+                    "authorized",
+                    "payment_authorization_id",
+                    "payment_reference",
+                    "amount",
+                    "currency"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/orders": {
+      "post": {
+        "summary": "Place the order",
+        "operationId": "postV1VoiceOrders",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.order.create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "order_intent_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Order intent with an authorized payment."
+                  },
+                  "payment_authorization_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "From authorize_payment."
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 200,
+                    "description": "Stable across retries. Recommended: <platform>:<customer_id>:<conversation_id>:<order_intent_id>."
+                  }
+                },
+                "required": [
+                  "order_intent_id",
+                  "payment_authorization_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "order_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "CREATED",
+                        "PAYMENT_AUTHORIZED",
+                        "CONFIRMED",
+                        "ACCEPTED",
+                        "PREPARING",
+                        "DISPATCHED",
+                        "OUT_FOR_DELIVERY",
+                        "DELIVERED",
+                        "CANCELLED",
+                        "REFUNDED",
+                        "FAILED"
+                      ]
+                    },
+                    "total": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "currency": {
+                      "type": "string",
+                      "const": "NZD"
+                    },
+                    "estimated_delivery_minutes": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "idempotent_replay": {
+                      "type": "boolean"
+                    },
+                    "speech": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "order_id",
+                    "status",
+                    "total",
+                    "currency",
+                    "estimated_delivery_minutes",
+                    "idempotent_replay",
+                    "speech"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/orders/reorder": {
+      "post": {
+        "summary": "Rebuild a previous order as a new intent",
+        "operationId": "postV1VoiceOrdersReorder",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.order.read",
+              "gimme.cart.create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+                  },
+                  "order_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Order to repeat; defaults to the most recent."
+                  },
+                  "address_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                    "description": "Deliver somewhere other than the default address."
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "session_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_intent": {
+                      "type": "object",
+                      "properties": {
+                        "order_intent_id": {
+                          "type": "string"
+                        },
+                        "session_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "AWAITING_CONFIRMATION",
+                            "CONFIRMED",
+                            "PAYMENT_AUTHORIZED",
+                            "ORDER_PLACED",
+                            "EXPIRED",
+                            "CANCELLED",
+                            "SUPERSEDED",
+                            "FAILED"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "BASKET",
+                            "USUAL",
+                            "REORDER"
+                          ]
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "sku": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                                "description": "GIMME product SKU."
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "unit_price": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              },
+                              "line_total": {
+                                "type": "number",
+                                "description": "Decimal amount in the given currency, two decimal places."
+                              },
+                              "alcoholic": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "sku",
+                              "name",
+                              "quantity",
+                              "unit_price",
+                              "line_total",
+                              "alcoholic"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "delivery_address": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "summary": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label",
+                            "summary"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "payment_method": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "subtotal": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "fees": {
+                          "type": "object",
+                          "properties": {
+                            "delivery_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            },
+                            "service_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            },
+                            "packaging_fee": {
+                              "type": "number",
+                              "description": "Decimal amount in the given currency, two decimal places."
+                            }
+                          },
+                          "required": [
+                            "delivery_fee",
+                            "service_fee",
+                            "packaging_fee"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "discount": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "promotion_code": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "currency": {
+                          "type": "string",
+                          "const": "NZD"
+                        },
+                        "estimated_delivery_minutes": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "delivery_requirements": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "authorization_status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "AUTHORIZED",
+                            "DECLINED"
+                          ]
+                        },
+                        "payment_status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "AUTHORIZED",
+                            "CAPTURED",
+                            "VOIDED",
+                            "FAILED"
+                          ]
+                        },
+                        "order_id": {
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "order_intent_id",
+                        "session_id",
+                        "status",
+                        "source",
+                        "items",
+                        "delivery_address",
+                        "payment_method",
+                        "subtotal",
+                        "fees",
+                        "discount",
+                        "total",
+                        "currency",
+                        "estimated_delivery_minutes",
+                        "delivery_requirements",
+                        "authorization_status",
+                        "payment_status",
+                        "created_at",
+                        "expires_at"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "confirmation": {
+                      "type": "object",
+                      "properties": {
+                        "requires_user_confirmation": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "confirmation_type": {
+                          "type": "string",
+                          "const": "PURCHASE"
+                        },
+                        "merchant": {
+                          "type": "string",
+                          "const": "GIMME"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "currency": {
+                          "type": "string",
+                          "const": "NZD"
+                        },
+                        "summary": {
+                          "type": "string",
+                          "description": "One-line spoken/visual summary of exactly what will be charged."
+                        },
+                        "requires_device_authentication": {
+                          "type": "boolean"
+                        },
+                        "expires_at": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "requires_user_confirmation",
+                        "confirmation_type",
+                        "merchant",
+                        "amount",
+                        "currency",
+                        "summary",
+                        "requires_device_authentication",
+                        "expires_at"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Hand to the platform's native purchase confirmation UI (§25)."
+                    },
+                    "speech": {
+                      "type": "string"
+                    },
+                    "previous_order": {
+                      "type": "object",
+                      "properties": {
+                        "order_id": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        }
+                      },
+                      "required": [
+                        "order_id",
+                        "total"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "total_changed": {
+                      "type": "boolean",
+                      "description": "The new total differs from what the previous order cost."
+                    }
+                  },
+                  "required": [
+                    "order_intent",
+                    "confirmation",
+                    "speech",
+                    "previous_order",
+                    "total_changed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/orders/latest": {
+      "get": {
+        "summary": "Status of the most recent order",
+        "operationId": "getV1VoiceOrdersLatest",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.order.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:\\-]+$",
+              "description": "Voice session id returned by identify_customer / POST /v1/voice/sessions."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "CREATED",
+                        "PAYMENT_AUTHORIZED",
+                        "CONFIRMED",
+                        "ACCEPTED",
+                        "PREPARING",
+                        "DISPATCHED",
+                        "OUT_FOR_DELIVERY",
+                        "DELIVERED",
+                        "CANCELLED",
+                        "REFUNDED",
+                        "FAILED"
+                      ]
+                    },
+                    "estimated_minutes": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "placed_at": {
+                      "type": "string"
+                    },
+                    "speech": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_id",
+                    "status",
+                    "estimated_minutes",
+                    "placed_at",
+                    "speech"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/orders/{id}": {
+      "get": {
+        "summary": "Order status",
+        "operationId": "getV1VoiceOrdersId",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.order.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "CREATED",
+                        "PAYMENT_AUTHORIZED",
+                        "CONFIRMED",
+                        "ACCEPTED",
+                        "PREPARING",
+                        "DISPATCHED",
+                        "OUT_FOR_DELIVERY",
+                        "DELIVERED",
+                        "CANCELLED",
+                        "REFUNDED",
+                        "FAILED"
+                      ]
+                    },
+                    "estimated_minutes": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "placed_at": {
+                      "type": "string"
+                    },
+                    "speech": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_id",
+                    "status",
+                    "estimated_minutes",
+                    "placed_at",
+                    "speech"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/orders/{id}/receipt": {
+      "get": {
+        "summary": "Order receipt",
+        "operationId": "getV1VoiceOrdersIdReceipt",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.order.read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "string"
+                    },
+                    "placed_at": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "CREATED",
+                        "PAYMENT_AUTHORIZED",
+                        "CONFIRMED",
+                        "ACCEPTED",
+                        "PREPARING",
+                        "DISPATCHED",
+                        "OUT_FOR_DELIVERY",
+                        "DELIVERED",
+                        "CANCELLED",
+                        "REFUNDED",
+                        "FAILED"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sku": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9_.:\\-]+$",
+                            "description": "GIMME product SKU."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "quantity": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "unit_price": {
+                            "type": "number",
+                            "description": "Decimal amount in the given currency, two decimal places."
+                          },
+                          "line_total": {
+                            "type": "number",
+                            "description": "Decimal amount in the given currency, two decimal places."
+                          },
+                          "alcoholic": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "sku",
+                          "name",
+                          "quantity",
+                          "unit_price",
+                          "line_total",
+                          "alcoholic"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "subtotal": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "fees": {
+                      "type": "object",
+                      "properties": {
+                        "delivery_fee": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "service_fee": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        },
+                        "packaging_fee": {
+                          "type": "number",
+                          "description": "Decimal amount in the given currency, two decimal places."
+                        }
+                      },
+                      "required": [
+                        "delivery_fee",
+                        "service_fee",
+                        "packaging_fee"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "discount": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "total": {
+                      "type": "number",
+                      "description": "Decimal amount in the given currency, two decimal places."
+                    },
+                    "currency": {
+                      "type": "string",
+                      "const": "NZD"
+                    },
+                    "payment": {
+                      "type": "string",
+                      "description": "Payment label, e.g. \"Visa ending 4242\"."
+                    },
+                    "delivered_to": {
+                      "type": "string",
+                      "description": "Address label and suburb only."
+                    },
+                    "speech": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "order_id",
+                    "placed_at",
+                    "status",
+                    "items",
+                    "subtotal",
+                    "fees",
+                    "discount",
+                    "total",
+                    "currency",
+                    "payment",
+                    "delivered_to",
+                    "speech"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/orders/{id}/cancel": {
+      "post": {
+        "summary": "Request cancellation",
+        "operationId": "postV1VoiceOrdersIdCancel",
+        "security": [
+          {
+            "oauth2": [
+              "gimme.order.cancel"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "order_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "CREATED",
+                        "PAYMENT_AUTHORIZED",
+                        "CONFIRMED",
+                        "ACCEPTED",
+                        "PREPARING",
+                        "DISPATCHED",
+                        "OUT_FOR_DELIVERY",
+                        "DELIVERED",
+                        "CANCELLED",
+                        "REFUNDED",
+                        "FAILED"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "speech": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "order_id",
+                    "status",
+                    "speech"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/dialog/turn": {
+      "post": {
+        "summary": "Platform-neutral dialog turn (see docs/voice-api.md)",
+        "operationId": "postV1VoiceDialogTurn",
+        "security": [
+          {
+            "oauth2": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/adapters/apple/intents": {
+      "post": {
+        "summary": "Apple App Intents adapter (see docs/apple-integration.md)",
+        "operationId": "postV1VoiceAdaptersAppleIntents",
+        "security": [
+          {
+            "oauth2": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/voice/adapters/google/fulfillment": {
+      "post": {
+        "summary": "Google adapter (see docs/google-integration.md)",
+        "operationId": "postV1VoiceAdaptersGoogleFulfillment",
+        "security": [
+          {
+            "oauth2": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "GIMME-API-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1.0"
+              ]
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Correlation-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": {}
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -192,6 +192,10 @@ See [`docs/integrations.md`](docs/integrations.md) for what each provider needs.
 
 ---
 
+## GIMME Voice Commerce
+
+[`voice-commerce/`](voice-commerce/README.md) is a separate TypeScript service: the MCP server, REST Voice API and Siri/Google adapters for voice ordering ("Hey Siri, order my usual from GIMME"). It has its own dependencies and tests; see its README.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — how the pieces fit and why
