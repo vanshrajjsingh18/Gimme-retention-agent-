@@ -110,6 +110,16 @@ def config_of(automation: Automation) -> dict:
     return cfg
 
 
+def meets_confidence(prediction: OrderPrediction, cfg: dict) -> bool:
+    """Whether this prediction clears the campaign's confidence threshold.
+
+    A one-order estimate has no learned routine to be confident in, so it is
+    not held to the threshold; it only exists at all when the campaign set
+    minimum orders to 1, which is the operator choosing estimates.
+    """
+    return prediction.is_estimate or prediction.overall_confidence >= cfg["min_confidence"]
+
+
 def plan_for(
     db: Session, customer_id: int, cfg: dict, *, now: datetime, after: datetime | None = None
 ) -> ReminderPlan:
@@ -163,7 +173,7 @@ def enroll(
         if not plan.has_plan:
             skipped_no_pattern += 1
             continue
-        if plan.prediction.overall_confidence < cfg["min_confidence"]:
+        if not meets_confidence(plan.prediction, cfg):
             # A routine the engine is not confident in produces a message
             # timed by coincidence. Counted rather than dropped silently, so
             # the threshold's cost is visible where it is being paid.
@@ -769,7 +779,7 @@ def _prospective_enrollments(
         if not plan.has_plan:
             not_enrolled["INSUFFICIENT_HISTORY"] = not_enrolled.get("INSUFFICIENT_HISTORY", 0) + 1
             continue
-        if plan.prediction.overall_confidence < cfg["min_confidence"]:
+        if not meets_confidence(plan.prediction, cfg):
             not_enrolled["LOW_CONFIDENCE"] = not_enrolled.get("LOW_CONFIDENCE", 0) + 1
             continue
         prospective.append(

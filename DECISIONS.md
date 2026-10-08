@@ -766,3 +766,24 @@ blocks are stored and replayed verbatim.
 
 **Reason:** The append-only transcript is required for reasoning continuity on
 current models, and it keeps the static system prompt and tool list cacheable.
+
+---
+
+## 2026-10-08 — Smart Reorder can include customers who have ordered once
+
+**Decision:** "Minimum completed orders" accepts 1. A customer with a single
+completed order then gets an *estimate*: the weekday and time of that order,
+after the store's median gap between a customer's first and second order
+(measured from order history, 14 days if fewer than 20 customers have
+reordered; bounded 2–90 days, cached for an hour). Estimates carry
+`is_estimate=True` and zero confidence, and are not held to the campaign's
+confidence threshold — they only exist when the operator set the minimum to 1.
+
+**Reason:** Requested so second-order campaigns can run. Lowering the field
+alone would have done nothing: the engine needs two orders to measure a gap
+and returned no prediction for one.
+
+**Tradeoffs:** The time is a best guess, and the default nudge copy ("your
+usual Thursday") overstates it for these customers — second-order campaigns
+should use copy that doesn't claim a habit. The default for new campaigns
+stays 3.

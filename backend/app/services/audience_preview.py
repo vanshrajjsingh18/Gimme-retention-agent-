@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.automations.cohort import resolve_audience
-from app.automations.nudge import config_of, plan_for
+from app.automations.nudge import config_of, meets_confidence, plan_for
 from app.models.base import utcnow
 from app.models.entities import (
     Automation,
@@ -113,7 +113,7 @@ def preview_audience(
             exclusions["insufficient_order_history"] += 1
             continue
 
-        if plan.prediction.overall_confidence < config["min_confidence"]:
+        if not meets_confidence(plan.prediction, config):
             exclusions["low_confidence"] += 1
             continue
 

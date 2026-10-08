@@ -502,6 +502,7 @@ def diagnose_customer_delivery(
                 "has_plan": plan.has_plan,
                 "reason_if_none": plan.reason or None,
                 "confidence": plan.prediction.overall_confidence if plan.prediction else None,
+                "is_estimate": bool(plan.prediction and plan.prediction.is_estimate),
                 "min_confidence": nudge.config_of(automation)["min_confidence"],
                 "next_reminder_local": local_label(plan.scheduled_utc),
             }
@@ -596,7 +597,7 @@ def _conclude(customer: Customer, automation: Automation, entry: dict, facts: di
     plan = entry.get("current_plan") or {}
     if plan and not plan.get("has_plan"):
         return f"Not sent — no usable ordering pattern ({plan.get('reason_if_none') or 'insufficient history'})."
-    if plan and plan.get("confidence") is not None and plan["confidence"] < plan.get("min_confidence", 0):
+    if plan and not plan.get("is_estimate") and plan.get("confidence") is not None and plan["confidence"] < plan.get("min_confidence", 0):
         return (
             f"Not sent — prediction confidence {plan['confidence']} is below this campaign's "
             f"minimum of {plan['min_confidence']}."

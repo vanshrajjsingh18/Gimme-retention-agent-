@@ -45,6 +45,10 @@ DEFAULT_WINDOW_ORDERS = 8
 #: without one silently redefining the other.
 MIN_ORDERS_FOR_PREDICTION = 3
 
+#: Days to a second order when a customer has only one, and the store has
+#: too few repeat customers to measure its own typical gap.
+DEFAULT_FIRST_REORDER_DAYS = 14.0
+
 #: Confidence bands, on the 0-100 scale the dashboard shows. Defaults only —
 #: every caller takes them as arguments.
 CONFIDENCE_HIGH = 70
@@ -213,6 +217,11 @@ class OrderPrediction:
     interval_confidence: int = 0
     overall_confidence: int = 0
 
+    #: True when there was no routine to learn — a single order — and the
+    #: time is an estimate: that order's time of day, plus the store's
+    #: typical wait before a second order. Its confidences are all zero.
+    is_estimate: bool = False
+
     def band(
         self, *, high: int = CONFIDENCE_HIGH, medium: int = CONFIDENCE_MEDIUM
     ) -> str:
@@ -302,8 +311,12 @@ def predict_next_order(
     now: datetime,
     window_orders: int = DEFAULT_WINDOW_ORDERS,
     min_orders: int = MIN_ORDERS_FOR_PREDICTION,
+    first_reorder_days: float | None = None,
 ) -> OrderPrediction:
     """Learn a customer's routine and project the next order from it.
+
+    With ``min_orders`` of 1, a customer with a single completed order gets
+    an estimate (see :func:`estimate_from_first_order`) rather than nothing.
 
     ``orders`` and ``now`` are customer-local naive datetimes. Only completed
     orders count: a cancelled order says nothing about when somebody likes to
@@ -324,6 +337,13 @@ def predict_next_order(
             ),
             orders_considered=len(completed),
             last_order_at=completed[-1].ordered_at if completed else None,
+        )
+
+    if len(completed) == 1:
+        return estimate_from_first_order(
+            completed[0],
+            now=now,
+            interval_days=first_reorder_days or DEFAULT_FIRST_REORDER_DAYS,
         )
 
     window = completed[-window_orders:]
@@ -402,6 +422,41 @@ def predict_next_order(
         time_confidence=time_pct,
         interval_confidence=interval_pct,
         overall_confidence=overall,
+    )
+
+
+def estimate_from_first_order(order: OrderFact, *, now: datetime, interval_days: float) -> OrderPrediction:
+    """A best guess for a customer who has ordered exactly once.
+
+    One order is not a routine, so nothing is learned from it except when in
+    the day this person buys. The gap comes from the store — how long GIMME
+    customers typically take to place a second order — and the next order is
+    aimed at the same weekday and time as the first. All confidences are 0
+    and ``is_estimate`` is set, so nothing downstream mistakes this for a habit.
+    """
+    first = order.ordered_at
+    centre = circular_time_of_day([first])
+    weekday = first.weekday()
+    due = _snap_to_weekday(first + timedelta(days=interval_days), weekday)
+    predicted = due.replace(hour=centre.hour, minute=centre.minute, second=0, microsecond=0)
+    predicted = _advance_past(predicted, now, step_days=interval_days, weekday=weekday, centre=centre)
+    return OrderPrediction(
+        has_prediction=True,
+        is_estimate=True,
+        reason=(
+            f"One order so far ({WEEKDAY_NAMES[weekday]}, {centre.label()}), so this is an estimate: "
+            f"customers typically order again after about {describe_interval(interval_days)}, "
+            "aimed at the same day and time as their first order."
+        ),
+        preferred_weekday=weekday,
+        preferred_weekday_name=WEEKDAY_NAMES[weekday],
+        preferred_time_label=centre.label(),
+        preferred_hour=centre.hour,
+        preferred_minute=centre.minute,
+        orders_considered=1,
+        last_order_at=first,
+        predicted_next_order_at=predicted,
+        intervals=IntervalStats(),
     )
 
 

@@ -27,10 +27,14 @@ Local naive datetimes throughout, in the business timezone, except
 """
 from __future__ import annotations
 
+import statistics
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
+
+from app.core.enums import OrderStatus
 
 from app.analytics.order_predictions import (
     DEFAULT_REMINDER_OFFSET,
@@ -186,6 +190,61 @@ def _with_predicted(prediction: OrderPrediction, predicted: datetime) -> OrderPr
     return replace(prediction, predicted_next_order_at=predicted)
 
 
+#: Repeat customers needed before the store's own first-to-second-order gap
+#: is trusted over the default.
+MIN_REPEAT_CUSTOMERS = 20
+_FIRST_REORDER_TTL_SECONDS = 3600
+_first_reorder_cache: dict[str, tuple[float, float]] = {}
+
+
+def typical_first_reorder_days(db: Session) -> float:
+    """Median days between a customer's first and second completed order.
+
+    Measured across the store, because a one-order customer has no gap of
+    their own. Cached for an hour: it moves slowly, and a queue build asks
+    for it once per one-order customer.
+    """
+    from sqlalchemy import func, select
+
+    from app.analytics.order_predictions import DEFAULT_FIRST_REORDER_DAYS
+    from app.core.enums import OrderStatus
+    from app.models.entities import Order
+
+    key = str(db.get_bind().url)
+    cached = _first_reorder_cache.get(key)
+    if cached and time.monotonic() - cached[1] < _FIRST_REORDER_TTL_SECONDS:
+        return cached[0]
+
+    rank = (
+        func.row_number()
+        .over(partition_by=Order.customer_id, order_by=Order.ordered_at)
+        .label("rank")
+    )
+    ranked = (
+        select(Order.customer_id, Order.ordered_at, rank)
+        .where(Order.status == OrderStatus.COMPLETED.value)
+        .subquery()
+    )
+    rows = db.execute(
+        select(ranked.c.customer_id, ranked.c.ordered_at)
+        .where(ranked.c.rank <= 2)
+        .order_by(ranked.c.customer_id, ranked.c.ordered_at)
+    ).all()
+    firsts: dict[int, datetime] = {}
+    gaps: list[float] = []
+    for customer_id, ordered_at in rows:
+        if customer_id in firsts:
+            gaps.append((ordered_at - firsts[customer_id]).total_seconds() / 86400.0)
+        else:
+            firsts[customer_id] = ordered_at
+    days = DEFAULT_FIRST_REORDER_DAYS
+    if len(gaps) >= MIN_REPEAT_CUSTOMERS:
+        # Bounded so a data quirk cannot aim reminders hours or a season away.
+        days = round(min(90.0, max(2.0, statistics.median(gaps))), 1)
+    _first_reorder_cache[key] = (days, time.monotonic())
+    return days
+
+
 def plan_for_customer(
     db: Session,
     customer_id: int,
@@ -210,8 +269,12 @@ def plan_for_customer(
     local_now = to_local(now).replace(tzinfo=None)
     local_after = to_local(after or now).replace(tzinfo=None)
 
+    facts = load_local_order_facts(db, customer_id)
+    first_reorder_days = None
+    if min_orders <= 1 and sum(1 for f in facts if f.status == OrderStatus.COMPLETED.value) == 1:
+        first_reorder_days = typical_first_reorder_days(db)
     prediction = predict_next_order(
-        load_local_order_facts(db, customer_id), now=local_now, min_orders=min_orders
+        facts, now=local_now, min_orders=min_orders, first_reorder_days=first_reorder_days
     )
     return plan_from_prediction(
         prediction,

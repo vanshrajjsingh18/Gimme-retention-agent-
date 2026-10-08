@@ -421,15 +421,16 @@ export default function AutomationForm({
               <input
                 id="nudge-min-orders"
                 type="number"
-                min={2}
+                min={1}
                 max={20}
                 className="input"
                 value={minOrders}
                 onChange={(event) => setMinOrders(Number(event.target.value))}
               />
               <p className="mt-1 text-xs text-slate-500">
-                Below three, a repeated weekday is a one-in-seven coincidence rather than
-                a habit.
+                {minOrders <= 1
+                  ? 'Includes customers with a single order. With no habit to learn yet, their reminder is an estimate: the time of day they first ordered, after the gap GIMME customers typically leave before a second order. Estimates are not held to the confidence threshold.'
+                  : 'Below three, a repeated weekday is a one-in-seven coincidence rather than a habit. Set 1 to include customers who have ordered once.'}
               </p>
             </div>
             <div>

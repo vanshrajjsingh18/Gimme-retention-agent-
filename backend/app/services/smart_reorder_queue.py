@@ -307,7 +307,7 @@ def build_queue(
         if not plan.has_plan:
             report.exclude(plan.reason or "NO_PATTERN")
             continue
-        if plan.prediction.overall_confidence < cfg["min_confidence"]:
+        if not nudge.meets_confidence(plan.prediction, cfg):
             report.exclude("LOW_CONFIDENCE")
             continue
         if plan.scheduled_utc is None or plan.scheduled_utc > horizon:
@@ -838,7 +838,7 @@ def refresh_for_customer(
 
         cfg = nudge.config_of(automation)
         plan = nudge.plan_for(db, customer_id, cfg, now=now)
-        if not plan.has_plan or plan.prediction.overall_confidence < cfg["min_confidence"]:
+        if not plan.has_plan or not nudge.meets_confidence(plan.prediction, cfg):
             continue
         enrollment.next_due_at = plan.scheduled_utc
         enrollment.pattern = nudge._store_routine(plan, now=now)
