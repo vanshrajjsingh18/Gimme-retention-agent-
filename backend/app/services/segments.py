@@ -235,6 +235,33 @@ DEFAULT_SEGMENTS: list[dict] = [
             "value": ["Beer"],
         },
     },
+    {
+        "name": "RTD Drinkers",
+        "description": "RTDs are among their top purchased categories.",
+        "rule": {
+            "field": "preferred_categories",
+            "operator": "contains_any",
+            "value": ["RTDs"],
+        },
+    },
+    {
+        "name": "Gin Drinkers",
+        "description": "Gin is among their top purchased categories.",
+        "rule": {
+            "field": "preferred_categories",
+            "operator": "contains_any",
+            "value": ["Gin"],
+        },
+    },
+    {
+        "name": "Whiskey Drinkers",
+        "description": "Whiskey is among their top purchased categories.",
+        "rule": {
+            "field": "preferred_categories",
+            "operator": "contains_any",
+            "value": ["Whiskey", "Whisky"],
+        },
+    },
 ]
 
 

@@ -393,15 +393,15 @@ export default function AutomationForm({
               <input
                 id="nudge-min-orders"
                 type="number"
-                min={2}
+                min={1}
                 max={20}
                 className="input"
                 value={minOrders}
                 onChange={(event) => setMinOrders(Number(event.target.value))}
               />
               <p className="mt-1 text-xs text-slate-500">
-                Below three, a repeated weekday is a one-in-seven coincidence rather than
-                a habit.
+                With fewer orders the pattern is weaker, but the campaign can still
+                reach customers earlier in their journey.
               </p>
             </div>
             <div>
